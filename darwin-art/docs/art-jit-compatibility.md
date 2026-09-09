@@ -8670,3 +8670,6 @@ incomplete and still requires managed caller unwind validation.
   validating ordinary VarHandle primitive/reference stores and their barrier
   paths. Remaining modes, JNI/exception breadth, and real APK acceptance remain
   outstanding.
+- Checkpoint 745: `2239-varhandle-perf-vh-gas` passes interpreter, optimized/JIT,
+  and unmodified-source lanes, covering atomic get-and-set read-modify-write
+  semantics. Remaining VarHandle modes and real APK acceptance remain open.
