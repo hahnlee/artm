@@ -13235,3 +13235,7 @@ or admission exception was added.
 - Checkpoint 762: Re-ran `629-vdex-speed`, validating VDEX input/recompilation
   and speed-filter execution; all three runner lanes pass. Remaining corpus
   failures and production APK acceptance remain open.
+- Checkpoint 763: Re-ran `714-invoke-custom-lambda-metafactory`, validating
+  invoke-custom, lambda metafactory linkage, and JIT call ABI; all three runner
+  lanes pass. Remaining corpus failures and production APK acceptance remain
+  open.

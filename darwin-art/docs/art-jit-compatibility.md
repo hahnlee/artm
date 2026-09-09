@@ -8742,3 +8742,7 @@ incomplete and still requires managed caller unwind validation.
   and speed-filter execution across interpreter, optimized/JIT, and
   unmodified-source lanes; all pass. Remaining corpus failures and production
   APK acceptance remain open.
+- Checkpoint 763: Re-ran `714-invoke-custom-lambda-metafactory`, validating
+  invoke-custom, lambda metafactory linkage, and JIT call ABI; interpreter,
+  optimized/JIT, and unmodified-source lanes all pass. Remaining corpus
+  failures and production APK acceptance remain open.
