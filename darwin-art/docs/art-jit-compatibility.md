@@ -8730,3 +8730,7 @@ incomplete and still requires managed caller unwind validation.
   naming and Java thread metadata; interpreter, optimized/JIT, and
   unmodified-source lanes all pass. Remaining corpus failures and production
   APK acceptance remain open.
+- Checkpoint 760: Re-ran `2282-single-step-before-catch`, validating
+  single-step/deoptimization behavior immediately before exception catch
+  dispatch; all interpreter, optimized/JIT, and unmodified-source lanes pass.
+  Remaining corpus failures and production APK acceptance remain open.

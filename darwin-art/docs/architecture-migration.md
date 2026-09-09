@@ -13225,3 +13225,7 @@ or admission exception was added.
 - Checkpoint 759: Re-ran `2275-pthread-name`, validating pthread-backed thread
   naming and Java thread metadata; all three runner lanes pass. Remaining
   corpus failures and production APK acceptance remain open.
+- Checkpoint 760: Re-ran `2282-single-step-before-catch`, validating
+  single-step/deoptimization immediately before exception catch dispatch; all
+  three runner lanes pass. Remaining corpus failures and production APK
+  acceptance remain open.
