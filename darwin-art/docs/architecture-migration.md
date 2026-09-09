@@ -11766,3 +11766,8 @@ or admission exception was added.
   linked runtime. The current executable still reaches the same abort, so the
   null-cookie fix is committed but has not yet been proven in the final link
   graph; archive provenance must be audited before judging the semantic fix.
+- Checkpoint 490: broadened null-cookie ownership inference to use either the
+  destructor code address or its argument address, then bind to the image
+  start as a stable synthetic cookie. This covers C++ runtimes whose destructor
+  thunk is outside the guest image; runtime acceptance still needs relink and
+  verification.

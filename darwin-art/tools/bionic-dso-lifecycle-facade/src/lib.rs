@@ -325,12 +325,15 @@ impl Lifecycle {
         // process-global null entry from surviving an APK unload.
         if dso == 0 {
             let function_address = function as usize;
-            if let Some(image) = state
-                .images
-                .iter_mut()
-                .find(|image| function_address >= image.start && function_address < image.end)
-            {
-                dso = function_address;
+            let argument_address = argument as usize;
+            if let Some(image) = state.images.iter_mut().find(|image| {
+                (function_address >= image.start && function_address < image.end)
+                    || (argument_address >= image.start && argument_address < image.end)
+            }) {
+                // Use the image start as a stable synthetic cookie. It is
+                // guaranteed non-zero and remains inside the exact image
+                // envelope used by finalization.
+                dso = image.start;
                 image.handles.insert(dso);
             }
         }
