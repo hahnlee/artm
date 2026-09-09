@@ -382,7 +382,11 @@ pub(crate) fn audit_runtime_link(root: &Path) -> Result<()> {
         // RegisterLibcoreNatives owns these AOSP OpenJDK tables; keep the
         // module archives on the CPU closure rather than manufacturing local
         // substitutes for their entrypoints.
-        .arg(root.join("_build/system-natives-darwin/libopenjdk-system-natives-darwin.a"))
+        .arg(format!(
+            "-Wl,-force_load,{}",
+            root.join("_build/system-natives-darwin/libopenjdk-system-natives-darwin.a")
+                .display()
+        ))
         // libopenjdk's JNI owner imports the AOSP JVM service ABI. Keep that
         // provider in the process runtime so RTLD_LOCAL named-JNI modules can
         // resolve it without relying on flat-namespace host symbols.
@@ -502,6 +506,7 @@ pub(crate) fn audit_runtime_link(root: &Path) -> Result<()> {
     // shims. Exporting the exact ABI set keeps their state in one Rust owner
     // instead of embedding a second facade instance in each module.
     for symbol in [
+        "_Java_java_lang_System_log",
         "_darwin_art_bionic_access",
         "_darwin_art_bionic_chmod",
         "_darwin_art_bionic_close",

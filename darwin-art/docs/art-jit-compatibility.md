@@ -7113,3 +7113,9 @@ incomplete and still requires managed caller unwind validation.
   exported by the runtime, and the final probe confirms `getcwd` uses the same
   process owner (capability_failure=0). The next missing contract is the
   `java.lang.System.log` registration exposed during generic JNI bootstrap.
+- Checkpoint 494: confirmed the duplicated-facade fix with a clean relink;
+  OpenJDK `getcwd` now resolves through the runtime process owner. Added the
+  minimal Darwin System.log ABI and exported it for early native lookup, but
+  ART still reports the method unresolved because this call occurs during
+  bootstrap class initialization; registration must be moved before that
+  initialization boundary.

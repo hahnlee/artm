@@ -1178,6 +1178,20 @@ jlong SystemCurrentTimeMillis(JNIEnv*, jclass) {
       .count();
 }
 
+void SystemLog(JNIEnv* env, jclass, jchar, jstring message, jthrowable) {
+  if (env == nullptr || message == nullptr) return;
+  const char* text = env->GetStringUTFChars(message, nullptr);
+  if (text != nullptr) {
+    std::fprintf(stderr, "%s\n", text);
+    env->ReleaseStringUTFChars(message, text);
+  }
+}
+
+extern "C" void Java_java_lang_System_log(JNIEnv* env, jclass klass, jchar type,
+                                             jstring message, jthrowable exception) {
+  SystemLog(env, klass, type, message, exception);
+}
+
 jlong SystemNanoTime(JNIEnv*, jclass) {
   return darwin_art::AndroidUptimeNanos();
 }
@@ -1447,6 +1461,9 @@ bool RegisterLibcoreNatives(JNIEnv* env) {
       {const_cast<char*>("specialProperties"),
        const_cast<char*>("()[Ljava/lang/String;"),
        reinterpret_cast<void*>(&SystemSpecialProperties)},
+      {const_cast<char*>("log"),
+       const_cast<char*>("(CLjava/lang/String;Ljava/lang/Throwable;)V"),
+       reinterpret_cast<void*>(&SystemLog)},
   };
 #endif
 #if !defined(DARWIN_ART_FULL_LIBCORE_LINUX)
@@ -1605,7 +1622,15 @@ bool RegisterManagedLoadNatives(JNIEnv* env) {
                 static_cast<jint>(std::size(process_environment_methods)))) {
     return false;
   }
-  register_java_sun_nio_fs_UnixNativeDispatcher(env);
+    register_java_sun_nio_fs_UnixNativeDispatcher(env);
+    if (env->ExceptionCheck()) {
+      return false;
+    }
+    // ART's boot-native registration may revisit java.lang.System while the
+    // managed-load set is being installed. Re-assert the complete AOSP
+    // libopenjdk table last so System.log remains available during VMClassLoader
+    // and java.nio initialization on a fresh runtime.
+    register_java_lang_System(env);
   return !env->ExceptionCheck();
 #else
   (void)env;
