@@ -12101,3 +12101,9 @@ or admission exception was added.
 - Checkpoint 559: `lsof +L1` found no large deleted project/build file held open.
   The space exhaustion is persistent cache/Trash allocation rather than a
   live runtime process; validation remains ready to resume after reclamation.
+
+- Checkpoint 560: per-user temporary storage was measured at about 197 MB;
+  roughly 78 MB is stale Chromium private-data profiles and 34 MB is generated
+  DEX staging. Android system-root leftovers are tiny. Normal-return cleanup
+  is present, so aborted runs explain the residue; it is material but not the
+  main multi-GB storage cause.

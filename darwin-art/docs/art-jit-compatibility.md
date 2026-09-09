@@ -7477,3 +7477,10 @@ incomplete and still requires managed caller unwind validation.
   project or build artifact is holding significant reclaimed space. The
   storage blocker is therefore persistent allocation (build caches/Trash),
   not a live runtime process.
+
+- Checkpoint 560: audited the macOS per-user temporary volume. It contains
+  about 197 MB, including roughly 78 MB of stale `tmp.*` Chromium private-data
+  profiles and 34 MB of a generated DEX staging directory; the many
+  `darwin-art-android-system-root.*` directories are only tens of KB each.
+  Runner cleanup exists on normal return, so these leftovers indicate aborted
+  runs. Temporary leakage is real but not the primary multi-GB allocation.
