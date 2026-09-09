@@ -12601,3 +12601,8 @@ or admission exception was added.
   and closes its complete process group, including descendants that survive
   direct-child exit or timeout. The process-group unit test passes, and this
   removes the stale-host contention observed in the latest corpus ledger.
+
+- Checkpoint 623: Extended process-group coverage with a normal direct-child
+  exit that leaves a long-lived descendant. The lifecycle unit suite passes
+  2/2 for normal exit and timeout paths, locking in the stale-host fix without
+  changing ART semantics.

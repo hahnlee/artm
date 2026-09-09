@@ -7990,3 +7990,10 @@ incomplete and still requires managed caller unwind validation.
   prevents orphaned `darwin-art-host` instances from contaminating later
   corpus lanes. `tools/test_process_group.py` passes; the three previously
   affected corpus tests also pass when run serially.
+
+- Checkpoint 623: Added a regression test for the normal-exit orphan case, not
+  only timeout cleanup. `tools/test_process_group.py` now passes 2/2, proving
+  that descendants are terminated after both direct-child exit and timeout.
+  This closes the runner-level lifecycle regression that had polluted corpus
+  evidence; it does not replace the required complete-corpus and real-app
+  validation.
