@@ -7454,3 +7454,10 @@ incomplete and still requires managed caller unwind validation.
   only about 156 MB is free and the worktree is clean. No test process was
   started because it would recreate the known storage failure; preserved
   corpus evidence remains available for the next writable-volume run.
+
+- Checkpoint 556: ran the existing `tools/audit-art-jit.sh` binary-only
+  integration audit; it exited 0. JIT/Nterp admission, GC/read barriers, JNI,
+  exceptions, fields/arrays, intrinsics, Surface/MediaCodec, and Android
+  lifecycle/window checks all reported PASS. The known macOS sentinel-page and
+  membarrier warnings remain non-fatal; full source rebuild and broader real-app
+  validation still await reclaimed storage.

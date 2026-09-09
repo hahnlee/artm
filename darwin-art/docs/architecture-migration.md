@@ -12081,3 +12081,9 @@ or admission exception was added.
 - Checkpoint 555: the current state still has only about 156 MB free and a
   clean worktree. Validation was not launched into a full volume; existing
   AOSP result artifacts remain intact for resumption after reclamation.
+
+- Checkpoint 556: the binary-only `tools/audit-art-jit.sh` integration audit
+  exited 0. It exercised JIT/Nterp, GC/read barriers, JNI, exceptions,
+  fields/arrays, intrinsics, Surface/MediaCodec, and Android lifecycle/window
+  paths with PASS results. macOS sentinel-page/membarrier warnings are still
+  non-fatal; source rebuild and real-app coverage remain open.
