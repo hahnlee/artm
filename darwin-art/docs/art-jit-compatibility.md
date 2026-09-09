@@ -8339,3 +8339,8 @@ incomplete and still requires managed caller unwind validation.
   run did not reach the worker phase before dex2oat/runner timeout, so it yielded
   no valid statistics and was removed. The runtime remains unchanged from the
   verified cache implementation; no speculative diagnostic behavior is retained.
+- Checkpoint 683: Confirmed the source tree is clean after removing the
+  inconclusive instrumentation and that the latest committed provider remains
+  the active implementation. No new stress claim is made; the next useful
+  step is a lower-level in-runtime cadence measurement that does not depend on
+  macOS process attach or runner timing.

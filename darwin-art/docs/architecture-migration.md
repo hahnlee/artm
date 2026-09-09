@@ -12892,3 +12892,7 @@ or admission exception was added.
   worker phase and produced no trustworthy statistics; the instrumentation was
   removed. No runtime behavior changed, and the next performance work remains
   collector/thread cadence.
+- Checkpoint 683: The worktree and provider source are clean after removing the
+  failed diagnostic counter. The verified implementation is unchanged; future
+  cadence measurement must be emitted from the runtime itself rather than rely
+  on macOS attach tools or a runner timeout.
