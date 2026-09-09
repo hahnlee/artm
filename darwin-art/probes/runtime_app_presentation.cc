@@ -1201,6 +1201,12 @@ int run(JNIEnv* env, art::Thread* self, jobject activity_instance,
               : env->GetStaticMethodID(font_bootstrap, "install", "()V");
       if (install_fonts != nullptr) {
         env->CallStaticVoidMethod(font_bootstrap, install_fonts);
+        if (env->ExceptionCheck()) {
+          std::cerr << "ART Android framework: system font bootstrap unavailable;"
+                    << " continuing with host font fallback\n";
+          env->ExceptionDescribe();
+          env->ExceptionClear();
+        }
       }
       env->DeleteLocalRef(bootstrap_name);
       env->DeleteLocalRef(loader_class);

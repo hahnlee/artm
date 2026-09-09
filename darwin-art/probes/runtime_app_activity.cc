@@ -1010,6 +1010,18 @@ int prepare(JNIEnv* env, art::Thread* self, jobject* activity_instance_out,
                 : env->GetStaticMethodID(font_bootstrap, "install", "()V");
         if (install_fonts != nullptr && !env->ExceptionCheck()) {
           env->CallStaticVoidMethod(font_bootstrap, install_fonts);
+          if (env->ExceptionCheck()) {
+            // A minimal Darwin image may not expose the platform Minikin
+            // native Typeface factory even though the APK's Java framework
+            // classes are present. Keep Application.onCreate reachable while
+            // preserving the pending exception as a diagnostic; text paths
+            // can then use the Skia-backed host fallback instead of aborting
+            // the entire Android process during zygote-equivalent bootstrap.
+            std::cerr << "ART Android framework: system font bootstrap unavailable;"
+                      << " continuing with host font fallback\n";
+            env->ExceptionDescribe();
+            env->ExceptionClear();
+          }
         }
         env->DeleteLocalRef(font_bootstrap);
         env->DeleteLocalRef(font_bootstrap_name);

@@ -66,9 +66,26 @@ final class FontBootstrap {
             // Zygote normally assigns that field while constructing this same
             // map; the detached startup must establish the seed before calling
             // the public replacement hook, not after it.
-            Object seedTypeface = ((Map<?, ?>) typefaces).get("sans-serif");
-            if (seedTypeface == null && !((Map<?, ?>) typefaces).isEmpty()) {
-                seedTypeface = ((Map<?, ?>) typefaces).values().iterator().next();
+            Map<?, ?> builtTypefaces = (Map<?, ?>) typefaces;
+            Object seedTypeface = builtTypefaces.get("sans-serif");
+            if (seedTypeface == null) {
+                for (Object candidate : builtTypefaces.values()) {
+                    if (candidate != null) {
+                        seedTypeface = candidate;
+                        break;
+                    }
+                }
+            }
+            // A detached host can encounter families whose font files are not
+            // present in the minimal system image. Android's zygote drops
+            // those entries before publishing the map; passing null values to
+            // setSystemFontMap instead reaches Typeface.create(null, style).
+            // Preserve the family keys but substitute the verified seed face,
+            // keeping the framework contract total without changing the APK.
+            Map<Object, Object> completeTypefaces = new LinkedHashMap<>();
+            for (Map.Entry<?, ?> entry : builtTypefaces.entrySet()) {
+                completeTypefaces.put(entry.getKey(),
+                        entry.getValue() == null ? seedTypeface : entry.getValue());
             }
             if (seedTypeface != null) {
                 defaultField.set(null, seedTypeface);
@@ -81,7 +98,7 @@ final class FontBootstrap {
                 defaultsField.set(null, defaults);
             }
             Method installMap = typeface.getMethod("setSystemFontMap", Map.class);
-            installMap.invoke(null, typefaces);
+            installMap.invoke(null, completeTypefaces);
             // Typeface's static defaults may have been touched by framework
             // startup before this detached launcher installs SystemFonts.  A
             // real zygote initializes these fields from the same map; restore

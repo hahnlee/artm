@@ -12272,3 +12272,14 @@ or admission exception was added.
    task is to make the real-APK host lifetime/window completion deterministic,
    then collect a bounded Chrome interaction/JIT trace and repeat the same
    path for Blue Archive.
+
+583. **2026-09-09 — real Calculator reaches framework inflation boundary**
+
+   Rebuilt the runtime after making detached font bootstrap exceptions
+   diagnostic/non-fatal. The unchanged Calculator APK now reaches
+   `Calculator.onCreate`, then fails while inflating the `TextView` in
+   `layout/toolbar` through `PhoneWindow.setContentView`. The nested
+   `InvocationTargetException` identifies the next missing native framework
+   contract; it is not an APK or resource rewrite. The next task is to expose
+   the underlying constructor cause and implement the AOSP-compatible
+   Typeface/Minikin-to-Skia bridge, then rerun the same APK unchanged.
