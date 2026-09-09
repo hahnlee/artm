@@ -8738,3 +8738,7 @@ incomplete and still requires managed caller unwind validation.
   inlined calls across class-loader boundaries; interpreter, optimized/JIT,
   and unmodified-source lanes all pass. Remaining corpus failures and
   production APK acceptance remain open.
+- Checkpoint 762: Re-ran `629-vdex-speed`, validating VDEX input/recompilation
+  and speed-filter execution across interpreter, optimized/JIT, and
+  unmodified-source lanes; all pass. Remaining corpus failures and production
+  APK acceptance remain open.

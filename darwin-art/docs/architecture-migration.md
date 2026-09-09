@@ -13232,3 +13232,6 @@ or admission exception was added.
 - Checkpoint 761: Re-ran `497-inlining-and-class-loader`, validating inlined
   calls across class-loader boundaries; all three runner lanes pass. Remaining
   corpus failures and production APK acceptance remain open.
+- Checkpoint 762: Re-ran `629-vdex-speed`, validating VDEX input/recompilation
+  and speed-filter execution; all three runner lanes pass. Remaining corpus
+  failures and production APK acceptance remain open.
