@@ -8335,3 +8335,7 @@ incomplete and still requires managed caller unwind validation.
   confirming the runtime reaches the application workload before the bounded
   timeout. The remaining issue is stress throughput/cadence, with no observed
   bytecode or JIT failure.
+- Checkpoint 682: A temporary cache hit counter was attempted, but the bounded
+  run did not reach the worker phase before dex2oat/runner timeout, so it yielded
+  no valid statistics and was removed. The runtime remains unchanged from the
+  verified cache implementation; no speculative diagnostic behavior is retained.

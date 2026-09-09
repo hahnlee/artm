@@ -12888,3 +12888,7 @@ or admission exception was added.
   reaches `Main main(String[]) PASS` and then spends its bounded window in worker
   GC cycles, so the open gap is stress throughput/cadence rather than dispatch,
   bytecode execution, or JIT admission.
+- Checkpoint 682: A short-lived cache-counter experiment did not reach the 096
+  worker phase and produced no trustworthy statistics; the instrumentation was
+  removed. No runtime behavior changed, and the next performance work remains
+  collector/thread cadence.
