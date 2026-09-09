@@ -8558,3 +8558,11 @@ incomplete and still requires managed caller unwind validation.
   graphics/JIT rebuild completed, but `004-ThreadStress` still reproduces the
   same `0x70000770` receiver fault. The executing path is therefore not fixed
   by the generic-JNI macro alone and must be traced to its actual entry stub.
+- Checkpoint 720: Symbolized the reproducible `004-ThreadStress` fault to an
+  AOT class-initialization status-byte load (`ldrb [x0,#0x6b]`) using the
+  compressed `0x70000000` reference directly. Added the AOSP codegen patch
+  `0179-darwin-arm64-clinit-reference-boundary.patch`, which decodes the
+  class reference before `GenerateClassInitializationCheck` dereferences it.
+  Rebuilt the full graphics/JIT closure; `004-ThreadStress` and `004-JniTest`
+  now pass interpreter, optimized/JIT, and unmodified-source lanes. The
+  broader compatibility matrix and real APK acceptance remain outstanding.

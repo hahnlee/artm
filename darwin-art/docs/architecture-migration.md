@@ -13084,3 +13084,8 @@ or admission exception was added.
   runtime was rebuilt. Identical `004-ThreadStress` failure evidence means the
   active fault is in another transition/stub path; no compatibility claim or
   fallback was introduced.
+- Checkpoint 720: AOT disassembly identified the ThreadStress crash as an
+  un-decoded compressed class reference used by the ARM64 clinit status check.
+  The new `0179` codegen patch performs the managed-to-native decode at that
+  boundary. Full rebuild/audit passed, and ThreadStress plus JniTest pass in
+  all three runner lanes; remaining AOSP and real-app coverage is still open.
