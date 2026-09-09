@@ -12548,3 +12548,11 @@ or admission exception was added.
   both `2246-trace-stream` and `2246-trace-v2` pass interpreter, live-JIT, and
   unmodified-source lanes. The remaining known gaps are `136` shutdown,
   `137` Darwin remote ptrace, and `1919` VMInit event/launcher semantics.
+
+- Checkpoint 616: Re-linked the runtime after the process-main launcher and
+  upstream-main dispatch changes. `1919-vminit-thread-start-timing` now passes
+  interpreter, live-JIT, and unmodified-source lanes. The previously failing
+  `2246-trace-stream` and `2246-trace-v2` also pass all three lanes once the
+  rebuilt runtime is used. Darwin remote `137-cfi` still reaches the custom
+  Mach unwinder but host task-port access is denied; its fallback remains the
+  only active remote-unwind gap.
