@@ -12993,3 +12993,8 @@ or admission exception was added.
   unresolved `addr=0x110` fault (`rc=139`) at low-window PCs not present in the
   registry. Continue by tracing the low-window code producer and JNI/nterp
   transition rather than treating arbitrary native PCs as managed frames.
+- Checkpoint 703: Removed the unverified nterp-range registration patch after
+  it interrupted shadow patch application, then regenerated the shadow tree.
+  `StartMinimalForDarwinProbe`/`FinishMinimalForDarwinProbe` are present in the
+  staged AOSP sources and the graphics-link audit is green again. Continue with
+  stable low-window producer identification instead of widening fault handling.

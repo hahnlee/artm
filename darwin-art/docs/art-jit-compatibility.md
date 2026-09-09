@@ -8455,3 +8455,9 @@ incomplete and still requires managed caller unwind validation.
   the registry and are reported as unresolved native signals. The next target
   is identifying that low-window code producer (nterp/trampoline versus JIT),
   not widening the signal handler.
+- Checkpoint 703: Recreated the runtime shadow from scratch after rejecting an
+  unverified nterp-range patch that broke patch application. The staged AOSP
+  tree now contains the minimal-start declarations/definitions and the full
+  graphics-link audit passes again. No runtime behavior claim is made from the
+  rejected nterp experiment; the next step remains tracing the low-window
+  producer with a stable build.
