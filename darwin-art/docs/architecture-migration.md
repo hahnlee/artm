@@ -11927,3 +11927,9 @@ or admission exception was added.
   unresolved `Float.floatToRawIntBits` during graphics startup). Diagnostic
   instrumentation was reverted; next isolate this with a forced runtime-link
   rebuild and phase-level evidence.
+
+- Checkpoint 526: rebuilding the graphics bootstrap archive from current
+  sources fixed the stale missing registrar link; the fast graphics link audit
+  passes. The next real-app run now fails earlier because the button DEX path
+  is rejected by the process PathClassLoader (status 5), so loader input
+  construction is the next AOSP contract to repair.

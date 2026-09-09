@@ -7277,3 +7277,10 @@ incomplete and still requires managed caller unwind validation.
   still aborts before the app frame and leaves `Float.floatToRawIntBits`
   unresolved. Temporary logging was removed; the next step is to trace the
   registration phase with the runtime-link build cache disabled.
+
+- Checkpoint 526: forced the graphics bootstrap archive rebuild and confirmed
+  `audit-runtime-graphics-link-fast` now links the current libcore registrar
+  (including `RegisterEarlySystemLog`). A fresh Button launch moved past the
+  stale-link boundary and exposed an earlier classpath contract issue: the
+  button DEX path is rejected by the process `PathClassLoader` (status 5).
+  This is the next loader-input fix; no APK mutation or fallback was introduced.
