@@ -812,7 +812,14 @@ pub(crate) fn audit_runtime_graphics_link_mode(
         .arg(root.join("_build/runtime-arm64/libart-arm64-darwin.a"))
         .arg(root.join("_build/runtime-core/libart-core-darwin.a"))
         .arg(root.join("_build/runtime-platform/libart-platform-darwin.a"))
-        .arg(root.join("_build/dex-probe/libdexfile-darwin.a"))
+        // libunwindstack's dex adapter references the external ADexFile ABI
+        // through indirection, so ld64 cannot discover these roots while
+        // scanning normally. Force-load the pinned AOSP libdexfile provider
+        // just as the Android APEX dependency does.
+        .arg(format!(
+            "-Wl,-force_load,{}",
+            root.join("_build/dex-probe/libdexfile-darwin.a").display()
+        ))
         .arg(
             build_paths
                 .native_output("runtime-graphics-bootstrap/objects/artbase_os_linux_aosp_fmt.cc.o"),

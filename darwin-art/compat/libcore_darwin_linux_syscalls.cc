@@ -242,7 +242,9 @@ bool IsAuthorizedHostRuntimePath(const char* path) {
                       std::getenv("DARWIN_ART_ANDROID_PRIVATE_DATA_ROOT")) ||
          IsExplicitHostFile(path, "DARWIN_ART_APK_APP_RESOURCE_APK") ||
          IsExplicitHostFile(path, "DARWIN_ART_APK_APP_SUPPORT_DEX") ||
-         IsExplicitHostFile(path, "DARWIN_ART_FRAMEWORK_RES_APK");
+         IsExplicitHostFile(path, "DARWIN_ART_FRAMEWORK_RES_APK") ||
+         IsExplicitHostFile(path, "DARWIN_ART_TEST_FONTS_XML") ||
+         IsExplicitHostFile(path, "DARWIN_ART_TEST_FONT");
 }
 
 int Open(const char* path, int linux_flags, mode_t mode) {

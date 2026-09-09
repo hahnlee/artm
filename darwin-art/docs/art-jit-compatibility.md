@@ -7299,3 +7299,10 @@ incomplete and still requires managed caller unwind validation.
   owns the single virtual `attachBaseContext` call. The run reaches service
   bridge creation and Activity attach; remaining failure is the graphics-link
   ADexFile provider closure, not Java loader/resource setup.
+- Checkpoint 529: rebuilt the provider with AOSP `external/dex_file_ext.cc` and
+  force-loaded the resulting `ADexFile_*` ABI into the graphics link; the fast
+  graphics audit now passes with zero fake symbols. The real Button path reaches
+  Activity.attach, HWUI GPU RenderNode presentation, and Nterp acceptance
+  (`result=42`) with no graphics exception. The process still aborts after this
+  successful frame during teardown, so the next target is post-present shutdown
+  ownership rather than APK loading or rendering capability.

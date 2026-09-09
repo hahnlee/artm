@@ -476,6 +476,9 @@ pub struct Facade {
     // as an exact-file capability as well; authorizing their parent directory
     // would let native code read unrelated host files.
     authorized_host_apk_splits: Vec<PathBuf>,
+    // Immutable font fixtures used by the framework-only graphics probe.
+    // These are exact-file capabilities, never a parent-directory grant.
+    authorized_host_test_fonts: Vec<PathBuf>,
     // Extracted native libraries are another installer-owned capability. The
     // Java PathClassLoader must be able to stat the directory and open its
     // direct children for DexPathList.findLibrary(), while arbitrary host
@@ -573,11 +576,17 @@ impl Facade {
             .map(PathBuf::from)
             .and_then(|path| path.canonicalize().ok())
             .filter(|path| path.is_absolute() && path.is_dir());
+        let authorized_host_test_fonts = ["DARWIN_ART_TEST_FONTS_XML", "DARWIN_ART_TEST_FONT"]
+            .into_iter()
+            .filter_map(|name| std::env::var_os(name).map(PathBuf::from))
+            .filter(|path| path.is_absolute() && path.is_file())
+            .collect();
         Ok(Self {
             prefix,
             broker,
             authorized_host_apk,
             authorized_host_apk_splits,
+            authorized_host_test_fonts,
             authorized_host_native_dir,
             cwd: Mutex::new(initial_cwd.normalized_path),
             descriptors: Mutex::new(DescriptorTable::default()),
@@ -709,6 +718,13 @@ impl Facade {
             &self.authorized_host_apk_splits,
             path,
         )
+        .or_else(|| {
+            let requested = PathBuf::from(std::ffi::OsString::from_vec(path.to_vec()));
+            self.authorized_host_test_fonts
+                .iter()
+                .find(|candidate| **candidate == requested)
+                .map(PathBuf::as_path)
+        })
     }
 
     // ART's DexPathList receives the host backing path for an app-private DEX

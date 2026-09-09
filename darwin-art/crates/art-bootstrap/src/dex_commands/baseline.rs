@@ -338,10 +338,12 @@ pub(crate) fn build_dex_probe(root: &Path) -> Result<()> {
             .arg(&upstream_test_native_output_class),
     )?;
 
+    let libdexfile_external_include = libdexfile.join("external/include");
     let includes = [
         patched_artbase.as_path(),
         artbase.as_path(),
         libdexfile.as_path(),
+        libdexfile_external_include.as_path(),
         libbase_include.as_path(),
         libziparchive_include.as_path(),
         palette_include.as_path(),
@@ -364,6 +366,10 @@ pub(crate) fn build_dex_probe(root: &Path) -> Result<()> {
     )?;
     let dex_sources = [
         dex_operator_source,
+        // libunwindstack's AOSP dex adapter consumes the public ADexFile C
+        // ABI. Keep the external implementation in the same provider archive
+        // instead of relying on an accidental host symbol.
+        libdexfile.join("external/dex_file_ext.cc"),
         libdexfile.join("dex/dex_file.cc"),
         libdexfile.join("dex/dex_file_loader.cc"),
         libdexfile.join("dex/standard_dex_file.cc"),

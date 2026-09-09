@@ -119,7 +119,9 @@ static int authorized_host_runtime_path(const char* path) {
          authorized_directory_within(path, getenv("DARWIN_ART_ANDROID_PRIVATE_DATA_ROOT")) ||
          explicit_host_file(path, "DARWIN_ART_APK_APP_RESOURCE_APK") ||
          explicit_host_file(path, "DARWIN_ART_APK_APP_SUPPORT_DEX") ||
-         explicit_host_file(path, "DARWIN_ART_FRAMEWORK_RES_APK");
+         explicit_host_file(path, "DARWIN_ART_FRAMEWORK_RES_APK") ||
+         explicit_host_file(path, "DARWIN_ART_TEST_FONTS_XML") ||
+         explicit_host_file(path, "DARWIN_ART_TEST_FONT");
 }
 
 static int remember_directory(DIR* directory, int host_directory) {

@@ -11945,3 +11945,10 @@ or admission exception was added.
   and Activity.attach performs the only base-context attachment. Execution now
   reaches Activity attach; the remaining blocker is missing ADexFile symbols in
   the graphics link closure.
+- Checkpoint 529: the dex provider now includes AOSP's public
+  `external/dex_file_ext.cc`, and the graphics audit force-loads that archive
+  so `ADexFile_*` resolution follows the Android dependency closure. Button
+  execution reaches Activity.attach, GPU RenderNode present, and Nterp result
+  42 without an app-side exception. A SIGABRT remains after the successful
+  present, isolating the next compatibility work to VM/provider teardown and
+  owner ordering; no APK rewrite or probe-only rendering fallback was added.
