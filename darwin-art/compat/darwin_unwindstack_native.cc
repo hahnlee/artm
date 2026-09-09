@@ -1334,8 +1334,6 @@ extern "C" bool darwin_art_unwindstack_check_local(const char* const* sequence,
          CheckUnwindstackSequence(unwinder, data, sequence, sequence_size);
 }
 
-// Keep the remote task acquisition path coupled to the native provider so
-// header-only lifetime fixes invalidate the generated Darwin graphics image.
 extern "C" bool darwin_art_unwindstack_check_remote(int process_id,
                                                       const char* const* sequence,
                                                       size_t sequence_size) {

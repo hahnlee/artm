@@ -7352,6 +7352,11 @@ incomplete and still requires managed caller unwind validation.
   the experiment was reverted; the authoritative gate remains the original
   unmodified AOSP source with remote `ESRCH`.
 
+- Checkpoint 539: forced the incremental graphics closure rebuild with the
+  pinned NDK environment; strict graphics link passes (`registrar=51`, no
+  fake symbols). Retested `137-cfi`; remote register capture still reports
+  `ESRCH` despite the debugger entitlement.
+
 - Checkpoint 536: hardened the Darwin remote task cache to retry
   `task_for_pid` during the fork/exec-to-SIGSTOP transition (8 attempts,
   1-second bounded wait) while checking child liveness. Host crate checks pass;

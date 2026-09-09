@@ -12004,3 +12004,8 @@ or admission exception was added.
   `task_for_pid` acquisition to cover the fork/exec/SIGSTOP race. `cargo check
   -p darwin-art-host` passes; graphics-closure identity drift is still
   reported by its audit and was not normalized.
+
+- Checkpoint 539: forced the incremental graphics closure rebuild with the
+  pinned NDK environment; strict graphics link passes (`registrar=51`, no
+  fake symbols). Retested `137-cfi`; remote register capture still reports
+  `ESRCH` despite the debugger entitlement.

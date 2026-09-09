@@ -11,7 +11,6 @@
 #include <memory>
 #include <unordered_map>
 #include <unistd.h>
-#include <cstdio>
 namespace darwin_art::remote_task {
 
 // Keep one validated task send right per remote process.  macOS may block on
@@ -59,8 +58,6 @@ inline mach_port_t Acquire(pid_t pid) {
       return MACH_PORT_NULL;
     }
     if (result->status != KERN_SUCCESS || result->task == MACH_PORT_NULL) {
-      std::fprintf(stderr, "darwin remote task_for_pid failed pid=%d kr=%d alive=%d\\n",
-                   pid, result->status, kill(pid, 0) == 0 ? 1 : 0);
       return MACH_PORT_NULL;
     }
     mach_port_t task = result->task;
