@@ -7199,3 +7199,7 @@ incomplete and still requires managed caller unwind validation.
 - Checkpoint 512: the macOS SDK declares `task_threads` against
   `task_inspect_t`; our cache currently retains a generic task send-right.
   Explicit inspect-right acquisition is the next host-layer change to test.
+- Checkpoint 513: tested the SDK's weak-linked `task_inspect_for_pid` path;
+  the remote smoke still stalled, so it was reverted. The known-good shared
+  read-port cache remains; inspect-right acquisition alone is not sufficient
+  and the remote API must be made asynchronous or replaced.

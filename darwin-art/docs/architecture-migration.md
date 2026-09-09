@@ -11857,3 +11857,6 @@ or admission exception was added.
 - Checkpoint 512: modern SDK headers require `task_inspect_t` for
   `task_threads`, while the cache retains a generic task send-right. Explicit
   inspect-right acquisition is the next change to test.
+- Checkpoint 513: weak-linked `task_inspect_for_pid` was tested but did not
+  release the remote smoke stall and was reverted. Read-port caching remains;
+  a non-blocking or alternate remote interrogation path is still required.
