@@ -7373,6 +7373,11 @@ incomplete and still requires managed caller unwind validation.
   monitor/inlining and graphics bootstrap acceptance. Remote-child CFI
   remains the known Darwin-specific negative transport gate.
 
+- Checkpoint 543: Rust lifecycle/ownership regression passed (`darwin-art-runtime`
+  27 tests and `darwin-art-engine` 5 tests). This confirms the remote-task
+  investigation has not regressed shutdown, lease, surface, or graphics owner
+  safety; AOSP remote CFI remains open.
+
 - Checkpoint 536: hardened the Darwin remote task cache to retry
   `task_for_pid` during the fork/exec-to-SIGSTOP transition (8 attempts,
   1-second bounded wait) while checking child liveness. Host crate checks pass;

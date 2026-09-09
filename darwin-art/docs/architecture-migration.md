@@ -12024,3 +12024,7 @@ or admission exception was added.
   remote-task changes, including GC/read barriers, JNI, exceptions, monitors,
   inlining, and graphics bootstrap. Remote-child CFI remains the known
   Darwin-specific negative transport gate.
+
+- Checkpoint 543: Rust lifecycle/ownership tests pass (`darwin-art-runtime`
+  27 and `darwin-art-engine` 5). Resource shutdown and graphics/surface lease
+  invariants remain intact while remote CFI transport work continues.
