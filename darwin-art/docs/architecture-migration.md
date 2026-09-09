@@ -12194,3 +12194,13 @@ or admission exception was added.
   corpus runs now pass `004-StackWalk`, `2262-default-conflict-methods`, and
   their interpreter/JIT/unmodified differential lanes. The final ledger is
   1,015 passed and 29 remaining failures, down from 1,012/32.
+
+575. **2026-09-09 — process-lifetime fix clears concurrency/GC/string cases**
+
+   Re-ran representative failures after the Android process-scoped lifetime
+   change: `004-ThreadStress`, `061-out-of-memory`, `074-gc-thrash`, and
+   `103-string-append` now pass interpreter, JIT, and unmodified-source
+   differential lanes. The corpus ledger is 1,019 passed / 25 failed. The
+   remaining failures are concentrated in class unloading/redefinition,
+   class-loader/app-image, native bridge, and unresolved-access cases; they
+   require runtime feature work rather than teardown changes.
