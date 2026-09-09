@@ -12087,3 +12087,8 @@ or admission exception was added.
   fields/arrays, intrinsics, Surface/MediaCodec, and Android lifecycle/window
   paths with PASS results. macOS sentinel-page/membarrier warnings are still
   non-fatal; source rebuild and real-app coverage remain open.
+
+- Checkpoint 557: a source-reference audit found the Darwin eligibility helper
+  only in acceptance probes; production patch ordering includes AOSP admission
+  removal `0093`, so no method/opcode allowlist is active there. Native rebuild
+  and broader app validation remain pending storage reclamation.

@@ -7461,3 +7461,9 @@ incomplete and still requires managed caller unwind validation.
   lifecycle/window checks all reported PASS. The known macOS sentinel-page and
   membarrier warnings remain non-fatal; full source rebuild and broader real-app
   validation still await reclaimed storage.
+
+- Checkpoint 557: source-reference audit confirms `DarwinJitCanCompile` and
+  `DarwinJitLookupResolvedMethod` are referenced only by acceptance probes;
+  the production JIT patch sequence applies AOSP admission removal `0093`
+  after the historical compatibility patches. No method/opcode allowlist is
+  active in the production compile path. Rebuild remains storage-blocked.
