@@ -13200,3 +13200,6 @@ or admission exception was added.
 - Checkpoint 752: `2239-varhandle-perf-vh-set-a` passes all three runner lanes,
   validating acquire/opaque VarHandle stores and ordering semantics. Remaining
   modes and real-app acceptance remain open.
+- Checkpoint 753: `2239-varhandle-perf-vh-gaa` passes all three runner lanes,
+  validating atomic get-and-add VarHandle read-modify-write semantics.
+  Remaining modes and real-app acceptance remain open.

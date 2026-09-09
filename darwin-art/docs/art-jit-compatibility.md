@@ -8700,3 +8700,7 @@ incomplete and still requires managed caller unwind validation.
   optimized/JIT, and unmodified-source lanes, validating acquire/opaque
   VarHandle stores and ordering semantics. Remaining modes and real APK
   acceptance remain open.
+- Checkpoint 753: `2239-varhandle-perf-vh-gaa` passes interpreter,
+  optimized/JIT, and unmodified-source lanes, validating atomic get-and-add
+  VarHandle read-modify-write semantics. Remaining modes and real APK
+  acceptance remain open.
