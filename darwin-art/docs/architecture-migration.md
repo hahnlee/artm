@@ -12036,3 +12036,8 @@ or admission exception was added.
 - Checkpoint 545: verified patch 0147 removes the ARM64 forced-explicit null
   workaround. Production JIT uses ART's `GetImplicitNullChecks()` setting as
   in AOSP.
+
+- Checkpoint 546: registered the header-only remote-task/unwind files as
+  explicit native graph inputs. The xtask suite passes (18 tests) and the fast
+  graphics-link audit remains green with `registrar=51`, eliminating stale
+  object reuse for future task-port changes.

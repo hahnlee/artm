@@ -7387,6 +7387,11 @@ incomplete and still requires managed caller unwind validation.
   removes the former Darwin forced-explicit workaround; production JIT now
   consumes ART's `GetImplicitNullChecks()` setting directly.
 
+- Checkpoint 546: added the header-only remote-task/unwind ABI files to the
+  native graph's explicit invalidation inputs. `darwin-art-xtask` tests pass
+  (18 tests), and `audit-runtime-graphics-link-fast` completes with
+  `registrar=51`; future Mach task changes now invalidate the correct objects.
+
 - Checkpoint 536: hardened the Darwin remote task cache to retry
   `task_for_pid` during the fork/exec-to-SIGSTOP transition (8 attempts,
   1-second bounded wait) while checking child liveness. Host crate checks pass;

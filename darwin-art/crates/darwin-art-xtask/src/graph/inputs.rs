@@ -103,6 +103,11 @@ pub(crate) fn graph_inputs(root: &Path) -> Vec<PathBuf> {
         PathBuf::from("compat/darwin_android_platform.h"),
         PathBuf::from("compat/darwin_provider_owners.cc"),
         PathBuf::from("compat/darwin_provider_owners.h"),
+        // Remote unwind's Mach task cache is header-only; keep it explicit so
+        // retry/permission changes invalidate the provider object and cannot
+        // silently reuse a stale graphics archive.
+        PathBuf::from("compat/darwin_remote_task_cache.h"),
+        PathBuf::from("compat/darwin_unwindstack_linux_abi.h"),
         // The libcore Linux archive is produced by a standalone shell edge,
         // so its C++ inputs must be explicit graph inputs rather than relying
         // on the shell script's timestamp to represent all three objects.
