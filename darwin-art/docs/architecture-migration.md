@@ -12166,3 +12166,10 @@ or admission exception was added.
   and does not return. This distinguishes a DestroyJavaVM/application-thread
   teardown hang from a JIT stack-map execution failure. The temporary logging
   was removed; the worktree remains clean.
+
+- Checkpoint 571: a native shutdown trace narrowed the same repro further:
+  AsyncTask cleanup and application-thread stop both return, while the hang
+  begins exactly at `JavaVM::DestroyJavaVM()`. The run had no reported
+  non-daemon application threads, so the remaining investigation is ART's
+  internal daemon/JIT/thread-list teardown. Diagnostic changes were removed
+  after the trace; no workaround or test weakening was committed.
