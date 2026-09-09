@@ -8131,3 +8131,8 @@ incomplete and still requires managed caller unwind validation.
   and points to state/lifecycle sensitivity between Throwable capture and
   formatting, rather than a universally missing Darwin stack frame. The probe
   was removed; the original corpus remains the authoritative failing case.
+- Checkpoint 646: Tested a Darwin-only rewalk of `BuildInternalStackTraceVisitor`
+  to avoid saved-frame reuse, but the shared staging patch application could
+  not apply that hunk reliably and the experiment was discarded. The graphics
+  bootstrap was regenerated from the unmodified manifest and remains healthy;
+  no unverified stack-walk workaround is retained.

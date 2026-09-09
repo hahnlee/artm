@@ -12719,3 +12719,7 @@ or admission exception was added.
   second fresh exception printed immediately afterward had five. This narrows
   the remaining defect to Throwable capture/publication lifecycle sensitivity;
   the probe was removed and no test source change is retained.
+- Checkpoint 646: A Darwin-only stack rewalk experiment was rejected because
+  the shared staging patcher could not apply the replacement hunk reliably.
+  It was fully removed; the graphics bootstrap was regenerated from the
+  canonical manifest with no workaround left in the runtime.
