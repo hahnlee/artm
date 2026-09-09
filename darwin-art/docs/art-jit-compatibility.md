@@ -8811,3 +8811,7 @@ incomplete and still requires managed caller unwind validation.
   covering heap iteration, JVMTI attachment, method metadata, stack traces,
   and class inspection. Intermediate ledger is 1,061 passed and 15 failed;
   final classification remains pending.
+- Checkpoint 778: Corpus workers remain live through `925-threadgroups`,
+  covering properties, monitor, thread, and thread-group behavior. The
+  intermediate ledger remains 1,061 passed and 15 failed; final classification
+  is deferred until the full run terminates.
