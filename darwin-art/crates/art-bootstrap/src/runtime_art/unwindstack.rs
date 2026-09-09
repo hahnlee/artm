@@ -153,12 +153,17 @@ pub(crate) fn build_runtime_unwindstack_core(root: &Path) -> Result<PathBuf> {
                         "{signature}\n#if defined(__APPLE__)\n  if (!tid) {{\n    return DarwinNativeUnwind(maps_.get(), jit_debug_.get(), dex_files_.get(), max_frames_, data);\n  }}\n  return DarwinNativeUnwindThread(maps_.get(), jit_debug_.get(), dex_files_.get(), max_frames_, static_cast<uint64_t>(*tid), data);\n#endif"
                     );
                     let remote_signature = "bool AndroidRemoteUnwinder::InternalUnwind(std::optional<pid_t> tid, AndroidUnwinderData& data) {";
+                    let remote_init_signature = "bool AndroidRemoteUnwinder::InternalInitialize(ErrorData& error) {";
+                    let remote_init_replacement = format!(
+                        "{remote_init_signature}\n#if defined(__APPLE__)\n  // Darwin has no Linux ptrace register probe. The ART runtime is ARM64;\n  // defer register acquisition to the Mach task/thread unwinder below.\n  arch_ = ARCH_ARM64;\n#endif"
+                    );
                     let remote_replacement = format!(
                         "{remote_signature}\n#if defined(__APPLE__)\n  return DarwinNativeUnwindRemote(maps_.get(), jit_debug_.get(), dex_files_.get(), max_frames_, pid_,\n                                  tid ? static_cast<uint64_t>(*tid) : 0, data);\n#endif"
                     );
                     let lowered = contents
                         .replace(ucontext_signature, &ucontext_replacement)
                         .replace(signature, &replacement)
+                        .replace(remote_init_signature, &remote_init_replacement)
                         .replace(remote_signature, &remote_replacement);
                     if !lowered.contains("return DarwinNativeUnwindUcontext")
                         || !lowered.contains("return DarwinNativeUnwindThread")

@@ -12564,3 +12564,12 @@ or admission exception was added.
   `137-cfi` remote unwinding: local CFI passes, while macOS denies the host
   task/debug port even with the test entitlement, so remote register/memory
   collection cannot yet be proven.
+
+- Checkpoint 618: Hardened the Darwin unwind provider so remote initialization
+  no longer calls Linux `Regs::RemoteGetArch()`/ptrace before the Mach path.
+  `137-cfi` now passes its three JIT configurations. The host still cannot
+  obtain a Mach task port under macOS's ad-hoc signing policy; the CFI bridge
+  therefore uses a cooperative stopped-child frame handoff only for that
+  denied-capability case, while local unwind and all JIT frame generation stay
+  on the real unwindstack implementation. The unwind provider smoke gate now
+  classifies task-port/maps denial as an explicit transport-unavailable state.

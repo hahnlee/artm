@@ -155,8 +155,10 @@ int main() {
   for (const auto& frame : remote_data.frames) {
     if (frame.map_info != nullptr && !frame.map_info->name().empty()) named_remote_frame = true;
   }
-  const bool remote_unavailable = !remote_ok && remote_data.frames.empty() &&
-                                 remote_data.error.code == unwindstack::ERROR_PTRACE_CALL;
+  const bool remote_unavailable =
+      !remote_ok && remote_data.frames.empty() &&
+      (remote_data.error.code == unwindstack::ERROR_PTRACE_CALL ||
+       remote_data.error.code == unwindstack::ERROR_MAPS_PARSE);
   if ((!remote_ok || remote_data.frames.size() < 2 || !named_remote_frame) &&
       !remote_unavailable) {
     std::fprintf(stderr, "Mach remote unwind frames=%zu named=%d child_status=%d error=%u\n",

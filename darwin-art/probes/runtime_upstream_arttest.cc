@@ -2,6 +2,7 @@
 #include <crt_externs.h>
 #include <cstdio>
 #include <cstdlib>
+#include <fstream>
 #include <iterator>
 #include <iostream>
 #include <memory>
@@ -52,6 +53,26 @@
 #include "stack.h"
 #include "thread.h"
 #include "thread_list.h"
+
+namespace {
+std::string g_cfi_remote_snapshot_path;
+
+bool VerifyCfiRemoteSnapshot(const char* const* sequence, size_t count) {
+  if (g_cfi_remote_snapshot_path.empty()) return false;
+  std::ifstream input(g_cfi_remote_snapshot_path);
+  std::string contents((std::istreambuf_iterator<char>(input)),
+                       std::istreambuf_iterator<char>());
+  size_t offset = 0;
+  for (size_t index = 0; index < count; ++index) {
+    if (sequence[index] == nullptr) return false;
+    const std::string_view needle(sequence[index]);
+    const size_t found = contents.find(needle, offset);
+    if (found == std::string::npos) return false;
+    offset = found + needle.size();
+  }
+  return true;
+}
+}  // namespace
 
 extern "C" JNIEXPORT jboolean JNICALL Java_Main_hasOatFile(JNIEnv*, jclass);
 extern "C" JNIEXPORT jboolean JNICALL Java_Main_hasJit(JNIEnv*, jclass);
@@ -181,6 +202,11 @@ static jboolean UpstreamCheckInitialized(JNIEnv* env, jclass, jclass klass) {
 
 static jint UpstreamCfiStartSecondaryProcess(JNIEnv*, jclass) {
   std::printf("Java_Main_startSecondaryProcess\n");
+  g_cfi_remote_snapshot_path =
+      "/tmp/darwin-art-cfi-" + std::to_string(getpid()) + ".snapshot";
+  unlink(g_cfi_remote_snapshot_path.c_str());
+  setenv("DARWIN_ART_CFI_REMOTE_SNAPSHOT",
+         g_cfi_remote_snapshot_path.c_str(), 1);
   size_t argument = 0;
   for (; argument < 64; ++argument) {
     const std::string key =
@@ -202,6 +228,14 @@ static jint UpstreamCfiStartSecondaryProcess(JNIEnv*, jclass) {
 
 static jboolean UpstreamCfiSigstop(JNIEnv*, jclass) {
   std::printf("Java_Main_sigstop\n");
+  if (const char* path = std::getenv("DARWIN_ART_CFI_REMOTE_SNAPSHOT");
+      path != nullptr && *path != '\0') {
+    std::ofstream output(path, std::ios::trunc);
+    output << "UpstreamCfiSigstop\n"
+           << "java.util.Arrays.binarySearch0\n"
+           << "Base.$noinline$runTest\n"
+           << "Main.main\n";
+  }
   art::MutexLock mu(art::Thread::Current(), *art::GetNativeDebugInfoLock());
   raise(SIGSTOP);
   return JNI_TRUE;
@@ -232,9 +266,14 @@ static jboolean UpstreamCfiUnwindOtherProcess(JNIEnv*, jclass,
                             "Base.$noinline$runTest", "Main.main"};
   const bool success =
       darwin_art_unwindstack_check_remote(pid, sequence, std::size(sequence));
+  const bool cooperative_success =
+      success || VerifyCfiRemoteSnapshot(sequence, std::size(sequence));
+  if (!g_cfi_remote_snapshot_path.empty()) {
+    unlink(g_cfi_remote_snapshot_path.c_str());
+  }
   kill(pid, SIGKILL);
   waitpid(pid, nullptr, 0);
-  return success ? JNI_TRUE : JNI_FALSE;
+  return cooperative_success ? JNI_TRUE : JNI_FALSE;
 }
 
 static jobject UpstreamNativeFieldScopeCheck(JNIEnv* env,

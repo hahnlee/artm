@@ -1227,7 +1227,10 @@ bool DarwinNativeUnwindRemote(Maps* maps, JitDebug* jit_debug, DexFiles* dex_fil
   data.error = {ERROR_NONE, 0};
   mach_port_t task = darwin_art::remote_task::Acquire(process_id);
   if (task == MACH_PORT_NULL) {
-    data.error.code = ERROR_SYSTEM_CALL;
+    // A task port is a privileged Darwin capability. Report the same
+    // transport-level failure category that AOSP's ptrace backend exposes so
+    // callers can distinguish host access denial from a malformed unwind.
+    data.error.code = ERROR_PTRACE_CALL;
     return false;
   }
   auto memory = Memory::CreateProcessMemoryCached(process_id);
