@@ -11714,3 +11714,9 @@ or admission exception was added.
   standalone fixture has no `DarwinServiceBridge` implementation on its class
   path, so `IServiceManager` is still null. APK runs that include the support
   DEX now have the correct discovery order.
+- Checkpoint 479: kept the ELF/JNI acceptance path explicitly headless so it
+  does not enter the Android window/resource bootstrap without its support
+  DEX. The graph, libc++, TLS, and Nterp admissions now pass before the next
+  native fixture transition; the remaining failure is a SIGABRT during the
+  later shared-library acceptance, requiring a focused ART/native boundary
+  trace rather than another framework-service workaround.
