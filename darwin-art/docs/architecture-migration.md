@@ -13166,3 +13166,7 @@ or admission exception was added.
 - Checkpoint 741: `2239-varhandle-perf-vh-set-bav` passes all three runner
   lanes, validating byte-array-view stores, type checks, and write barriers.
   Remaining VarHandle modes and real-app acceptance remain outstanding.
+- Checkpoint 742: `2239-varhandle-perf-vh-reflect-get` passes interpreter,
+  optimized/JIT, and unmodified-source lanes, validating reflection-created
+  VarHandle access and runtime type resolution. More modes and real-app
+  acceptance remain open.

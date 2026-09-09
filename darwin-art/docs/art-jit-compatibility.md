@@ -8658,3 +8658,7 @@ incomplete and still requires managed caller unwind validation.
   optimized/JIT, and unmodified-source lanes, covering byte-array-view stores,
   type checks, and write-barrier paths. Remaining VarHandle modes and real APK
   acceptance remain open.
+- Checkpoint 742: `2239-varhandle-perf-vh-reflect-get` passes all three lanes,
+  validating reflection-created VarHandle access and runtime type resolution.
+  Remaining VarHandle modes plus full JNI/exception and real APK coverage stay
+  open.
