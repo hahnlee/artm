@@ -12589,3 +12589,10 @@ or admission exception was added.
   eligibility header is diagnostic-probe-only. Remaining work is end-to-end
   validation of the complete corpus and real unmodified applications, not a
   production JIT gate removal.
+
+- Checkpoint 621: Serial rechecks of the three rows marked failed by the
+  concurrent corpus run (`039-join-main`, `2275-pthread-name`, and
+  `2282-single-step-before-catch`) passed all interpreter, JIT, and unmodified
+  source lanes on the current runtime. The prior failures were transient
+  timeout/contention artifacts. This strengthens the corpus evidence but does
+  not close the full-corpus or real-application validation scope.

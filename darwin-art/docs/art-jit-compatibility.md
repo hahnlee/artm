@@ -7975,3 +7975,11 @@ incomplete and still requires managed caller unwind validation.
   enabled through the upstream ART path. The eligibility helper is retained
   only for diagnostic acceptance probes. Full real-app and unabridged corpus
   validation remain open; this checkpoint does not claim overall completion.
+
+- Checkpoint 621: Re-ran the three non-pass rows left by the concurrent corpus
+  ledger (`039-join-main`, `2275-pthread-name`, and
+  `2282-single-step-before-catch`) serially against the current binaries. Each
+  passed the interpreter expected-output, JIT expected-output, and unmodified
+  source interpreter+optimized lanes. The earlier ledger rows were timeout/
+  contention artifacts, not reproducible runtime mismatches. The complete
+  corpus and real-app requirements remain open.
