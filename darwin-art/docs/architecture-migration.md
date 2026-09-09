@@ -13055,3 +13055,9 @@ or admission exception was added.
   low-window `SEGV_ACCERR` signature without a JIT publication event. Producer
   classification via mapping/symbolization remains the next architecture
   task; signal handling is intentionally unchanged.
+- Checkpoint 714: Added opt-in Mach VM-region diagnostics for unresolved ARM64
+  faults (`DARWIN_ART_DEBUG_FAULT_MAP`). The signal path now reports the
+  faulting PC's region/protection boundary for AOT/nterp/trampoline/JIT
+  classification while preserving normal recovery semantics. A fresh Chrome
+  APK is required before collecting the next acceptance trace because the prior
+  profile copy is absent.

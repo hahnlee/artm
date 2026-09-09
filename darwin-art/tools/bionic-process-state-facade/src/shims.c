@@ -606,6 +606,32 @@ static void DarwinArtAndroidSignalTrampoline(int host_signal,
           (size_t)length < sizeof(message) ? (size_t)length : sizeof(message) - 1;
       (void)write(STDERR_FILENO, message, bytes);
     }
+    if (getenv("DARWIN_ART_DEBUG_FAULT_MAP") != NULL) {
+      mach_vm_address_t region = (mach_vm_address_t)unresolved_pc;
+      mach_vm_size_t region_size = 0;
+      vm_region_basic_info_data_64_t info;
+      mach_msg_type_number_t count = VM_REGION_BASIC_INFO_COUNT_64;
+      mach_port_t object = MACH_PORT_NULL;
+      const kern_return_t kr = mach_vm_region(
+          mach_task_self(), &region, &region_size, VM_REGION_BASIC_INFO_64,
+          (vm_region_info_t)&info, &count, &object);
+      const int map_length = snprintf(
+          message, sizeof(message),
+          "DARWIN fault map kr=%d pc=%p addr=%p base=%p size=0x%llx "
+          "prot=0x%x max=0x%x inherit=%d\n",
+          kr, (void*)unresolved_pc,
+          (void*)DarwinFaultAddress(host_info, (const ucontext_t*)host_context),
+          (void*)region, (unsigned long long)region_size,
+          kr == KERN_SUCCESS ? info.protection : 0,
+          kr == KERN_SUCCESS ? info.max_protection : 0,
+          kr == KERN_SUCCESS ? info.inheritance : 0);
+      if (map_length > 0) {
+        const size_t bytes = (size_t)map_length < sizeof(message)
+                                 ? (size_t)map_length
+                                 : sizeof(message) - 1;
+        (void)write(STDERR_FILENO, message, bytes);
+      }
+    }
     if (getenv("DARWIN_ART_DEBUG_MEDIA_CODEC") != NULL && host_context != NULL) {
       const ucontext_t* context = (const ucontext_t*)host_context;
       const uintptr_t sp = arm_thread_state64_get_sp(context->uc_mcontext->__ss);

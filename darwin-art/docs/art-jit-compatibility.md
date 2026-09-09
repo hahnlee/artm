@@ -8524,3 +8524,10 @@ incomplete and still requires managed caller unwind validation.
   `SEGV_ACCERR`/`addr=0x6060313` signature and still emitted no registry event.
   Keep the PC classified as an unowned generated-code window until mapping
   symbolization identifies its producer.
+- Checkpoint 714: Added opt-in `DARWIN_ART_DEBUG_FAULT_MAP` instrumentation to
+  the unresolved ARM64 signal path. It records the Mach VM region containing
+  the faulting PC (base, size, current/max protection, and inheritance) without
+  changing recovery behavior. The Chrome acceptance rerun could not be
+  repeated because the previously materialized Chrome APK is no longer present
+  in the profile store; no producer classification is claimed until a fresh APK
+  is installed and the map evidence is captured.
