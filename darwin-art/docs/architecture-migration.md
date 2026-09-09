@@ -12941,3 +12941,7 @@ or admission exception was added.
   valid-looking frame method pointer. The temporary Darwin stack-map bypass
   was not retained; implementation must repair exact OAT/JIT header matching
   so AOSP's normal NPE signal path can run.
+- Checkpoint 692: The Darwin-only `return_pc=pc` experiment rebuilt and ran
+  Chrome, but reproduced the same implicit-null crash. It was removed after
+  verification; the remaining issue is method-header/code-cache ownership,
+  not the ARM64 signal PC offset convention.

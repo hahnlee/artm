@@ -8395,3 +8395,8 @@ incomplete and still requires managed caller unwind validation.
   an arbitrary PC or native loader fault. A Darwin-only bypass of
   `IsValidReturnPc` was build-tested only as a temporary experiment and was
   discarded; the required fix is accurate OAT/JIT stack-map/header lookup.
+- Checkpoint 692: Tested the alternate Darwin signal return-PC convention
+  (`pc` instead of AOSP's `pc+4`) against the unchanged Chrome APK. The full
+  graphics closure passed, but Chrome still faulted identically with `addr=0x110`.
+  The experiment was reverted; stack-map failure is not a one-instruction PC
+  offset issue.
