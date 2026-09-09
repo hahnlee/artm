@@ -13213,3 +13213,8 @@ or admission exception was added.
   Calculator (`2+3=5`) and DeskClock timer flows through the common
   HWUI/SurfaceFlinger/Metal path. Full AOSP matrix and Blue Archive acceptance
   remain open.
+- Checkpoint 757: Re-ran the corpus's prior
+  `9999-input-channel-endpoint-parcel-smoke` failure after rebuilding the
+  generic compiler API companion; all three runner lanes pass. The prior
+  failure was stale compiler-surface state, not a runtime semantic failure.
+  Full corpus and Blue Archive acceptance remain open.

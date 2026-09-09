@@ -8716,3 +8716,9 @@ incomplete and still requires managed caller unwind validation.
   Calculator (`2+3=5`) and DeskClock timer flows through the common
   HWUI/SurfaceFlinger/Metal path. Full AOSP matrix and Blue Archive acceptance
   remain open.
+- Checkpoint 757: Re-ran the corpus's sole prior failure,
+  `9999-input-channel-endpoint-parcel-smoke`, after rebuilding the generic
+  compiler API companion. Interpreter, optimized/JIT, and unmodified-source
+  lanes now all pass; the earlier failure was stale compiler-surface state,
+  not a runtime semantic failure. Full corpus and Blue Archive acceptance
+  remain open.
