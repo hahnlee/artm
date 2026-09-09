@@ -7406,3 +7406,7 @@ incomplete and still requires managed caller unwind validation.
   acquisition (Mach status and child liveness) and confirmed the existing
   generated graphics image must be rebuilt before that instrumentation can be
   observed. The JIT/host crate check remains green; remote CFI is still open.
+
+- Checkpoint 547: unmodified AOSP `984-obsolete-invoke` passes in interpreter
+  and JIT modes, including the combined source differential run. Obsolete
+  method dispatch remains compatible on the Darwin ARM64 runtime.

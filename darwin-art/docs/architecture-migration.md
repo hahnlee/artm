@@ -12041,3 +12041,7 @@ or admission exception was added.
   explicit native graph inputs. The xtask suite passes (18 tests) and the fast
   graphics-link audit remains green with `registrar=51`, eliminating stale
   object reuse for future task-port changes.
+
+- Checkpoint 547: unmodified AOSP `984-obsolete-invoke` passes in interpreter
+  and JIT modes, including the combined source differential run. Obsolete
+  method dispatch remains compatible on the Darwin ARM64 runtime.
