@@ -84,14 +84,13 @@ where
         }
     };
 
+    // The ART graphics shutdown callback still owns a borrowed surface handle
+    // (it clears the owner-wake callback and drains GPU work). Remove the
+    // Surface subsystem lease first, but keep the SurfaceSession alive until
+    // GraphicsSession::close has completed. Destroying the surface first
+    // leaves a dangling handle in GraphicsState and aborts during teardown.
     if session.surface().is_some() {
         if let Err(error) = session.remove_expected_subsystem(Subsystem::Surface) {
-            remember(error.status() as i32);
-        }
-        if let Some(surface) = session.surface_mut() {
-            remember(surface.close());
-        }
-        if let Err(error) = session.release_surface() {
             remember(error.status() as i32);
         }
     }
@@ -103,6 +102,15 @@ where
         if let Ok(Some(graphics)) = session.graphics_for_shutdown_mut() {
             remember(graphics.close());
         }
+    }
+
+    // Surface destruction follows the ART graphics callback so every native
+    // borrower observes a live surface for the complete shutdown boundary.
+    if let Some(surface) = session.surface_mut() {
+        remember(surface.close());
+    }
+    if let Err(error) = session.release_surface() {
+        remember(error.status() as i32);
     }
 
     if session.provider().is_some()
@@ -284,9 +292,9 @@ mod tests {
         assert_eq!(
             &*events.lock().unwrap(),
             &[
+                "graphics",
                 "surface",
                 "drop-surface",
-                "graphics",
                 "engine",
                 "finalize-graphics",
                 "drop-graphics",

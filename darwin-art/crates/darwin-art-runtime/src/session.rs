@@ -371,8 +371,8 @@ mod tests {
         assert_eq!(
             &*events.borrow(),
             &[
-                "surface-close",
                 "graphics-close",
+                "surface-close",
                 "engine-close",
                 "provider-clear"
             ]

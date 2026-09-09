@@ -133,8 +133,14 @@ void begin_activity_transition(GraphicsState* state, JNIEnv* env) {
 void shutdown(GraphicsState* state, JNIEnv* env) {
   if (state == nullptr || env == nullptr) return;
   if (state->gpu_surface != nullptr && state->owner_wake_bound) {
-    (void)darwin_art_surface_set_owner_wake(state->gpu_surface, nullptr,
-                                             nullptr);
+    // A window-close callback can destroy the active surface before ART's
+    // owner-thread teardown runs. Consult the lock-free active-surface slot
+    // before touching the opaque handle; a stale GraphicsState borrow must
+    // fail closed instead of dereferencing freed Objective-C state.
+    if (darwin_art_surface_active_gpu() == state->gpu_surface) {
+      (void)darwin_art_surface_set_owner_wake(state->gpu_surface, nullptr,
+                                               nullptr);
+    }
     state->owner_wake_bound = false;
   }
   auto clear_class = [env](jclass* reference) {

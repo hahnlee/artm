@@ -11952,3 +11952,10 @@ or admission exception was added.
   42 without an app-side exception. A SIGABRT remains after the successful
   present, isolating the next compatibility work to VM/provider teardown and
   owner ordering; no APK rewrite or probe-only rendering fallback was added.
+
+- Checkpoint 530: corrected the native shutdown dependency order. The ART
+  graphics callback borrows the Metal surface while clearing owner-wake and
+  draining GPU state, so SurfaceSession must remain alive until GraphicsSession
+  closes. Rust now removes the surface lease first but destroys the surface
+  after the graphics close; lifecycle tests pass. Re-run the real Button gate
+  with a freshly linked graphics dylib before treating the SIGABRT as resolved.

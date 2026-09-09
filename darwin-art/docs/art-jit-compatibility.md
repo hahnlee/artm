@@ -7306,3 +7306,11 @@ incomplete and still requires managed caller unwind validation.
   (`result=42`) with no graphics exception. The process still aborts after this
   successful frame during teardown, so the next target is post-present shutdown
   ownership rather than APK loading or rendering capability.
+
+- Checkpoint 530: isolated the teardown SIGABRT to the Rust owner transaction
+  closing `SurfaceSession` before ART's graphics callback. GraphicsState keeps
+  a borrowed surface handle for owner-wake cleanup, so this violated the
+  lifetime contract. The shutdown transaction now keeps the surface alive
+  through `GraphicsSession::close` and only then destroys it; runtime ordering
+  tests pass. A fresh graphics relink is still required to re-run the end-to-end
+  Button gate after this lifetime repair.
