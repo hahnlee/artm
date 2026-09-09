@@ -7889,3 +7889,10 @@ incomplete and still requires managed caller unwind validation.
   method/string/native cases, interface/default methods, JNI resolution, and
   read-modify-write stress. Lifecycle `136` and Darwin remote unwind `137`
   remain the only previously identified blockers.
+
+- Checkpoint 611: Ran `1900-track-alloc` through `1917-get-stack-frame`
+  (18 JVMTI/runtime tests); every interpreter and live-JIT lane passed.
+  `1919-vminit-thread-start-timing` is the sole failure in the next slice:
+  its output shows the JVMTI `VMInit` callback is missing and the harness-owned
+  thread is reported as `ART run-test main`, so this is an agent-install/event
+  ordering and launcher thread identity gap rather than a JIT codegen failure.
