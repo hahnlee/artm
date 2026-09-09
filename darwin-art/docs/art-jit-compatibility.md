@@ -7851,3 +7851,11 @@ incomplete and still requires managed caller unwind validation.
   `150-loadlibrary` passed interpreter, JIT, and unmodified-source lanes.
   `136-daemon-jni-shutdown` remains the owner-thread coordinator gap, and the
   Darwin remote half of `137-cfi` remains open.
+
+- Checkpoint 606: Revalidated the lifecycle split after the process-exit hook.
+  `150-loadlibrary` again passed all three lanes with the restored upstream
+  test harness, confirming that APK-only `_exit` handling does not truncate
+  normal ART test output. `136-daemon-jni-shutdown` still reproduces the ART
+  shutdown-thread fault under the standard `DestroyJavaVM` path; its fix must
+  replace the retained owner pointer through the complete run coordinator,
+  rather than changing process exit policy.
