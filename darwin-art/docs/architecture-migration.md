@@ -12837,3 +12837,9 @@ or admission exception was added.
   was still empty (`stdout=0/42`) in AOSP 096 GC stress, proving that flush alone
   does not establish the run-test output contract. The experiment was fully
   reverted, the host rebuilt, and the ordinary 497 three-lane regression passed.
+- Checkpoint 671: Refreshed four entries that were marked failed only in the
+  historical corpus snapshot: 126 multidex, 2031 compiled-frame deopt, 2271
+  profile inline cache, and 304 method tracing now pass interpreter, JIT, and
+  unmodified optimized lanes individually. Historical summaries must not be
+  treated as current failures; forced-GC stress (149/096) remains the active
+  performance/lifecycle gap.

@@ -8273,3 +8273,10 @@ incomplete and still requires managed caller unwind validation.
   still observed `stdout=0/42`, so the flush was insufficient and all changes
   were reverted. The host was rebuilt and unmodified 497 passed interpreter,
   JIT, and interpreter+optimized lanes; DestroyJavaVM remains authoritative.
+- Checkpoint 671: Re-ran the stale corpus failures individually on the restored
+  host. Unmodified 126-miranda-multidex, 2031-zygote-compiled-frame-deopt,
+  2271-profile-inline-cache, and 304-method-tracing each pass all three lanes;
+  the old six-failure summary is therefore not current evidence. The only
+  outstanding reproduced stress concern is 149-suspend-all-stress/096 GC
+  stress runtime, which remains a teardown/cadence investigation rather than
+  a bytecode correctness failure.
