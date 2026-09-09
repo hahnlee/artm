@@ -8552,3 +8552,9 @@ incomplete and still requires managed caller unwind validation.
   pass. The failure is therefore specific to the concurrent/thread-stress
   reference path rather than the basic JNI bridge, and remains open for a
   targeted transition fix.
+- Checkpoint 719: Defined `DARWIN_ART_REFERENCE_BASE=0x10000000000` in the
+  Darwin runtime toolchain so assembly JNI/trampoline normalization guards are
+  enabled consistently with the C++ reference window. A full incremental
+  graphics/JIT rebuild completed, but `004-ThreadStress` still reproduces the
+  same `0x70000770` receiver fault. The executing path is therefore not fixed
+  by the generic-JNI macro alone and must be traced to its actual entry stub.

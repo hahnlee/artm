@@ -17,6 +17,10 @@ pub(crate) fn runtime_cpp_command(includes: &[&Path]) -> Command {
         "-DART_FORCE_USE_READ_BARRIER",
         "-DART_FRAME_SIZE_LIMIT=1744",
         "-DART_BASE_ADDRESS=0x70000000",
+        // Assembly JNI/trampoline entrypoints use this explicit host window
+        // constant to lift logical 32-bit ArtMethod/reference values before
+        // native dereferences. Keep it aligned with kArtCompressedReferenceBase.
+        "-DDARWIN_ART_REFERENCE_BASE=0x10000000000",
         "-DART_BASE_ADDRESS_MIN_DELTA=(-0x1000000)",
         "-DART_BASE_ADDRESS_MAX_DELTA=0x1000000",
         "-DART_STACK_OVERFLOW_GAP_arm=8192",

@@ -13079,3 +13079,8 @@ or admission exception was added.
   optimized/JIT, and unmodified-source modes. Basic JNI ABI conversion is
   intact; the outstanding defect is isolated to the concurrent thread-stress
   reference/transition path.
+- Checkpoint 719: The toolchain now exports the explicit Darwin reference-base
+  macro required by assembly JNI/trampoline guards, and the complete graphics
+  runtime was rebuilt. Identical `004-ThreadStress` failure evidence means the
+  active fault is in another transition/stub path; no compatibility claim or
+  fallback was introduced.
