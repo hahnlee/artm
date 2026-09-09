@@ -12339,3 +12339,11 @@ or admission exception was added.
    preserving guest-root isolation for ordinary app files. This is a narrow
    host adaptation, not an APK change or a completion of general native
    library compatibility.
+
+590. **2026-09-09 — representative optimized JIT lanes remain green**
+
+   After the host-capability relink, unchanged AOSP `001-HelloWorld` and
+   `497-inlining-and-class-loader` both pass interpreter, optimized-JIT, and
+   unmodified-source interpreter+optimized lanes. These are regression
+   evidence for the current ARM64 JIT/runtime path only; the full corpus,
+   stress matrix, and real-app completion criteria remain open.
