@@ -8631,3 +8631,7 @@ incomplete and still requires managed caller unwind validation.
   unmodified-source lanes after patch 0184, confirming the earlier clinit/JNI
   transition regression remains fixed under multithreaded execution. Full
   concurrency matrix and real APK acceptance remain open.
+- Checkpoint 735: `802-deoptimization` passes all three lanes, covering
+  exception-handler entry and deoptimization state recovery from compiled
+  code. Additional deopt/OSR combinations and real APK acceptance remain
+  outstanding.

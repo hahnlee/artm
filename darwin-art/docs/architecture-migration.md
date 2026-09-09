@@ -13144,3 +13144,7 @@ or admission exception was added.
 - Checkpoint 734: `004-ThreadStress` passes all three runner lanes after the
   referent boundary patch, validating multithreaded JNI/transition behavior.
   The complete concurrency matrix and real-app acceptance remain outstanding.
+- Checkpoint 735: `802-deoptimization` passes interpreter, optimized/JIT, and
+  unmodified-source lanes, validating exception-handler entry and compiled
+  state recovery during deoptimization. More deopt/OSR combinations and
+  real-app acceptance remain open.
