@@ -7516,3 +7516,9 @@ incomplete and still requires managed caller unwind validation.
   about 90 GB: two populated VM disk images consume roughly 58 GB and restore
   IPSW images add about 34 GB. Android SDK (12 GB), Xcode data (8.5 GB), and
   Gradle (3.8 GB) are additional caches outside ART.
+
+- Checkpoint 566: removed the explicitly requested obsolete Android VM project
+  (`android-microvm-runtime`, 1.8 GB) and all Capsule VM/restore data (about
+  90 GB) after confirming no Capsule VM process was running. Docker reported
+  zero images/containers and an unavailable daemon, so no Docker objects were
+  deleted. Host free space rose from about 61 GB to 153 GB.

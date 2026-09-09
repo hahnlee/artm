@@ -12134,3 +12134,8 @@ or admission exception was added.
   Gradle add about 12 GB, 8.5 GB, and 3.8 GB respectively. The previous
   61 GiB ART profile issue is fixed; remaining shortage is host tooling/VM
   storage.
+
+- Checkpoint 566: removed the requested obsolete Android VM project (1.8 GB)
+  and Capsule's stopped VM/restore data (about 90 GB), after confirming no VM
+  process was active. Docker had zero images/containers and no running daemon,
+  so there was no Docker cache to prune. Free space increased to about 153 GB.
