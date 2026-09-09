@@ -13295,3 +13295,7 @@ or admission exception was added.
   `734-duplicate-fields` (including JIT/JNI, VDEX, thread-priority, and
   field-resolution coverage). The intermediate ledger is still 1,060 passed
   and 16 failed; final classification awaits worker termination.
+- Checkpoint 777: Corpus workers remain live and have reached `912-classes`,
+  covering heap iteration, JVMTI attachment, method metadata, stack traces,
+  and class inspection. Intermediate ledger is 1,061 passed and 15 failed;
+  final classification remains pending.
