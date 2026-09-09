@@ -13255,3 +13255,8 @@ or admission exception was added.
   entrypoint before instrumentation bridges and rebuilt/audited the graphics
   runtime. `031-class-attributes` still faults at a boot/shared-AOT PC; the
   remaining gap is boot-image/shared-range publication.
+- Checkpoint 768: Confirmed the remaining fault is in boot-image/shared AOT
+  code: debug publication logs contain app/JIT ranges but no range covering
+  `0x100704a738c`. A visitor experiment was rejected because runtime shadow
+  patch offsets differ across generated copies; no unverified boot-image code
+  was retained. `031-class-attributes` remains open.
