@@ -8704,3 +8704,7 @@ incomplete and still requires managed caller unwind validation.
   optimized/JIT, and unmodified-source lanes, validating atomic get-and-add
   VarHandle read-modify-write semantics. Remaining modes and real APK
   acceptance remain open.
+- Checkpoint 754: `2239-varhandle-perf-vh-gab` passes interpreter,
+  optimized/JIT, and unmodified-source lanes, validating atomic get-and-bitwise
+  read-modify-write semantics. Remaining modes and real APK acceptance remain
+  open.
