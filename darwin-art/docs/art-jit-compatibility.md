@@ -8755,3 +8755,7 @@ incomplete and still requires managed caller unwind validation.
   table, dropping application JIT ranges and misrouting implicit-null faults
   to user SIGSEGV handlers. Rebuilt and audited the graphics runtime link,
   then `004-SignalTest` passed all three lanes.
+- Checkpoint 766: Reproduced `031-class-attributes` after the registry fix;
+  its app-AOT generated code still faults on an implicit-null access without a
+  published range. This is a distinct app-AOT registration gap (not the fixed
+  JIT table exhaustion) and remains the next runtime repair target.

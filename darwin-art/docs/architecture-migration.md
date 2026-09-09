@@ -13247,3 +13247,7 @@ or admission exception was added.
   table, dropping application JIT ranges and misrouting implicit-null faults
   to user SIGSEGV handlers. Graphics runtime link audit and `004-SignalTest`
   now pass all three lanes.
+- Checkpoint 766: Reproduced `031-class-attributes` after the registry fix;
+  app-AOT generated code still faults on an implicit-null access without a
+  published range. This distinct app-AOT registration gap remains the next
+  runtime repair target.
