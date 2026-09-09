@@ -8722,3 +8722,7 @@ incomplete and still requires managed caller unwind validation.
   lanes now all pass; the earlier failure was stale compiler-surface state,
   not a runtime semantic failure. Full corpus and Blue Archive acceptance
   remain open.
+- Checkpoint 758: Re-ran `039-join-main`, a core thread-join/concurrency
+  regression, and all interpreter, optimized/JIT, and unmodified-source lanes
+  pass. The corpus ledger still contains stale failures requiring refresh;
+  full matrix and Blue Archive acceptance remain open.

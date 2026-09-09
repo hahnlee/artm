@@ -13218,3 +13218,7 @@ or admission exception was added.
   generic compiler API companion; all three runner lanes pass. The prior
   failure was stale compiler-surface state, not a runtime semantic failure.
   Full corpus and Blue Archive acceptance remain open.
+- Checkpoint 758: Re-ran `039-join-main`, a core thread-join/concurrency
+  regression; all three runner lanes pass. The corpus ledger still contains
+  stale failures requiring refresh. Full matrix and Blue Archive acceptance
+  remain open.
