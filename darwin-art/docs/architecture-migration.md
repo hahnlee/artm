@@ -11873,3 +11873,10 @@ or admission exception was added.
   prior `default` damage is an APFS sparsebundle lifecycle failure from live
   mounted compaction, not APK/Git corruption. The 61G default profile remains
   the storage bottleneck and must never be compacted while mounted.
+
+- Checkpoint 517: the ELF/JNI acceptance path now returns `42` with
+  `ExceptionCheck()==0`; the host still receives SIGABRT during ART teardown.
+  The defect is therefore post-invocation lifecycle cleanup
+  (`DetachCurrentThread`/`DestroyJavaVM` or a late native owner), not APK
+  loading or JNI argument marshalling. Keep this as the next runtime repair
+  target instead of adding a probe-only bypass.

@@ -7217,3 +7217,10 @@ incomplete and still requires managed caller unwind validation.
   ensured/mounted. The damaged `default` profile remains APFS sparsebundle
   corruption caused by compacting a mounted live bundle; APK and Git objects
   were not damaged. Disk pressure is dominated by the 61G default bundle.
+
+- Checkpoint 517: a fresh `probe-runtime-elf-jni` run reaches the real
+  `runAcceptance()` JNI call with result `42` and no pending exception, then
+  aborts during ART process teardown. This separates the remaining failure
+  from ELF loading/JNI ABI execution: the next fix must instrument and repair
+  the `DetachCurrentThread`/`DestroyJavaVM` shutdown contract, not weaken the
+  native acceptance gate.
