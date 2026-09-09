@@ -7284,3 +7284,10 @@ incomplete and still requires managed caller unwind validation.
   stale-link boundary and exposed an earlier classpath contract issue: the
   button DEX path is rejected by the process `PathClassLoader` (status 5).
   This is the next loader-input fix; no APK mutation or fallback was introduced.
+
+- Checkpoint 527: rebuilt the graphics bootstrap archive and reran the real
+  Button path against the fresh dylib. Link-time registration is now current;
+  launch reaches `ClassLoader` construction but rejects the button DEX location
+  (status 5, `ClassLoader referenced unknown path`). The next repair is the
+  detached `CreatePathClassLoader` input/location contract, before revisiting
+  libcore native registration.

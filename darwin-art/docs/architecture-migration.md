@@ -11933,3 +11933,8 @@ or admission exception was added.
   passes. The next real-app run now fails earlier because the button DEX path
   is rejected by the process PathClassLoader (status 5), so loader input
   construction is the next AOSP contract to repair.
+
+- Checkpoint 527: after a forced graphics bootstrap rebuild, the real Button
+  process reaches loader construction but fails with AOSP's unknown-path warning
+  for the button DEX (status 5). This isolates the next change to the detached
+  PathClassLoader location/input contract; current-source linking is verified.
