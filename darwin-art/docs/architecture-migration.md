@@ -13070,3 +13070,8 @@ or admission exception was added.
   and unmodified-source modes. Exception dispatch and stack restoration now
   have a differential regression result; the remaining runtime boundaries are
   still explicitly tracked rather than treated as complete.
+- Checkpoint 717: Region diagnostics on the failing `004-ThreadStress` run
+  classify the PC as an executable generated-code mapping (`prot=0x5`,
+  `max=0x7`), not a W^X/JIT publication fault. The bad receiver remains in
+  the logical `0x70000000` compressed-reference window, narrowing the next
+  implementation task to JNI/thread transition decoding under concurrency.

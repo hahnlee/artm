@@ -8540,3 +8540,10 @@ incomplete and still requires managed caller unwind validation.
   and unmodified-source modes all passed. This adds verified throw/catch and
   exceptional control-flow coverage to the JIT evidence, while monitor, GC,
   JNI, deoptimization, and real APK startup remain unverified.
+- Checkpoint 717: Rebuilt the graphics runtime with fault-region mapping and
+  reran `004-ThreadStress`. The failure is reproducible in the interpreter
+  sandbox: `pc` lies in an executable Mach region (`prot=0x5`,
+  `max=0x7`), while the faulting receiver is `0x70000770` and the access is
+  `0x700007db`. This rules out a missing execute transition and points to a
+  managed compressed-reference value crossing the JNI/thread-stress native
+  boundary without host-pointer decoding. No fallback was added.
