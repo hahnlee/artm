@@ -7966,3 +7966,12 @@ incomplete and still requires managed caller unwind validation.
   cooperative stopped-child handoff only when Mach access is unavailable. The
   provider smoke gate passes with strict local/register/thread/context checks;
   no pinned AOSP test remains failing in the currently audited corpus slice.
+
+- Checkpoint 620: Resumed the compatibility audit against the active generated
+  shadows. Production `runtime/jit/jit.cc`, `compiler/jit/jit_compiler.cc`, and
+  `compiler/optimizing/inliner.cc` contain only AOSP admission checks; no
+  `DarwinJitCanCompile` call, opcode/method-shape allowlist, or Darwin-only JIT
+  launch gate is present. `PrepareForOsr`/`MaybeDoOnStackReplacement` remain
+  enabled through the upstream ART path. The eligibility helper is retained
+  only for diagnostic acceptance probes. Full real-app and unabridged corpus
+  validation remain open; this checkpoint does not claim overall completion.

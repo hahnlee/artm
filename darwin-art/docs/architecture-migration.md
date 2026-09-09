@@ -12581,3 +12581,11 @@ or admission exception was added.
   cooperative stopped-child handoff only when Mach access is unavailable. The
   provider smoke gate passes with strict local/register/thread/context checks;
   no pinned AOSP test remains failing in the currently audited corpus slice.
+
+- Checkpoint 620: Re-audited the active ART runtime/compiler shadows after
+  resuming the goal. The production JIT path has no Darwin admission helper,
+  bytecode/method-shape allowlist, or launch gate; it follows AOSP checks and
+  keeps the upstream OSR preparation/dispatch path enabled. The Darwin
+  eligibility header is diagnostic-probe-only. Remaining work is end-to-end
+  validation of the complete corpus and real unmodified applications, not a
+  production JIT gate removal.
