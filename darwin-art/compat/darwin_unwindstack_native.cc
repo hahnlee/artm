@@ -95,6 +95,7 @@ struct DarwinAotCodeRange {
 // reusing a loop's trace across recursive or concurrently changing frames.
 struct LocalManagedBacktraceCache {
   uint64_t caller_pc = 0;
+  uint64_t frame_pointer = 0;
   uint64_t managed_sp = 0;
   uint64_t shadow_frame = 0;
   std::vector<unwindstack::FrameData> frames;
@@ -1134,7 +1135,9 @@ bool DarwinNativeUnwind(Maps* maps, JitDebug* jit_debug, DexFiles* dex_files, si
       ((registered_managed_sp != 0 &&
         g_local_managed_backtrace_cache.managed_sp == registered_managed_sp) ||
        (registered_managed_sp == 0 && has_shadow_frame &&
-        g_local_managed_backtrace_cache.shadow_frame == shadow_frame));
+        g_local_managed_backtrace_cache.shadow_frame == shadow_frame) ||
+       (registered_managed_sp == 0 && !has_shadow_frame &&
+        g_local_managed_backtrace_cache.frame_pointer == frame_pointer));
   if (cache_key_matches) {
     data.frames = g_local_managed_backtrace_cache.frames;
     if (data.frames.size() > limit) data.frames.resize(limit);
@@ -1186,8 +1189,9 @@ bool DarwinNativeUnwind(Maps* maps, JitDebug* jit_debug, DexFiles* dex_files, si
       caller_record[0], &walk);
   if (collected) {
     AppendManagedFrames(&walk);
-    if ((walk.has_registered_quick_frame || has_shadow_frame) && caller_pc != 0) {
+    if (caller_pc != 0) {
       g_local_managed_backtrace_cache.caller_pc = caller_pc;
+      g_local_managed_backtrace_cache.frame_pointer = frame_pointer;
       g_local_managed_backtrace_cache.managed_sp = walk.registered_managed_sp;
       g_local_managed_backtrace_cache.shadow_frame = has_shadow_frame ? shadow_frame : 0;
       g_local_managed_backtrace_cache.frames = data.frames;
