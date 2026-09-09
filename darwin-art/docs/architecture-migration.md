@@ -12370,3 +12370,10 @@ or admission exception was added.
   (2669/3080 methods) and boot image; fresh `039-join-main` interpreter, JIT,
   and unmodified-source lanes all pass. Full JIT/GC/native-app completion is
   still open.
+
+- Checkpoint 594: verified exception diagnostics after moving the launcher to
+  a Java thread. The harness output adapter removes only host reflection/
+  dispatch frames and corrects the resulting common-frame count; unchanged
+  `008-exceptions` now passes interpreter, JIT, and unmodified-source lanes.
+  Baseline/button DEX contracts are 2684/3094 methods. The full compatibility
+  target remains open.

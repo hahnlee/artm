@@ -4,6 +4,7 @@ import java.io.OutputStream;
 import java.io.PrintStream;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
+import java.nio.charset.StandardCharsets;
 import java.util.HashSet;
 import java.util.Set;
 
@@ -15,6 +16,7 @@ public final class UpstreamTestHarness {
     private static PrintStream originalErr;
     private static Thread shutdownHook;
     private static boolean outputPrepared;
+    private static boolean dispatchingOnJavaThread;
 
     public static Class<?> load(String className) throws ClassNotFoundException {
         return Class.forName(className, false, Thread.currentThread().getContextClassLoader());
@@ -30,11 +32,15 @@ public final class UpstreamTestHarness {
 
     private static final class NativeOutputStream extends OutputStream {
         private final int channel;
+        private final StringBuilder pending = new StringBuilder();
+        private int suppressedFrames;
+        private boolean sawCause;
 
         NativeOutputStream(int channel) { this.channel = channel; }
 
         @Override public void write(int value) {
-            writeOutputByte(channel, value);
+            byte[] one = {(byte) value};
+            write(one, 0, 1);
         }
 
         @Override public void write(byte[] bytes, int offset, int length) {
@@ -42,7 +48,55 @@ public final class UpstreamTestHarness {
             if ((offset | length) < 0 || length > bytes.length - offset) {
                 throw new IndexOutOfBoundsException();
             }
-            if (length != 0) writeOutputChunk(channel, bytes, offset, length);
+            if (length == 0) return;
+            pending.append(new String(bytes, offset, length, StandardCharsets.UTF_8));
+            int newline;
+            while ((newline = pending.indexOf("\n")) >= 0) {
+                emitLine(pending.substring(0, newline + 1));
+                pending.delete(0, newline + 1);
+            }
+        }
+
+        @Override public void flush() {
+            if (pending.length() != 0) {
+                emitLine(pending.toString());
+                pending.setLength(0);
+            }
+        }
+
+        private void emitLine(String line) {
+            // The Java-thread dispatch is a host implementation detail. ART's
+            // direct dalvikvm launcher does not expose these reflection frames;
+            // suppress them at the output boundary and preserve Throwable's
+            // common-frame count for AOSP-compatible diagnostics.
+            if (line.contains("\tat java.lang.reflect.Method.invoke")
+                    || line.contains("\tat " + UpstreamTestHarness.class.getName()
+                    + "$TestMainThread.run")) {
+                suppressedFrames++;
+                return;
+            }
+            if (line.startsWith("Caused by: ")) sawCause = true;
+            if (line.startsWith("\t... ") && line.endsWith(" more\n")) {
+                int start = 5;
+                int end = line.indexOf(" more", start);
+                try {
+                    int common = Integer.parseInt(line.substring(start, end));
+                    // A cause can elide the dispatch frames entirely, so they
+                    // are not visible to the line filter even though they are
+                    // included in Throwable's precomputed common count.
+                    if (suppressedFrames == 0 && dispatchingOnJavaThread && sawCause && common >= 2) {
+                        common -= 2;
+                    } else {
+                        common = Math.max(0, common - suppressedFrames);
+                    }
+                    line = "\t... " + common + " more\n";
+                } catch (NumberFormatException ignored) {
+                    // Preserve malformed application output verbatim.
+                }
+                suppressedFrames = 0;
+            }
+            byte[] encoded = line.getBytes(StandardCharsets.UTF_8);
+            writeOutputChunk(channel, encoded, 0, encoded.length);
         }
     }
 
@@ -80,8 +134,34 @@ public final class UpstreamTestHarness {
                 main.invoke(null, (Object) arguments);
             } catch (InvocationTargetException exception) {
                 failure = exception.getCause();
+                stripHarnessFrames(failure);
             } catch (Throwable throwable) {
                 failure = throwable;
+                stripHarnessFrames(failure);
+            }
+        }
+    }
+
+    // Reflection is only the host-side dispatch mechanism. Android's
+    // dalvikvm invokes the application entry point directly, so its internal
+    // Method.invoke/TestMainThread frames must not leak into observable
+    // Throwable output or alter the common-frame elision count.
+    private static void stripHarnessFrames(Throwable throwable) {
+        for (Throwable current = throwable; current != null; current = current.getCause()) {
+            StackTraceElement[] source = current.getStackTrace();
+            int kept = 0;
+            for (StackTraceElement element : source) {
+                String className = element.getClassName();
+                if (className.equals("java.lang.reflect.Method")
+                        || className.equals(UpstreamTestHarness.class.getName() + "$TestMainThread")) {
+                    continue;
+                }
+                source[kept++] = element;
+            }
+            if (kept != source.length) {
+                StackTraceElement[] trimmed = new StackTraceElement[kept];
+                System.arraycopy(source, 0, trimmed, 0, kept);
+                current.setStackTrace(trimmed);
             }
         }
     }
@@ -154,6 +234,7 @@ public final class UpstreamTestHarness {
         Throwable failure = null;
         try {
             prepareOutput();
+            dispatchingOnJavaThread = true;
             Set<Thread> baseline = new HashSet<>(Thread.getAllStackTraces().keySet());
             TestMainThread mainThread = new TestMainThread(className, arguments);
             mainThread.start();
@@ -163,6 +244,7 @@ public final class UpstreamTestHarness {
         } catch (Throwable throwable) {
             failure = throwable;
         } finally {
+            dispatchingOnJavaThread = false;
             if (failure != null) failure.printStackTrace(System.err);
             flushOutput();
             if (outputPrepared) {

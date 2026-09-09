@@ -446,7 +446,7 @@ pub(crate) fn build_dex_probe(root: &Path) -> Result<()> {
     verify_dex_contract(
         &output,
         56,
-        2669,
+        2684,
         &[
             "Ldev/darwinart/probe/ProbeContext;",
             "Ldev/darwinart/probe/ProbeContext$BaseContext;",
