@@ -12143,3 +12143,11 @@ or admission exception was added.
 - Checkpoint 567: the full Cargo workspace/all-target suite now exits 0 after
   storage recovery and profile recreation. Profile 8/8, runtime 27/27,
   engine 5/5, xtask 18/18, and the ELF/FS/host/provider suites all pass.
+
+- Checkpoint 568: rebuilt the native graphics/JIT closure from the clean
+  workspace. The incremental build reused all 106 ART compiler and 27
+  dex2oat objects; `audit-runtime-graphics-link-fast` passed with registrar
+  closure complete (51 symbols, zero fake/host ICU/fmt/CoreText fallbacks).
+  Host free space remains about 153 GB. The existing AOSP corpus ledger still
+  records 1,012 passing and 32 known failing/timeout cases; those failures
+  remain the next compatibility work rather than being masked as passes.

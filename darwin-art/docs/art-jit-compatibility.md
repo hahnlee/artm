@@ -7528,3 +7528,11 @@ incomplete and still requires managed caller unwind validation.
   8/8, runtime 27/27, engine 5/5, xtask 18/18, ELF/FS/host/provider suites,
   and all other workspace targets. The storage fix did not introduce Rust ABI
   or lifecycle regressions.
+
+- Checkpoint 568: rebuilt the native graphics/JIT closure from the clean
+  workspace. The incremental build reused all 106 ART compiler and 27
+  dex2oat objects; `audit-runtime-graphics-link-fast` passed with registrar
+  closure complete (51 symbols, zero fake/host ICU/fmt/CoreText fallbacks).
+  Host free space remains about 153 GB. The existing AOSP corpus ledger still
+  records 1,012 passing and 32 known failing/timeout cases; those failures
+  remain the next compatibility work rather than being masked as passes.
