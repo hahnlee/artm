@@ -8415,6 +8415,10 @@ incomplete and still requires managed caller unwind validation.
   fault remained. The experiment was removed; the mismatch is not merely an
   uninitialized frame slot. Next, trace the producer of the low-window code
   and its method identity.
+- Checkpoint 697: AOSP frame generation review found the leaf/no-current-method
+  path can legitimately use an empty quick frame, while signal recovery assumes
+  `sp[0]` is the current method. This is a concrete frame-contract hypothesis,
+  but Chrome has not yet been proven to use that path; no code change is kept.
 - Checkpoint 696: Compared 64-bit and 32-bit `ArtMethod` entrypoint accessors
   for Chrome's fault-frame `sp[0]`; both returned zero. This rules out a simple
   image-pointer-size selection bug. The slot is likely not the executing

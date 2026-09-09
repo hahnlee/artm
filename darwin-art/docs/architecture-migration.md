@@ -12961,3 +12961,7 @@ or admission exception was added.
 - Checkpoint 696: Both k64 and k32 entrypoint reads from the fault-frame
   `sp[0]` returned zero. Pointer-size selection is not the cause; inspect the
   actual quick-frame boundary and tagged managed-stack state used by signals.
+- Checkpoint 697: The pinned AOSP generator permits a zero-size frame for leaf
+  methods that do not require the current method, whereas the signal handler
+  reads `sp[0]` as a method. This frame-contract mismatch is now the next
+  measured target; implementation remains unchanged pending PC/frame proof.
