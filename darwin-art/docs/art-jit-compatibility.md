@@ -7088,3 +7088,7 @@ incomplete and still requires managed caller unwind validation.
   graph/image cleanup. Android C++ runtimes may pass a null `__cxa_atexit`
   cookie; those registrations are now associated with their destructor's
   owning image by code address so image finalization can drain them safely.
+- Checkpoint 489: explicitly rebuilt the DSO lifecycle facade and reran the
+  linked runtime. The current executable still reaches the same abort, so the
+  null-cookie fix is committed but has not yet been proven in the final link
+  graph; archive provenance must be audited before judging the semantic fix.
