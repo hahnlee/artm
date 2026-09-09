@@ -11749,3 +11749,7 @@ or admission exception was added.
   change; the abort is unchanged and still occurs before the lifecycle callback
   diagnostics. This rules out image-registry ordering as the immediate cause
   and leaves the guest finalizer/ELF drop path as the active boundary.
+- Checkpoint 486: reran after rebuilding the Rust ELF loader as well; the first
+  libc++ image still aborts before the Rust drop boundary can report progress.
+  The next step is to instrument the loader's fini-array invocation itself and
+  verify whether a guest finalizer faults before DSO lifecycle finalization.
