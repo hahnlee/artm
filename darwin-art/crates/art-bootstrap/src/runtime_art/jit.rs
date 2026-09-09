@@ -369,12 +369,6 @@ pub(crate) fn build_jit_compiler(root: &Path) -> Result<()> {
     run_command(
         Command::new("patch")
             .args(["--batch", "--forward", "-p1", "-i"])
-            .arg(root.join("patches/art/0066-darwin-arm64-class-load-boundary.patch"))
-            .current_dir(build.join("patched-source")),
-    )?;
-    run_command(
-        Command::new("patch")
-            .args(["--batch", "--forward", "-p1", "-i"])
             .arg(root.join("patches/art/0068-darwin-string-resolution-boundary.patch"))
             .current_dir(build.join("patched-source")),
     )?;
@@ -484,19 +478,7 @@ pub(crate) fn build_jit_compiler(root: &Path) -> Result<()> {
     run_command(
         Command::new("patch")
             .args(["--batch", "--forward", "-p1", "-i"])
-            .arg(root.join("patches/art/0092-darwin-unrestricted-aosp-invokes.patch"))
-            .current_dir(build.join("patched-source")),
-    )?;
-    run_command(
-        Command::new("patch")
-            .args(["--batch", "--forward", "-p1", "-i"])
             .arg(root.join("patches/art/0093-darwin-aosp-jit-admission.patch"))
-            .current_dir(build.join("patched-source")),
-    )?;
-    run_command(
-        Command::new("patch")
-            .args(["--batch", "--forward", "-p1", "-i"])
-            .arg(root.join("patches/art/0123-darwin-unrestricted-aosp-loads.patch"))
             .current_dir(build.join("patched-source")),
     )?;
     run_command(

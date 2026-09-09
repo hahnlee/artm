@@ -13003,3 +13003,10 @@ or admission exception was added.
   `optimizing_compiler.cc` hunks, proving that the graph is still cache-state
   dependent. Fix this patch-closure failure before the next runtime fault
   experiment; no additional runtime behavior was claimed.
+- Checkpoint 705: The patch graph no longer applies stale `0066`, `0092`, or
+  `0123` transformations that are already present in pinned AOSP; the runtime
+  shadow identity is now `v29`. A forced restage followed by the incremental
+  graphics-link audit passed (`registrar=51`, zero fake symbols and zero
+  CoreText/host ICU/fmt leakage), establishing a reproducible clean build
+  boundary. Runtime compatibility work continues at the unresolved Chrome
+  native/JNI fault boundary.

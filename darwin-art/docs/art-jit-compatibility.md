@@ -8467,3 +8467,10 @@ incomplete and still requires managed caller unwind validation.
   `optimizing_compiler.cc` hunks), so the current successful binary still relies
   on cached shadow state. Next repair the patch-closure reproducibility before
   collecting further low-window PC evidence.
+- Checkpoint 705: Removed obsolete patch applications for `0066`, `0092`, and
+  `0123`, each already reflected in the pinned AOSP optimizing compiler, and
+  bumped the runtime shadow identity. After explicitly restaging the runtime
+  shadow, `audit-runtime-graphics-link-incremental` completed with
+  `registrar=51 fake-symbols=0 host-icu=0 host-fmt=0 CoreText=0`; the ARM64 JIT
+  archive and runtime bootstrap were rebuilt from the clean shadow. This fixes
+  build reproducibility only; Chrome's unresolved native fault remains open.
