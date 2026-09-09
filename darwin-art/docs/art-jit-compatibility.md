@@ -7762,3 +7762,10 @@ incomplete and still requires managed caller unwind validation.
   `008-exceptions` now passes interpreter, JIT, and unmodified-source lanes.
   Baseline/button DEX contracts are 2684/3094 methods. The full compatibility
   target remains open.
+
+- Checkpoint 595: a fresh 020–049 corpus window initially exposed only the
+  launcher exception-prefix mismatch in `034-call-null` and `038-inner-null`.
+  After restoring Android's `Exception in thread "main"` presentation, both
+  tests pass interpreter, JIT, and unmodified-source lanes; `039-join-main`
+  remains green as well. No new bytecode/JIT semantic failure appeared in the
+  window. Full corpus and real-app criteria remain open.

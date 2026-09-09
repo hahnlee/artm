@@ -245,7 +245,10 @@ public final class UpstreamTestHarness {
             failure = throwable;
         } finally {
             dispatchingOnJavaThread = false;
-            if (failure != null) failure.printStackTrace(System.err);
+            if (failure != null) {
+                System.err.print("Exception in thread \"main\" ");
+                failure.printStackTrace(System.err);
+            }
             flushOutput();
             if (outputPrepared) {
                 System.setOut(originalOut);
