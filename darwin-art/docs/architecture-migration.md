@@ -13148,3 +13148,6 @@ or admission exception was added.
   unmodified-source lanes, validating exception-handler entry and compiled
   state recovery during deoptimization. More deopt/OSR combinations and
   real-app acceptance remain open.
+- Checkpoint 736: `597-deopt-new-string` passes all three runner lanes,
+  validating string allocation/construction across a debuggable deoptimization
+  boundary. Broader allocation coverage and real-app acceptance remain open.

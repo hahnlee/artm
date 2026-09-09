@@ -8635,3 +8635,7 @@ incomplete and still requires managed caller unwind validation.
   exception-handler entry and deoptimization state recovery from compiled
   code. Additional deopt/OSR combinations and real APK acceptance remain
   outstanding.
+- Checkpoint 736: `597-deopt-new-string` passes interpreter, optimized/JIT,
+  and unmodified-source lanes, exercising allocation/string construction
+  across a debuggable deoptimization boundary. Broader allocation and real
+  APK coverage remain open.
