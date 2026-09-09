@@ -498,6 +498,48 @@ pub(crate) fn audit_runtime_link(root: &Path) -> Result<()> {
             "-o",
         ])
         .arg(&runtime_library);
+    // RTLD_LOCAL OpenJDK native modules import these process-wide Bionic
+    // shims. Exporting the exact ABI set keeps their state in one Rust owner
+    // instead of embedding a second facade instance in each module.
+    for symbol in [
+        "_darwin_art_bionic_access",
+        "_darwin_art_bionic_chmod",
+        "_darwin_art_bionic_close",
+        "_darwin_art_bionic_closedir",
+        "_darwin_art_bionic_fchmod",
+        "_darwin_art_bionic_fchown",
+        "_darwin_art_bionic_fd_export_for_scm",
+        "_darwin_art_bionic_fs_fcntl_core",
+        "_darwin_art_bionic_fs_owns_fd_core",
+        "_darwin_art_bionic_fs_resolve_private_host_path",
+        "_darwin_art_bionic_fs_statvfs_core",
+        "_darwin_art_bionic_fstat",
+        "_darwin_art_bionic_fsync",
+        "_darwin_art_bionic_getcwd",
+        "_darwin_art_bionic_link",
+        "_darwin_art_bionic_lseek",
+        "_darwin_art_bionic_lstat",
+        "_darwin_art_bionic_mkdir",
+        "_darwin_art_bionic_open",
+        "_darwin_art_bionic_opendir",
+        "_darwin_art_bionic_pathconf",
+        "_darwin_art_bionic_read",
+        "_darwin_art_bionic_readdir",
+        "_darwin_art_bionic_readlink",
+        "_darwin_art_bionic_realpath",
+        "_darwin_art_bionic_rename",
+        "_darwin_art_bionic_socket_broker_close",
+        "_darwin_art_bionic_socket_broker_read",
+        "_darwin_art_bionic_socket_broker_write",
+        "_darwin_art_bionic_stat",
+        "_darwin_art_bionic_statvfs",
+        "_darwin_art_bionic_symlink",
+        "_darwin_art_bionic_unlinkat",
+        "_darwin_art_bionic_utimensat",
+        "_darwin_art_bionic_write",
+    ] {
+        linker.arg(format!("-Wl,-exported_symbol,{symbol}"));
+    }
     super::art_test_exports::apply(&mut linker);
     let description = describe_command(&linker);
     let link_stamp = build_dir.join("runtime-link.fingerprint");

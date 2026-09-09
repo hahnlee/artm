@@ -7108,3 +7108,8 @@ incomplete and still requires managed caller unwind validation.
   slots release successfully. The remaining acceptance failure is earlier in
   the generic fixture's JNI_OnLoad, where java.nio FileSystems initialization
   raises UnixException; this is now isolated from ELF unload correctness.
+- Checkpoint 493: removed the second stateful Rust filesystem facade from the
+  RTLD_LOCAL OpenJDK JNI owner. It now imports the process-wide provider ABI
+  exported by the runtime, and the final probe confirms `getcwd` uses the same
+  process owner (capability_failure=0). The next missing contract is the
+  `java.lang.System.log` registration exposed during generic JNI bootstrap.
