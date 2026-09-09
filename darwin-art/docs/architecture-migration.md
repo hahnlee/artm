@@ -12682,3 +12682,9 @@ or admission exception was added.
   `844` pass across interpreter/JIT/unmodified lanes. Remaining work is
   narrowed to `497` reflection stack framing, `629` VDEX AOT selection, and
   `9999` Parcel compiler API coverage.
+
+- Checkpoint 639: The shared hidden-API compiler projection now includes the
+  Android `Parcel` lifecycle/data methods. After rebuilding framework compat,
+  `9999-input-channel-endpoint-parcel-smoke` passes in interpreter, JIT, and
+  unmodified lanes. Remaining runtime work is limited to `497` reflection
+  stack framing and `629` VDEX AOT selection.

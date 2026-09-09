@@ -8086,3 +8086,10 @@ incomplete and still requires managed caller unwind validation.
   interpreter/JIT/unmodified lanes. Remaining actionable cases are `497`
   (reflection stack frame), `629` (VDEX AOT selection), and `9999` (Parcel API
   compiler surface).
+
+- Checkpoint 639: Added the Android `Parcel` compiler contract (`obtain`, data
+  position, FD query, int read/write, and recycle) to the shared hidden-API
+  projection. Rebuilt framework compat and reran `9999-input-channel-endpoint-
+  parcel-smoke`; interpreter, JIT, and unmodified-source lanes all pass.
+  Remaining runtime gaps are `497` reflection stack framing and `629` VDEX AOT
+  method selection.
