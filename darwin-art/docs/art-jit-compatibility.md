@@ -8746,3 +8746,7 @@ incomplete and still requires managed caller unwind validation.
   invoke-custom, lambda metafactory linkage, and JIT call ABI; interpreter,
   optimized/JIT, and unmodified-source lanes all pass. Remaining corpus
   failures and production APK acceptance remain open.
+- Checkpoint 764: Re-ran `844-exception2`, validating exception propagation,
+  catch handling, and optimized/JIT deoptimization; all interpreter,
+  optimized/JIT, and unmodified-source lanes pass. Remaining corpus failures
+  and production APK acceptance remain open.

@@ -13239,3 +13239,6 @@ or admission exception was added.
   invoke-custom, lambda metafactory linkage, and JIT call ABI; all three runner
   lanes pass. Remaining corpus failures and production APK acceptance remain
   open.
+- Checkpoint 764: Re-ran `844-exception2`, validating exception propagation,
+  catch handling, and optimized/JIT deoptimization; all three runner lanes
+  pass. Remaining corpus failures and production APK acceptance remain open.
