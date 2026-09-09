@@ -8595,3 +8595,7 @@ incomplete and still requires managed caller unwind validation.
   runtime still emits the known Darwin membarrier/sentinel-page warnings;
   these runs did not reproduce a fault. Full compatibility matrix and real
   APK acceptance remain open.
+- Checkpoint 726: `597-deopt-busy-loop` also passes in interpreter,
+  optimized/JIT, and unmodified-source lanes after the same reference-boundary
+  changes. This exercises a debuggable deoptimization loop without falling
+  back from JIT; wider deopt/OSR coverage remains outstanding.

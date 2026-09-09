@@ -13112,3 +13112,6 @@ or admission exception was added.
   optimized/JIT, and unmodified-source lanes. This validates monitor, read
   barrier, and concurrent-GC paths after the reference-boundary changes;
   broader AOSP and real-APK coverage is still required.
+- Checkpoint 726: The debuggable `597-deopt-busy-loop` differential run passes
+  in all three lanes, extending validation to a JIT deoptimization loop. More
+  deopt/OSR cases and real-APK acceptance remain open.
