@@ -120,6 +120,11 @@ pub(crate) fn build_dex_probe(root: &Path) -> Result<()> {
             .arg(root.join("probes/ProbeCanvas.java"))
             .arg(root.join("probes/ProbeView.java"))
             .arg(root.join("probes/ProbeContentRoot.java"))
+            // The baseline probe also exercises the same in-process system
+            // service contract used by installed apps. Without this AOSP
+            // bridge class BinderInternal.getContextObject() can only return
+            // an empty Binder and ResourcesManager fails during bootstrap.
+            .arg(root.join("tools/android-apk-app-runtime/fixture/DarwinServiceBridge.java"))
             .arg(root.join("probes/compile-stubs/android/content/IContentProvider.java"))
             .arg(root.join("probes/compile-stubs/android/content/ContentCaptureOptions.java"))
             .arg(root.join("probes/compile-stubs/android/view/autofill/AutofillManager.java"))

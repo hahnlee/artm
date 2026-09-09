@@ -8488,3 +8488,8 @@ incomplete and still requires managed caller unwind validation.
   status 27 when `ResourcesManager` asks for an unavailable `android.system`
   Binder service. This exposes the next real compatibility task: bootstrap the
   system-service provider for headless app execution.
+- Checkpoint 708: Added the existing `DarwinServiceBridge` source to the
+  baseline probe DEX build so headless execution uses the same Binder contract
+  as installed apps. The rebuilt DEX contains the bridge, but the probe still
+  returns status 27 before service creation completes; the remaining issue is
+  bridge class initialization/registration timing, not missing DEX packaging.

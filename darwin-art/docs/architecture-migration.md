@@ -13023,3 +13023,9 @@ or admission exception was added.
   the headless process has no `android.system` Binder service. The next
   architectural boundary is system-service bootstrap, not another compiler
   fallback or gate.
+- Checkpoint 708: Baseline DEX generation now includes the production
+  `DarwinServiceBridge` implementation, aligning headless Binder lookup with
+  installed-app execution. A rebuilt DEX confirms the class is packaged, yet
+  `ResourcesManager` still receives a null service manager (status 27), so the
+  next boundary is class initialization/registration timing rather than a
+  second mock service implementation.
