@@ -7743,3 +7743,7 @@ incomplete and still requires managed caller unwind validation.
    transitioned through dalvikvm's normal thread-exit path. Two experimental
    monitor/native-peer fixes were reverted after failing to prove the result;
    the lifecycle boundary remains an open runtime/harness integration task.
+- Checkpoint 592: Capsule VM was an obsolete, separate VM environment rather
+  than a Darwin ART runtime component. Its stopped VM images and restore IPSW
+  data (about 90 GB) were removed after confirming no Capsule process was
+  active; no source or runtime dependency remains.
