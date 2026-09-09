@@ -33,6 +33,7 @@ public final class UpstreamTestHarness {
     private static final class NativeOutputStream extends OutputStream {
         private final int channel;
         private final StringBuilder pending = new StringBuilder();
+        private String pendingMethodInvoke;
         private int suppressedFrames;
         private boolean sawCause;
 
@@ -62,9 +63,33 @@ public final class UpstreamTestHarness {
                 emitLine(pending.toString());
                 pending.setLength(0);
             }
+            if (pendingMethodInvoke != null) {
+                emitVisibleLine(pendingMethodInvoke);
+                pendingMethodInvoke = null;
+            }
         }
 
         private void emitLine(String line) {
+            // Method.invoke is also a legitimate application frame (for
+            // example, tests that exercise reflection). Delay that line until
+            // the following frame identifies the harness dispatch itself.
+            // The old unconditional filter accidentally removed app frames.
+            if (pendingMethodInvoke != null) {
+                if (line.contains("\tat " + UpstreamTestHarness.class.getName()
+                        + "$TestMainThread.run")
+                        || line.contains("\tat " + UpstreamTestHarness.class.getName()
+                        + ".run")) {
+                    suppressedFrames++;
+                    pendingMethodInvoke = null;
+                } else {
+                    emitVisibleLine(pendingMethodInvoke);
+                    pendingMethodInvoke = null;
+                }
+            }
+            if (line.contains("\tat java.lang.reflect.Method.invoke")) {
+                pendingMethodInvoke = line;
+                return;
+            }
             // The Java-thread dispatch is a host implementation detail. ART's
             // direct dalvikvm launcher does not expose these reflection frames;
             // suppress them at the output boundary and preserve Throwable's
@@ -95,6 +120,10 @@ public final class UpstreamTestHarness {
                 }
                 suppressedFrames = 0;
             }
+            emitVisibleLine(line);
+        }
+
+        private void emitVisibleLine(String line) {
             byte[] encoded = line.getBytes(StandardCharsets.UTF_8);
             writeOutputChunk(channel, encoded, 0, encoded.length);
         }

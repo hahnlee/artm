@@ -8148,3 +8148,10 @@ incomplete and still requires managed caller unwind validation.
   flow and points to the Android string-concatenation/append path when a
   native `StackTraceElement` is formatted. The diagnostic test source was
   restored unchanged afterward.
+- Checkpoint 649: The apparent native-frame omission was isolated to the
+  probe harness, not ART. `NativeOutputStream.emitLine` unconditionally
+  dropped every `java.lang.reflect.Method.invoke` line, including the
+  application's legitimate reflective call in test 497. The filter now
+  delays that line and suppresses it only when the following frame identifies
+  the harness dispatch. After rebuilding the support DEX, `497` passes in
+  interpreter, JIT, and unmodified-source interpreter+optimized lanes.

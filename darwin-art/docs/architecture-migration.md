@@ -12733,3 +12733,9 @@ or admission exception was added.
   element` prints it. The discrepancy is therefore in the Android
   string-concat/append path for native `StackTraceElement` values, not the
   Throwable loop itself. Diagnostic source changes were removed.
+- Checkpoint 649: The native-frame discrepancy was caused by the test
+  harness's output boundary: it suppressed every `Method.invoke` line and
+  therefore removed an app-owned reflection frame. The boundary now waits for
+  the next frame and filters only harness dispatch frames. Rebuilt support
+  artifacts and the 497 interpreter/JIT/unmodified-source lanes all match
+  AOSP expected output; no ART stack-walk change was needed.
