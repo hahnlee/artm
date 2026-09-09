@@ -12739,3 +12739,7 @@ or admission exception was added.
   the next frame and filters only harness dispatch frames. Rebuilt support
   artifacts and the 497 interpreter/JIT/unmodified-source lanes all match
   AOSP expected output; no ART stack-walk change was needed.
+- Checkpoint 650: Re-ran unmodified AOSP `497-inlining-and-class-loader` with
+  `--gcstress`. Interpreter, JIT, and unmodified-source interpreter+optimized
+  all pass under the forced GC contract, so the corrected harness boundary
+  does not hide a GC/read-barrier regression in this coverage.

@@ -8155,3 +8155,7 @@ incomplete and still requires managed caller unwind validation.
   delays that line and suppresses it only when the following frame identifies
   the harness dispatch. After rebuilding the support DEX, `497` passes in
   interpreter, JIT, and unmodified-source interpreter+optimized lanes.
+- Checkpoint 650: Ran the same unmodified AOSP `497-inlining-and-class-loader`
+  corpus with the AOSP `--gcstress` contract. Interpreter, JIT, and
+  unmodified-source interpreter+optimized lanes all pass, extending the
+  reflection/inlining result through forced concurrent GC pressure.
