@@ -12624,3 +12624,7 @@ or admission exception was added.
 - Checkpoint 627: Observation confirms the four-way replay advanced through
   `1957-error-ext` without stale host processes after more than eight minutes.
   It remains in flight; only its terminal summary will establish corpus status.
+
+- Checkpoint 628: The replay reached `1971-multi-force-early-return` after ten
+  minutes and continues without process-group leaks. Structural and later
+  compiler cases remain in flight, so no interim ledger count is final.

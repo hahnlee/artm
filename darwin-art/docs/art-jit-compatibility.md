@@ -8019,3 +8019,8 @@ incomplete and still requires managed caller unwind validation.
   `1957-error-ext` JVMTI boundary. The runner has remained live for more than
   eight minutes with no orphaned ART hosts or process-group leaks. The
   terminal corpus summary is still pending and no completion claim is made.
+
+- Checkpoint 628: The same replay has advanced through the
+  `1971-multi-force-early-return` deoptimization/JVMTI boundary after ten
+  minutes. Four-way execution remains live with no orphaned hosts; terminal
+  results are still pending.
