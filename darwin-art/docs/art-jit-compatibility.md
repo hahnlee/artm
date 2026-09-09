@@ -7436,3 +7436,9 @@ incomplete and still requires managed caller unwind validation.
   424 MB Rust incremental cache is disposable but cannot reclaim space until
   its containing volume is cleaned. No native/AOSP rebuild was started under
   this condition, preserving the existing runtime artifacts.
+
+- Checkpoint 553: re-inspected the preserved `985-re-obsolete` runner output.
+  The existing unmodified AOSP run reports interpreter expected-output PASS,
+  JIT expected-output PASS, and source interpreter+optimized differential PASS.
+  A later attempted rebuild hit the storage ceiling, but this authoritative
+  completed artifact confirms the re-obsolete regression itself is green.

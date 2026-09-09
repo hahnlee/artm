@@ -12067,3 +12067,8 @@ or admission exception was added.
 - Checkpoint 552: a fresh audit still reports about 149 MB free. Rust's 424 MB
   incremental cache is rebuildable, but native/AOSP validation remains paused
   until storage is actually reclaimed.
+
+- Checkpoint 553: preserved `985-re-obsolete` runner output was revalidated.
+  Interpreter, JIT, and unmodified source interpreter+optimized differential
+  lanes all report PASS. The separate rebuild attempt remains storage-blocked;
+  the completed regression artifact is still valid evidence.
