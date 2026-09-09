@@ -8073,3 +8073,8 @@ incomplete and still requires managed caller unwind validation.
   cases. Four-way worker turnover remains healthy with no orphaned hosts. The
   terminal summary is still pending, so the seven interim failure rows remain
   unclassified until serial reruns.
+
+- Checkpoint 637: The replay has advanced through `936–948`, including BCP
+  transformation, recursive/reflective obsolete-method, and annotation cases.
+  The parent and four workers remain healthy without orphaned ART hosts. The
+  final summary is still pending as the remaining tail is processed.

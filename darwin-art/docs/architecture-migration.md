@@ -12670,3 +12670,8 @@ or admission exception was added.
   monitors, threads, timers, JNI table/search, and retransformation. Four-way
   worker turnover remains healthy without orphaned hosts. Terminal summary is
   still pending; the seven interim failures await serial reruns.
+
+- Checkpoint 637: The active replay has progressed through `936–948`, covering
+  BCP transformation, recursive/reflective obsolete-method, and annotation
+  cases. Parent and workers remain healthy with no orphaned ART hosts; final
+  summary generation is still pending.
