@@ -12506,6 +12506,13 @@ or admission exception was added.
   `1919-vminit-thread-start-timing` remains, due to VMInit event ordering and
   launcher thread identity.
 
+- Checkpoint 613: Ran the pinned corpus from `201-built-in-except-detail-messages`
+  through `2048-bad-native-registry` in parallel. All discovered tests passed
+  in interpreter and live-JIT differential lanes, including loop/inlining and
+  deoptimization tests, structural redefinition/JVMTI suites, GC/reference
+  processing, UFFD fault handling, and native-registry checks. Also removed
+  stale 039 test-host processes left by an earlier interrupted run.
+
 - Checkpoint 610: Ran the pinned corpus from `160-read-barrier-stress` through
   `183-rmw-stress-test` (24 tests) in parallel. All interpreter and live-JIT
   differential lanes passed, covering read barriers, lock ownership, app-image
