@@ -7467,3 +7467,8 @@ incomplete and still requires managed caller unwind validation.
   the production JIT patch sequence applies AOSP admission removal `0093`
   after the historical compatibility patches. No method/opcode allowlist is
   active in the production compile path. Rebuild remains storage-blocked.
+
+- Checkpoint 558: no additional source mutation is justified while the volume
+  remains at roughly 151 MB free. The binary-only integration audit already
+  exits 0, so the next authoritative step is a fresh source build plus the
+  remaining AOSP/real-app lanes after storage reclamation.

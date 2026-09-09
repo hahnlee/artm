@@ -12092,3 +12092,8 @@ or admission exception was added.
   only in acceptance probes; production patch ordering includes AOSP admission
   removal `0093`, so no method/opcode allowlist is active there. Native rebuild
   and broader app validation remain pending storage reclamation.
+
+- Checkpoint 558: with roughly 151 MB free, no further source mutation or
+  native rebuild was started. The existing integration audit is green; the
+  next step remains a fresh build followed by remaining AOSP and real-app
+  lanes once storage is reclaimed.
