@@ -11845,3 +11845,6 @@ or admission exception was added.
 - Checkpoint 508: Darwin `task_threads` blocks on the forked child before
   register state or frame walking. The remote API implementation remains
   unchanged; a separately spawned helper will isolate fork inheritance next.
+- Checkpoint 509: an independent `posix_spawn` helper reproduced the same
+  `task_threads` stall, excluding fork inheritance. The diagnostic harness
+  change was reverted; remote task/thread acquisition remains unresolved.

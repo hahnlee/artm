@@ -7184,3 +7184,7 @@ incomplete and still requires managed caller unwind validation.
   child, before register state or frame walking. No frame-walker workaround
   was added; next diagnostic uses a separately spawned helper process to
   distinguish fork inheritance from the general remote task/thread contract.
+- Checkpoint 509: a separately `posix_spawn`ed helper reproduced the same
+  `task_threads` stall, ruling out fork inheritance. The harness change was
+  reverted; general Darwin remote task/thread acquisition remains the active
+  host-layer defect.
