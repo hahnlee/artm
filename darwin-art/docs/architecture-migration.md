@@ -12931,3 +12931,8 @@ or admission exception was added.
   low-window `0x110` fault remained. The change was removed. Focus now shifts
   from range lifetime to the executable mapping and entrypoint/ABI metadata
   used by the faulting managed code.
+- Checkpoint 690: A temporary ARM64 instruction-word trace was attempted for
+  the unresolved Chrome fault PC, but its patch did not apply cleanly against
+  the layered fault-handler source and was discarded. The tree retains no
+  speculative signal instrumentation; focus remains exact executable mapping
+  ownership and managed entrypoint/ABI compatibility.

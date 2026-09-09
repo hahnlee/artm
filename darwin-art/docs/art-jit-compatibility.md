@@ -8384,3 +8384,8 @@ incomplete and still requires managed caller unwind validation.
   graphics closure; the same low-window `0x110` fault remained. The change was
   reverted. The remaining discrepancy is the executable mapping and
   entrypoint/ABI metadata used by the faulting managed code.
+- Checkpoint 690: Attempted a temporary ARM64 instruction-word trace at the
+  unresolved Chrome fault PC. The patch did not apply cleanly to the layered
+  fault-handler source and was removed; no diagnostic instrumentation remains.
+  The next target is direct ownership and ABI resolution of the low-window
+  executable mapping.
