@@ -8042,3 +8042,9 @@ incomplete and still requires managed caller unwind validation.
   deoptimization cases. Its parent and four active test workers are present,
   with no orphaned ART hosts; only the terminal summary will establish the
   final pass/fail ledger.
+
+- Checkpoint 632: The replay has continued into the `712–716` VarHandle,
+  invoke-custom/lambda, and JLI cases after more than twenty-six minutes.
+  Worker turnover remains normal and no orphaned ART hosts are present. The
+  interim failures are not yet actionable until the replay reaches a terminal
+  summary and the affected tests are rerun serially.

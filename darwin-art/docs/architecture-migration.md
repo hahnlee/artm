@@ -12643,3 +12643,8 @@ or admission exception was added.
   minutes and has advanced into `595–597` profile/app and deoptimization
   cases. The parent and active workers remain attached without orphaned ART
   hosts; terminal summary generation is still pending.
+
+- Checkpoint 632: The active replay has advanced beyond `712` into VarHandle,
+  invoke-custom/lambda, and JLI coverage. Worker turnover remains healthy with
+  no orphaned ART hosts; the interim failure rows await terminal replay and
+  serial reproduction before any runtime change is selected.
