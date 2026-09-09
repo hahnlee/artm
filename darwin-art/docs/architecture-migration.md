@@ -12870,3 +12870,8 @@ or admission exception was added.
   all interpreter/JIT/optimized lanes. Its old corpus failure is therefore not
   an ordinary runtime regression; only the forced-GC 096 cadence remains under
   investigation.
+- Checkpoint 678: Live 096 GC-stress logs show the Java main dispatch succeeds
+  before its worker threads continue, while repeated explicit GCs report
+  8--15 ms suspend-all pauses and 100+ ms total GC cycles. The remaining issue
+  is worker/collector cadence rather than launcher teardown; macOS `sample`
+  still cannot provide a stack, so further changes require in-runtime evidence.

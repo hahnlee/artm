@@ -8313,3 +8313,9 @@ incomplete and still requires managed caller unwind validation.
   interpreter, JIT, and interpreter+optimized lanes all pass. This confirms
   its historical corpus failure is not an ordinary ARM64/JIT regression. The
   forced-GC 096 cadence issue remains the only reproduced stress gap.
+- Checkpoint 678: Inspected live 096 stress logs rather than treating the
+  timeout as teardown: `Main main(String[]) PASS` appears before the worker
+  threads continue, with repeated explicit concurrent GCs and 8--15 ms
+  suspend-all pauses. This proves the bounded timeout is in the worker/GC
+  stress workload, not the Java main dispatch. The macOS profiler remains
+  unavailable, so no unsupported optimization is claimed.
