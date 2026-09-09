@@ -8014,3 +8014,8 @@ incomplete and still requires managed caller unwind validation.
   processes. The ledger is intentionally left running for the remaining
   structural, compiler, and graphics-related inputs; no interim pass count is
   treated as final evidence.
+
+- Checkpoint 627: Continued observing the four-way replay through the
+  `1957-error-ext` JVMTI boundary. The runner has remained live for more than
+  eight minutes with no orphaned ART hosts or process-group leaks. The
+  terminal corpus summary is still pending and no completion claim is made.

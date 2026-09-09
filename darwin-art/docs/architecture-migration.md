@@ -12620,3 +12620,7 @@ or admission exception was added.
 - Checkpoint 626: The same replay has reached the 1939 proxy/monitor JVMTI
   range with no orphaned ART hosts. Remaining structural/compiler inputs are
   still executing, so the previous ledger count is not yet authoritative.
+
+- Checkpoint 627: Observation confirms the four-way replay advanced through
+  `1957-error-ext` without stale host processes after more than eight minutes.
+  It remains in flight; only its terminal summary will establish corpus status.
