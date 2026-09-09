@@ -7141,3 +7141,7 @@ incomplete and still requires managed caller unwind validation.
   16-byte frame; only calls with a guest stack tail receive post-tail scratch.
   The focused trampoline audit remains PASS; end-to-end relink/probe is still
   pending and the full compatibility goal remains open.
+- Checkpoint 499: after the frame-size adjustment, the focused trampoline
+  audit and formatting checks remain clean. A full `audit-runtime-link` retry
+  stalled in its existing long-running build process and was terminated; no
+  new end-to-end probe result is claimed. The mixed JNI abort remains open.

@@ -11811,3 +11811,7 @@ or admission exception was added.
   unwind frame, while stack-bearing calls reserve scratch after the guest
   tail. This isolates a frame-size interaction observed on `nativeUsesEnv`;
   the full runtime relink and mixed-call probe remain to be completed.
+- Checkpoint 499: focused JNI trampoline audit and repository formatting still
+  pass. The full runtime-link retry stalled in the existing build pipeline and
+  was stopped without changing source state; mixed JNI end-to-end validation
+  remains pending.
