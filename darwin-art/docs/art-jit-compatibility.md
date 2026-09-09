@@ -8124,3 +8124,10 @@ incomplete and still requires managed caller unwind validation.
   a line-number regression and was reverted. The remaining issue is now
   narrowed to the downstream StackTraceElement/publication path, with the
   graphics bootstrap and link audit restored to PASS.
+- Checkpoint 645: A temporary source probe calling `getStackTrace()` before
+  `printStackTrace()` returned six frames including `Method.invoke (Native
+  Method)`, while a subsequent freshly-created exception printed five frames.
+  This proves the native frame is recoverable through the public conversion API
+  and points to state/lifecycle sensitivity between Throwable capture and
+  formatting, rather than a universally missing Darwin stack frame. The probe
+  was removed; the original corpus remains the authoritative failing case.

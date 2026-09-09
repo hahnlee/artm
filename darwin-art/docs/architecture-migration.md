@@ -12714,3 +12714,8 @@ or admission exception was added.
   Forcing the native `-2` StackTraceElement marker produced a line-number
   regression and was reverted; the unresolved boundary is downstream frame
   publication/formatting. Graphics bootstrap and link audit are restored.
+- Checkpoint 645: A temporary probe showed `new Exception().getStackTrace()`
+  returning six frames, including `Method.invoke (Native Method)`, whereas a
+  second fresh exception printed immediately afterward had five. This narrows
+  the remaining defect to Throwable capture/publication lifecycle sensitivity;
+  the probe was removed and no test source change is retained.
