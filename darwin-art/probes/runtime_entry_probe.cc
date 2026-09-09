@@ -1136,7 +1136,19 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
     run_result->frame_height = 0;
     return 0;
   }
-  if (run_apk_app) {
+  // The ELF/JNI acceptance fixture is a headless execution test.  It does
+  // not represent an Android application process and deliberately has no
+  // support DEX containing DarwinServiceBridge, so entering the window
+  // presentation bootstrap here would exercise an unrelated service-manager
+  // dependency and turn a JNI test into an IServiceManager NPE.  Real APK
+  // processes and the framework-button probe still take the complete
+  // presentation path below.
+  const bool run_headless_elf_fixture =
+      run_elf_jni_fixture && !run_apk_app && !run_framework_button &&
+      !run_service_process;
+  if (run_headless_elf_fixture) {
+    presentation_status = 0;
+  } else if (run_apk_app) {
     // The ART process owner remains the Android main/UI Looper thread recorded
     // by begin_run(). NSWindow/CAMetalLayer creation is marshalled to the
     // AppKit actor, while graphics/input callbacks stay on this owner thread;
