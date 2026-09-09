@@ -12538,3 +12538,13 @@ or admission exception was added.
   launcher identity issue: the runtime reports `ART run-test main` instead of
   AOSP's `main`; the harness source now requests `main`, but the native launch
   path still overwrites that logical name and requires a runtime-side fix.
+
+- Checkpoint 615: Rebuilt both baseline and button DEX bundles after the
+  launcher change (method contracts are now 2681 and 3091) and reran the
+  previously failing tests. `2275-pthread-name` and
+  `2282-single-step-before-catch` now pass all three lanes. The native
+  upstream launcher now resolves and invokes `Main.main(String[])` directly on
+  the ART process-main peer, removing harness frames from the tracing stack;
+  both `2246-trace-stream` and `2246-trace-v2` pass interpreter, live-JIT, and
+  unmodified-source lanes. The remaining known gaps are `136` shutdown,
+  `137` Darwin remote ptrace, and `1919` VMInit event/launcher semantics.

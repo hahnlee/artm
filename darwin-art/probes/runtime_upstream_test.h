@@ -274,15 +274,12 @@ inline bool Prepare(JNIEnv* env, jclass harness) {
 inline int Run(JNIEnv* env, jclass harness) {
   const char* target = std::getenv("DARWIN_ART_UPSTREAM_MAIN");
   if (target == nullptr || target[0] == '\0' || harness == nullptr) return 120;
-  // Run the application entry point on a real Java Thread. Calling Main.main
-  // directly on the attached native launcher leaves that peer alive forever;
-  // an application thread joining it then correctly waits forever because
-  // the launcher never traverses ART's normal Thread::Destroy transition.
-  // This helper preserves Android's process-main lifecycle while keeping the
-  // native host responsible only for process status and output plumbing.
-  jmethodID run_main = env->GetStaticMethodID(
-      harness, "run", "(Ljava/lang/String;[Ljava/lang/String;)Ljava/lang/Throwable;");
-  if (run_main == nullptr || env->ExceptionCheck()) return 120;
+  // dalvikvm enters the application class directly. Calling through the Java
+  // harness would leave UpstreamTestHarness.run/Method.invoke on the active
+  // stack, and ART method tracing would incorrectly serialize those frames
+  // into the application's main trace.
+  jmethodID load_main_class = env->GetStaticMethodID(
+      harness, "load", "(Ljava/lang/String;)Ljava/lang/Class;");
   jstring class_name = env->NewStringUTF(target);
   jclass string_class = env->FindClass("java/lang/String");
   std::vector<const char*> upstream_arguments;
@@ -303,28 +300,42 @@ inline int Run(JNIEnv* env, jclass harness) {
     env->DeleteLocalRef(value);
   }
   if (class_name == nullptr || arguments == nullptr || env->ExceptionCheck()) return 120;
-  jobject failure = nullptr;
+  jclass main_class = load_main_class == nullptr || class_name == nullptr
+      ? nullptr
+      : static_cast<jclass>(env->CallStaticObjectMethod(
+            harness, load_main_class, class_name));
+  jmethodID main_method = main_class == nullptr || env->ExceptionCheck()
+      ? nullptr
+      : env->GetStaticMethodID(main_class, "main", "([Ljava/lang/String;)V");
+  if (main_method == nullptr || env->ExceptionCheck()) {
+    env->ExceptionClear();
+    env->DeleteLocalRef(main_class);
+    env->DeleteLocalRef(arguments);
+    env->DeleteLocalRef(string_class);
+    env->DeleteLocalRef(class_name);
+    return 120;
+  }
   {
     ScopedNativeStderrCapture native_stderr(OutputPath(1));
     if (!native_stderr.IsValid()) return 120;
-    failure = env->CallStaticObjectMethod(harness, run_main, class_name, arguments);
+    env->CallStaticVoidMethod(main_class, main_method, arguments);
   }
   if (env->ExceptionCheck()) {
     env->ExceptionClear();
+    env->DeleteLocalRef(main_class);
+    env->DeleteLocalRef(arguments);
+    env->DeleteLocalRef(string_class);
+    env->DeleteLocalRef(class_name);
     return 122;
   }
   bool wrote = !env->ExceptionCheck() &&
       OutputExists(std::getenv("DARWIN_ART_UPSTREAM_STDOUT")) &&
       OutputExists(std::getenv("DARWIN_ART_UPSTREAM_STDERR"));
-  if (failure != nullptr) {
-    std::cerr << "ART upstream test: " << target << " threw\n";
-  }
+  env->DeleteLocalRef(main_class);
   env->DeleteLocalRef(arguments);
   env->DeleteLocalRef(string_class);
-  env->DeleteLocalRef(failure);
   env->DeleteLocalRef(class_name);
   if (!wrote) return 121;
-  if (failure != nullptr) return 122;
   std::cerr << "ART upstream test: " << target << " main(String[]) PASS\n";
   return 0;
 }

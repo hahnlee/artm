@@ -243,12 +243,21 @@ public final class UpstreamTestHarness {
             prepareOutput();
             dispatchingOnJavaThread = true;
             Set<Thread> baseline = new HashSet<>(Thread.getAllStackTraces().keySet());
-            TestMainThread mainThread = new TestMainThread(className, arguments);
-            mainThread.start();
-            mainThread.join();
+            // dalvikvm executes the application entry point directly on its
+            // attached process-main peer. Besides matching Android's thread
+            // identity, this keeps method tracing from recording the harness
+            // worker/join frames as part of the application's main trace.
+            Class<?> mainClass = load(className);
+            Method main = mainClass.getDeclaredMethod("main", String[].class);
+            main.setAccessible(true);
+            try {
+                main.invoke(null, (Object) arguments);
+            } catch (InvocationTargetException exception) {
+                failure = exception.getCause();
+                stripHarnessFrames(failure);
+                failureOutputDispatched = dispatchExplicitUncaughtException(failure);
+            }
             awaitNewNonDaemonThreads(baseline);
-            failure = mainThread.failure;
-            failureOutputDispatched = mainThread.failureOutputDispatched;
         } catch (Throwable throwable) {
             failure = throwable;
         } finally {
