@@ -12793,3 +12793,8 @@ or admission exception was added.
   one quick frame reuse the prior unwind result; recursive/frame transitions
   force a normal walk. Incremental relink and the complete ARM64/JIT audit
   pass, while forced-GC stress still requires a terminating end-to-end run.
+- Checkpoint 661: The next full 096 `--gcstress` retry stayed CPU-bound in the
+  interpreter lane for over four minutes after dex2oat completed and was
+  explicitly terminated. This indicates the quick-frame cache does not help
+  interpreter-only allocation backtraces. There was no crash or managed error;
+  interpreter backtrace overhead is now the focused performance target.

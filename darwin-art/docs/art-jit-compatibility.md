@@ -8218,3 +8218,10 @@ incomplete and still requires managed caller unwind validation.
   ARM64/JIT audit pass, including GC, OSR, deopt, JNI, and framework fixtures.
   The cache is not credited with clearing the forced-GC timeout until a full
   stress run terminates successfully.
+- Checkpoint 661: A full 096 `--gcstress` retry with the cache remained CPU-bound
+  in the interpreter lane for more than four minutes and was terminated after
+  no terminal result. The ordinary process output showed compilation completed
+  before the prolonged managed run, confirming the current cache key does not
+  cover interpreter-only frames. No crash or managed failure was observed; the
+  forced-GC timeout remains open and the next optimization must address the
+  interpreter backtrace path without weakening AOSP stress semantics.
