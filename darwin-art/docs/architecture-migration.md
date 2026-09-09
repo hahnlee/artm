@@ -13303,3 +13303,7 @@ or admission exception was added.
   covering properties, monitor, thread, and thread-group behavior. The
   intermediate ledger remains 1,061 passed and 15 failed; final classification
   is deferred until the full run terminates.
+- Checkpoint 779: The same four-worker corpus run remains live through
+  `940-recursive-obsolete`, covering JVMTI transformation and recursive
+  obsolete-method paths. Intermediate counts remain 1,061 passed and 15
+  failed; the final matrix is still pending worker termination.
