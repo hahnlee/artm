@@ -179,17 +179,27 @@ int PublishRuntimeElfImage(void* context, uintptr_t start, uintptr_t end) {
 int FinalizeRuntimeElfImage(void* context, uintptr_t start, uintptr_t end) {
   ElfLibrary* library = static_cast<ElfLibrary*>(context);
   if (library == nullptr || library->dso_lifecycle == nullptr ||
-      library->image_registry == nullptr ||
-      darwin_art_bionic_dso_lifecycle_finalize_image(
+      library->image_registry == nullptr) {
+    std::fprintf(stderr, "DARWIN ELF loader: finalize rejected missing lifecycle context\n");
+    return -1;
+  }
+  if (darwin_art_bionic_dso_lifecycle_finalize_image(
           library->dso_lifecycle, start, end) != 0) {
+    std::fprintf(stderr, "DARWIN ELF loader: finalize rejected DSO lifecycle range=[0x%llx,0x%llx)\n",
+                 static_cast<unsigned long long>(start), static_cast<unsigned long long>(end));
     return -1;
   }
   if (darwin_art_bionic_vm_unregister_borrowed_range(
           reinterpret_cast<void*>(start), end - start) != 0) {
+    std::fprintf(stderr, "DARWIN ELF loader: finalize rejected VM borrowed range\n");
     return -1;
   }
-  return darwin_art_image_registry::Finalize(library->image_registry, start,
-                                              end);
+  const int result = darwin_art_image_registry::Finalize(library->image_registry, start,
+                                                          end);
+  if (result != 0) {
+    std::fprintf(stderr, "DARWIN ELF loader: finalize rejected image registry\n");
+  }
+  return result;
 }
 
 int DropRuntimeElfGraph(void* value, void* context) {

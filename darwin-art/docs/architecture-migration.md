@@ -11731,3 +11731,7 @@ or admission exception was added.
   The abort remains, so this is not yet sufficient; the next trace must
   inspect owner teardown after the unload callback rather than treating the
   JNI return value as the end of the lifecycle.
+- Checkpoint 482: repeated the full ELF acceptance after the unload ordering
+  change; the first libc++ image still aborts during teardown, before the
+  graph-unload result is surfaced. The failure is therefore below the Java
+  lifecycle and remains an active NativeBridge/ELF owner teardown defect.
