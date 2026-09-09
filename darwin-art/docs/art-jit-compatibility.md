@@ -7119,3 +7119,8 @@ incomplete and still requires managed caller unwind validation.
   ART still reports the method unresolved because this call occurs during
   bootstrap class initialization; registration must be moved before that
   initialization boundary.
+- Checkpoint 495: traced the remaining generic bootstrap failure beyond
+  filesystem: `System.log` is requested while VMClassLoader initializes, before
+  the normal libcore registration table is visible. The runtime carries the
+  minimal ABI/export, but the probe still fails; registration must move into
+  ART's pre-class-initialization native phase.
