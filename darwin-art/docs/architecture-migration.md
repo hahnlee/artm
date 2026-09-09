@@ -13151,3 +13151,6 @@ or admission exception was added.
 - Checkpoint 736: `597-deopt-new-string` passes all three runner lanes,
   validating string allocation/construction across a debuggable deoptimization
   boundary. Broader allocation coverage and real-app acceptance remain open.
+- Checkpoint 737: `471-deopt-environment` passes interpreter, optimized/JIT,
+  and unmodified-source lanes, validating compiled-local reconstruction during
+  deoptimization. More OSR/deopt cases and real-app acceptance remain open.

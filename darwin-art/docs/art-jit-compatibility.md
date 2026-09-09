@@ -8639,3 +8639,6 @@ incomplete and still requires managed caller unwind validation.
   and unmodified-source lanes, exercising allocation/string construction
   across a debuggable deoptimization boundary. Broader allocation and real
   APK coverage remain open.
+- Checkpoint 737: `471-deopt-environment` passes all three lanes, validating
+  preservation and reconstruction of compiled locals across deoptimization.
+  Additional OSR/deopt combinations and real APK acceptance remain open.
