@@ -38,6 +38,8 @@ fn exit_android_process(status: i32) -> ! {
     // Android application processes are disposed as one OS lifetime. libc
     // `exit` would run host C++ static destructors while Chromium task runners
     // are still live, which is neither Android behavior nor race-free.
+    // Flush stdio explicitly because _exit intentionally skips libc teardown.
+    unsafe { libc::fflush(std::ptr::null_mut()) };
     unsafe { _exit(status) }
 }
 
@@ -348,6 +350,14 @@ fn run_owner(
                 graphics_attached,
             );
             if options.terminate_android_process {
+                if shutdown_guard
+                    .runtime()
+                    .engine()
+                    .map_or(-1, EngineSession::prepare_process_exit)
+                    != 0
+                {
+                    eprintln!("darwin-art-host: native DSO unload before exit failed");
+                }
                 let service_cleanup = service_processes
                     .terminate_for_process_exit()
                     .map_err(HostError::HostService);
@@ -398,6 +408,14 @@ fn run_owner(
             last_frame: frame_host.last_frame,
         };
         if options.terminate_android_process {
+            if shutdown_guard
+                .runtime()
+                .engine()
+                .map_or(-1, EngineSession::prepare_process_exit)
+                != 0
+            {
+                eprintln!("darwin-art-host: native DSO unload before exit failed");
+            }
             service_processes
                 .terminate_for_process_exit()
                 .map_err(HostError::HostService)?;

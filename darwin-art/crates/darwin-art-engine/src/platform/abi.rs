@@ -8,17 +8,19 @@ use darwin_art_engine_sys::{
     GraphicsSessionDispatchKeyV1Fn, GraphicsSessionDispatchPointerFn,
     GraphicsSessionDispatchPointerV2Fn, GraphicsSessionPumpFrameFn,
     GraphicsSessionPumpMainLooperFn, GraphicsSessionWaitMainLooperFn,
-    GraphicsSessionWakeMainLooperFn, ProviderClearHooksFn, ProviderInstallHooksFn,
-    ProviderNativeAcquireFn, ProviderNativeReleaseFn, RunProcessFn, ShutdownProcessFn,
-    SurfaceActiveFn, SurfaceCloseRequestedFn, SurfaceCreateFn, SurfaceDestroyFn, SurfaceGetSizeFn,
-    SurfaceNextKeyEventV1Fn, SurfaceNextPointerEventFn, SurfaceNextPointerEventV2Fn,
-    SurfacePresentAsyncFn, SurfacePresentFn, SurfacePumpEventsFn, SurfaceResizeFn, SurfaceUpdateFn,
+    GraphicsSessionWakeMainLooperFn, PrepareProcessExitFn, ProviderClearHooksFn,
+    ProviderInstallHooksFn, ProviderNativeAcquireFn, ProviderNativeReleaseFn, RunProcessFn,
+    ShutdownProcessFn, SurfaceActiveFn, SurfaceCloseRequestedFn, SurfaceCreateFn, SurfaceDestroyFn,
+    SurfaceGetSizeFn, SurfaceNextKeyEventV1Fn, SurfaceNextPointerEventFn,
+    SurfaceNextPointerEventV2Fn, SurfacePresentAsyncFn, SurfacePresentFn, SurfacePumpEventsFn,
+    SurfaceResizeFn, SurfaceUpdateFn,
 };
 
 #[derive(Clone, Copy)]
 pub(crate) struct ProcessSymbols {
     pub run_process: RunProcessFn,
     pub shutdown_process: ShutdownProcessFn,
+    pub prepare_process_exit: PrepareProcessExitFn,
 }
 
 #[derive(Clone, Copy)]
@@ -83,6 +85,7 @@ impl LoadedEngine {
                 process: ProcessSymbols {
                     run_process: library.symbol(b"darwin_art_run_process\0")?,
                     shutdown_process: library.symbol(b"darwin_art_shutdown_process\0")?,
+                    prepare_process_exit: library.symbol(b"darwin_art_prepare_process_exit\0")?,
                 },
                 surface: SurfaceSymbols {
                     create: library.symbol(b"darwin_art_surface_create\0")?,

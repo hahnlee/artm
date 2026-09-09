@@ -181,6 +181,7 @@ impl ProcessResult {
 
 pub type RunProcessFn = unsafe extern "C" fn(*const ProcessConfig, *mut ProcessResult) -> i32;
 pub type ShutdownProcessFn = unsafe extern "C" fn() -> i32;
+pub type PrepareProcessExitFn = unsafe extern "C" fn() -> i32;
 
 #[derive(Clone, Copy)]
 #[repr(C)]

@@ -623,6 +623,11 @@ pub(crate) fn audit_runtime_graphics_link_mode(
         .arg("-Wl,-exported_symbol,_darwin_art_runtime_native_owner_attach")
         .arg("-Wl,-exported_symbol,_darwin_art_runtime_native_owner_lookup")
         .arg("-Wl,-exported_symbol,_darwin_art_runtime_native_owner_destroy")
+        // The host invokes this narrow lifecycle hook immediately before an
+        // Android-style process exit.  Keep it rooted despite dead stripping
+        // and expose the C ABI from the production graphics runtime image.
+        .arg("-Wl,-u,_darwin_art_prepare_process_exit")
+        .arg("-Wl,-exported_symbol,_darwin_art_prepare_process_exit")
         .arg("-Wl,-exported_symbol,___jit_debug_descriptor")
         .arg("-Wl,-exported_symbol,___dex_debug_descriptor")
         .arg("-Wl,-exported_symbol,_ArtPlugin_Initialize")

@@ -12457,3 +12457,12 @@ or admission exception was added.
   be represented by one coordinator updating process state,
   `ScopedRunBoundary`, and every post-launch ART callback together; ad-hoc
   reattachment inside `Run()` is unsafe. Worktree was restored clean.
+
+- Checkpoint 605: Added an exported, dead-strip-rooted process-exit lifecycle
+  hook. Android APK processes now invoke AOSP `JavaVMExt::UnloadNativeLibraries`
+  plus the Darwin ELF registry drain immediately before `_exit`; upstream ART
+  tests retain normal `DestroyJavaVM` semantics so their managed output is not
+  truncated. After rebuilding both DEX bundles and the graphics runtime,
+  `150-loadlibrary` passed interpreter, JIT, and unmodified-source lanes.
+  `136-daemon-jni-shutdown` remains the owner-thread coordinator gap, and the
+  Darwin remote half of `137-cfi` remains open.

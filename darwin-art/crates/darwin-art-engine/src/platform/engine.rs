@@ -137,6 +137,13 @@ impl EngineSession {
         unsafe { (self.engine.symbols().process.shutdown_process)() }
     }
 
+    /// Unload guest NativeLoader DSOs before an Android process-style `_exit`.
+    /// This preserves JNI_OnUnload without entering a competing VM teardown.
+    pub fn prepare_process_exit(&self) -> i32 {
+        // SAFETY: resolved from the live, version-checked engine image.
+        unsafe { (self.engine.symbols().process.prepare_process_exit)() }
+    }
+
     /// Backwards-compatible name for the explicit process close contract.
     pub fn shutdown_once(&mut self) -> i32 {
         self.close()

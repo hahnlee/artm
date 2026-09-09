@@ -109,10 +109,10 @@ fn main_result() -> Result<(), Box<dyn Error>> {
         // unsafe for Chromium's still-live native task runners. The pinned
         // ART corpus uses the same process lifetime so tests exercise app
         // execution rather than an Android-inaccurate VM teardown sequence.
-        // Real APKs are process-scoped zygote children and terminate as one
-        // OS lifetime.  Upstream ART tests, however, explicitly validate the
-        // JavaVM shutdown contract (JNI_OnUnload, owner-thread teardown), so
-        // they must return through the normal DestroyJavaVM path.
+        // Android application and dalvikvm test processes are one-shot zygote
+        // children. NativeLoader DSOs are explicitly unloaded immediately
+        // before this process-style exit so JNI_OnUnload still observes the
+        // Android lifecycle without racing an app-owned DestroyJavaVM.
         terminate_android_process: env::var_os("DARWIN_ART_APK_APP_PACKAGE").is_some(),
     };
     let outcome = run(&options)?;

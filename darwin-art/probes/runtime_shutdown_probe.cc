@@ -14,6 +14,7 @@
 #include "runtime_graphics_probe.h"
 #include "runtime_process_state.h"
 #include "runtime.h"
+#include "jni/java_vm_ext.h"
 #include "scoped_thread_state_change-inl.h"
 #include "thread-current-inl.h"
 
@@ -446,4 +447,17 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_shutdown_process() {
     darwin_art_process::clear_provider_hooks_state();
   }
   return status;
+}
+
+extern "C" DARWIN_ART_EXPORT int32_t darwin_art_prepare_process_exit() {
+  // Android's process teardown asks JavaVMExt to unload every library tracked
+  // by System.load before the zygote child exits.  This is distinct from the
+  // Darwin ELF graph registry (which only owns converted guest images), so
+  // invoke the AOSP lifecycle boundary first and then drain that registry.
+  if (art::Runtime* runtime = art::Runtime::Current(); runtime != nullptr) {
+    if (art::JavaVMExt* vm = runtime->GetJavaVM(); vm != nullptr) {
+      vm->UnloadNativeLibraries();
+    }
+  }
+  return android::ShutdownElfLibraries() ? 0 : DARWIN_ART_STATUS_SHUTDOWN_FAILED;
 }
