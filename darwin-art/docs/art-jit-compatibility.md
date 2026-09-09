@@ -7769,3 +7769,10 @@ incomplete and still requires managed caller unwind validation.
   tests pass interpreter, JIT, and unmodified-source lanes; `039-join-main`
   remains green as well. No new bytecode/JIT semantic failure appeared in the
   window. Full corpus and real-app criteria remain open.
+
+- Checkpoint 596: a fresh 050–079 window passed every test except
+  `054-uncaught`, which exposed missing main-thread uncaught-handler dispatch.
+  The Java launcher now invokes the thread/default handler on the ART main
+  thread and suppresses duplicate stderr output; `054-uncaught` passes
+  interpreter, JIT, and unmodified-source lanes. The remaining full-corpus,
+  GC/JIT stress, and real-app criteria remain open.

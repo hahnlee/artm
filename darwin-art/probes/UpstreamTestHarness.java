@@ -119,6 +119,7 @@ public final class UpstreamTestHarness {
         private final String className;
         private final String[] arguments;
         private volatile Throwable failure;
+        private volatile boolean failureOutputDispatched;
 
         TestMainThread(String className, String[] arguments) {
             super("ART run-test main");
@@ -135,9 +136,11 @@ public final class UpstreamTestHarness {
             } catch (InvocationTargetException exception) {
                 failure = exception.getCause();
                 stripHarnessFrames(failure);
+                failureOutputDispatched = dispatchExplicitUncaughtException(failure);
             } catch (Throwable throwable) {
                 failure = throwable;
                 stripHarnessFrames(failure);
+                failureOutputDispatched = dispatchExplicitUncaughtException(failure);
             }
         }
     }
@@ -232,6 +235,7 @@ public final class UpstreamTestHarness {
 
     public static Throwable run(String className, String[] arguments) {
         Throwable failure = null;
+        boolean failureOutputDispatched = false;
         try {
             prepareOutput();
             dispatchingOnJavaThread = true;
@@ -241,11 +245,12 @@ public final class UpstreamTestHarness {
             mainThread.join();
             awaitNewNonDaemonThreads(baseline);
             failure = mainThread.failure;
+            failureOutputDispatched = mainThread.failureOutputDispatched;
         } catch (Throwable throwable) {
             failure = throwable;
         } finally {
             dispatchingOnJavaThread = false;
-            if (failure != null) {
+            if (failure != null && !failureOutputDispatched) {
                 System.err.print("Exception in thread \"main\" ");
                 failure.printStackTrace(System.err);
             }
