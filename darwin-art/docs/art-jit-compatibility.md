@@ -8008,3 +8008,9 @@ incomplete and still requires managed caller unwind validation.
   using the corrected process-group runner. The replay has progressed through
   the JVMTI `1917-get-stack-frame` range without stale hosts; results remain
   in-flight and are not yet counted as a completion claim.
+
+- Checkpoint 626: The replay remains live under the orphan-safe runner and has
+  advanced through the 1939 proxy/monitor JVMTI cases without residual host
+  processes. The ledger is intentionally left running for the remaining
+  structural, compiler, and graphics-related inputs; no interim pass count is
+  treated as final evidence.

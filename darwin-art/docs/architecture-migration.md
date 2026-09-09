@@ -12616,3 +12616,7 @@ or admission exception was added.
   the orphan-safe runner. It has reached the `1917-get-stack-frame` JVMTI
   slice with no surviving host processes; the ledger is still running and
   remains unverified until its terminal summary is available.
+
+- Checkpoint 626: The same replay has reached the 1939 proxy/monitor JVMTI
+  range with no orphaned ART hosts. Remaining structural/compiler inputs are
+  still executing, so the previous ledger count is not yet authoritative.
