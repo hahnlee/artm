@@ -13066,3 +13066,7 @@ or admission exception was added.
   modes. This validates unrestricted ARM64 lowering for a representative
   primitive/branch opcode set while exceptions, monitors, GC, JNI,
   deoptimization, and real APK startup remain in scope.
+- Checkpoint 716: AOSP `008-exceptions` passes in interpreter, optimized/JIT,
+  and unmodified-source modes. Exception dispatch and stack restoration now
+  have a differential regression result; the remaining runtime boundaries are
+  still explicitly tracked rather than treated as complete.

@@ -8536,3 +8536,7 @@ incomplete and still requires managed caller unwind validation.
   optimized/JIT, and unmodified-source modes, covering boolean, arithmetic,
   branch, and omnibus opcode lowering. The full compatibility matrix and real
   APK startup remain outstanding.
+- Checkpoint 716: Ran AOSP ART `008-exceptions`; interpreter, optimized/JIT,
+  and unmodified-source modes all passed. This adds verified throw/catch and
+  exceptional control-flow coverage to the JIT evidence, while monitor, GC,
+  JNI, deoptimization, and real APK startup remain unverified.
