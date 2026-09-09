@@ -12173,3 +12173,9 @@ or admission exception was added.
   non-daemon application threads, so the remaining investigation is ART's
   internal daemon/JIT/thread-list teardown. Diagnostic changes were removed
   after the trace; no workaround or test weakening was committed.
+
+- Checkpoint 572: attempted to instrument AOSP `Runtime::~Runtime()` for the
+  DestroyJavaVM substage, but the generated patch was intentionally removed
+  after the bootstrap patch application rejected its malformed hunk. No
+  runtime artifact or behavior was changed; the authoritative blocker remains
+  the previously observed hang at the DestroyJavaVM boundary.
