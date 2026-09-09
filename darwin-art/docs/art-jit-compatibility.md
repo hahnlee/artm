@@ -8003,3 +8003,8 @@ incomplete and still requires managed caller unwind validation.
   final output read, and preserves bounded timeout cleanup. The two lifecycle
   tests pass with stdout/stderr pipes enabled, covering the exact stale-host
   failure mode observed in corpus runs.
+
+- Checkpoint 625: Started a fresh `--resume --parallel 4` pinned-corpus replay
+  using the corrected process-group runner. The replay has progressed through
+  the JVMTI `1917-get-stack-frame` range without stale hosts; results remain
+  in-flight and are not yet counted as a completion claim.

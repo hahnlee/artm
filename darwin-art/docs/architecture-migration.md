@@ -12611,3 +12611,8 @@ or admission exception was added.
   when descendants retain inherited output pipes. Descendants are terminated
   before the final read, avoiding false timeout failures and stale ART hosts;
   the lifecycle suite remains 2/2 passing with piped output.
+
+- Checkpoint 625: Launched the fresh four-way resumable pinned-AOSP replay with
+  the orphan-safe runner. It has reached the `1917-get-stack-frame` JVMTI
+  slice with no surviving host processes; the ledger is still running and
+  remains unverified until its terminal summary is available.
