@@ -12896,3 +12896,10 @@ or admission exception was added.
   failed diagnostic counter. The verified implementation is unchanged; future
   cadence measurement must be emitted from the runtime itself rather than rely
   on macOS attach tools or a runner timeout.
+
+- Checkpoint 684: Current core-app graphics acceptance remains green for
+  Calculator (`2+3=5`) and DeskClock. Physical Chrome menu interaction now
+  gives a reproducible unresolved generated-code fault on a null-offset
+  (`0x110`) access after isolated child-process churn. Treat this as the next
+  native Android contract boundary to repair; no diagnostic instrumentation or
+  fallback behavior was retained.

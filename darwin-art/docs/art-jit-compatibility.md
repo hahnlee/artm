@@ -8344,3 +8344,11 @@ incomplete and still requires managed caller unwind validation.
   the active implementation. No new stress claim is made; the next useful
   step is a lower-level in-runtime cadence measurement that does not depend on
   macOS process attach or runner timing.
+
+- Checkpoint 684: Re-ran the current AOSP core-app graphics acceptance; the
+  unchanged Calculator computes `2+3=5` and DeskClock publishes through the
+  HWUI/SurfaceFlinger/Metal path. A fresh physical-input Chrome menu run then
+  reproduced an unresolved generated-code fault at address `0x110` after the
+  child-process lifecycle churn. This is a real native/ABI compatibility bug,
+  not a screenshot or probe failure; the next step is to map that stripped
+  `libchrome.so` fault to its Android contract before changing runtime code.
