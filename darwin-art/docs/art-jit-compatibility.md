@@ -8684,3 +8684,7 @@ incomplete and still requires managed caller unwind validation.
   optimized/JIT, and unmodified-source lanes, validating reflection-created
   VarHandle stores and runtime type resolution. Remaining modes and real APK
   acceptance remain open.
+- Checkpoint 749: `2239-varhandle-perf-vh-get-bav` passes interpreter,
+  optimized/JIT, and unmodified-source lanes, validating byte-array-view
+  acquire/opaque reads and their ordering semantics. Remaining modes and real
+  APK acceptance remain open.
