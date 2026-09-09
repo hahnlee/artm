@@ -13209,3 +13209,7 @@ or admission exception was added.
 - Checkpoint 755: `2239-varhandle-perf-vh-cas` passes all three runner lanes,
   validating ordinary atomic compare-and-set success/failure semantics.
   Remaining modes and real-app acceptance remain open.
+- Checkpoint 756: `aosp-core-apps-graphics-acceptance.sh` passes unchanged
+  Calculator (`2+3=5`) and DeskClock timer flows through the common
+  HWUI/SurfaceFlinger/Metal path. Full AOSP matrix and Blue Archive acceptance
+  remain open.
