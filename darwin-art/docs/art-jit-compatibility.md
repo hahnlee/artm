@@ -7196,3 +7196,6 @@ incomplete and still requires managed caller unwind validation.
   parsing and Ptrace reuse one validated send right. Fresh smoke still stalls
   after cache reuse, so the remaining issue is downstream remote thread/task
   interrogation rather than repeated task_for_pid alone.
+- Checkpoint 512: the macOS SDK declares `task_threads` against
+  `task_inspect_t`; our cache currently retains a generic task send-right.
+  Explicit inspect-right acquisition is the next host-layer change to test.

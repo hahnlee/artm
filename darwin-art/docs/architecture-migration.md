@@ -11854,3 +11854,6 @@ or admission exception was added.
 - Checkpoint 511: added shared remote task-port caching across map parsing and
   Ptrace. The smoke hang persists after cache reuse, narrowing the defect to
   subsequent remote thread/task interrogation.
+- Checkpoint 512: modern SDK headers require `task_inspect_t` for
+  `task_threads`, while the cache retains a generic task send-right. Explicit
+  inspect-right acquisition is the next change to test.
