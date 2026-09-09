@@ -12783,3 +12783,8 @@ or admission exception was added.
   JIT audit pass. The bounded forced-GC 497 run remained active beyond the
   observation window, so stress performance is still open and no false PASS is
   recorded.
+- Checkpoint 659: A second bounded forced-GC launch with lower-overhead process
+  observation remained in interpreter preparation/dex2oat during the window;
+  it yielded no managed throughput sample and was fully reaped. The optimized
+  map-publication implementation is linked and audit-clean, but the stress
+  timeout remains an open performance item.

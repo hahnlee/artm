@@ -8206,3 +8206,8 @@ incomplete and still requires managed caller unwind validation.
   pass after this change. A bounded 497 GC-stress run still exceeded the
   observation window, so the optimization is not yet credited with clearing
   the long-run stress timeout.
+- Checkpoint 659: Repeated the forced-GC launch with a bounded low-overhead
+  process probe; the runner spent the observation window in its interpreter
+  preparation/dex2oat phases, so no managed throughput sample was obtained.
+  The probe and all descendants were reaped. The optimized unwind-map path
+  remains linked and audit-clean; GC-stress completion is still unproven.
