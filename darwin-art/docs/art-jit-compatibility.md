@@ -7167,3 +7167,7 @@ incomplete and still requires managed caller unwind validation.
   the process stalls inside `AndroidRemoteUnwinder::Unwind` before returning
   from remote-child sampling. This isolates the next defect to the remote
   register/maps/record collection path rather than thread resume cleanup.
+- Checkpoint 505: added forward-progress and zero-size guards to the Darwin
+  `/proc/<pid>/maps` submap traversal. A fresh smoke still stalls in remote
+  unwind, so the kernel region query or remote register acquisition remains
+  unresolved; no successful relink/probe is claimed.

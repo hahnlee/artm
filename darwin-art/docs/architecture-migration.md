@@ -11832,3 +11832,6 @@ or admission exception was added.
 - Checkpoint 504: a fresh smoke run reaches worker join and then hangs inside
   remote-child unwind. The remaining issue is therefore in remote
   register/maps/frame collection, not local thread resumption.
+- Checkpoint 505: Darwin remote map traversal now rejects zero-size and
+  non-progressing submap records. The smoke hang persists, indicating a deeper
+  kernel region-query or remote-register issue still requires isolation.

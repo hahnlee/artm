@@ -169,6 +169,8 @@ bool ReadMapFile(const std::string& path, Callback callback) {
       process_id == getpid() ? DarwinImageSegments() : DarwinRemoteImageSegments(task);
   mach_vm_address_t address = 0;
   natural_t depth = 0;
+  mach_vm_address_t previous_address = 0;
+  natural_t previous_depth = 0;
   while (true) {
     mach_vm_size_t size = 0;
     vm_region_submap_info_data_64_t info{};
@@ -177,6 +179,11 @@ bool ReadMapFile(const std::string& path, Callback callback) {
         task, &address, &size, &depth,
         reinterpret_cast<vm_region_recurse_info_t>(&info), &count);
     if (result != KERN_SUCCESS) break;
+    // Some task maps expose empty submap records while a child is blocked.
+    // Never spin forever when the kernel returns no forward progress.
+    if (size == 0 || (address == previous_address && depth == previous_depth)) break;
+    previous_address = address;
+    previous_depth = depth;
     if (info.is_submap) {
       ++depth;
       continue;
