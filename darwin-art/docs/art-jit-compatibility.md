@@ -8048,3 +8048,9 @@ incomplete and still requires managed caller unwind validation.
   Worker turnover remains normal and no orphaned ART hosts are present. The
   interim failures are not yet actionable until the replay reaches a terminal
   summary and the affected tests are rerun serially.
+
+- Checkpoint 633: The live four-way replay has advanced through `720` and
+  `735–736` thread/interface and checker cases. The parent remains attached,
+  workers are turning over normally, and no orphaned ART hosts are present.
+  Ledger counts continue to fluctuate while hash-invalidated rows are replaced;
+  terminal replay plus serial failure reproduction remains required.

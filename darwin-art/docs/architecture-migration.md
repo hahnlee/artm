@@ -12648,3 +12648,8 @@ or admission exception was added.
   invoke-custom/lambda, and JLI coverage. Worker turnover remains healthy with
   no orphaned ART hosts; the interim failure rows await terminal replay and
   serial reproduction before any runtime change is selected.
+
+- Checkpoint 633: The replay has progressed through `720` and `735–736`
+  thread/interface and checker coverage. Parent/worker lifecycle remains
+  healthy without orphaned ART hosts. Interim ledger counts are unstable while
+  invalidated rows are re-run, so no failure is treated as final yet.
