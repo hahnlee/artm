@@ -13127,3 +13127,7 @@ or admission exception was added.
   the field. Link audit passed, and `855-native` plus `1927-exception-event`
   pass interpreter/JIT/unmodified lanes; broader JNI and exception coverage
   is still required.
+- Checkpoint 730: `004-ReferenceMap` passes all three runner lanes, validating
+  stack reference-map walking through compiled frames after the intrinsic
+  boundary fix. Additional JNI/stack-walk coverage and real APK acceptance
+  remain open.

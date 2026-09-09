@@ -8611,3 +8611,7 @@ incomplete and still requires managed caller unwind validation.
   decodes the compressed receiver before field access. Full JIT/graphics link
   audit passed; `855-native` and `1927-exception-event` pass all three lanes.
   Broader JNI/exception matrix and real APK acceptance remain open.
+- Checkpoint 730: `004-ReferenceMap` passes interpreter, optimized/JIT, and
+  unmodified-source lanes after the referent intrinsic change, covering stack
+  reference-map walking through compiled frames. Wider JNI/stack-walk cases
+  and real APK acceptance remain outstanding.
