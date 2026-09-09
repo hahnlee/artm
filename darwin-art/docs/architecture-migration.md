@@ -12981,3 +12981,9 @@ or admission exception was added.
   is not a fix; the next architectural change must publish the AOSP managed
   stack across the JNI/native invocation transition and distinguish native
   faults from ART generated-code faults.
+- Checkpoint 701: The process-global Darwin null handler now gates exception
+  rewriting on the signal PC being present in the ART-published JIT/AOT
+  registry. Chrome's `libchrome.so` null access is consequently surfaced as
+  an unresolved native signal (`addr=0x110`, `rc=139`) rather than a fabricated
+  ART NPE. This restores the native-versus-managed fault boundary; JNI/native
+  invocation remains the next implementation target.

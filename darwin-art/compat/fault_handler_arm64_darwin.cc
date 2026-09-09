@@ -76,12 +76,23 @@ bool NullPointerHandler::Action(int, siginfo_t* info, void* context) {
   }
 
   mcontext_t machine_context = MachineContext(context);
+  const uintptr_t published_method =
+      DarwinArtLookupJitMethod(GetPc(machine_context));
+  // ART's implicit-null handler is process-global on Darwin, but Android ELF
+  // libraries (for example Chromium) also fault in the same process.  Never
+  // reinterpret a native image PC as a quick frame merely because an
+  // arbitrary native stack word happens to look like an ArtMethod.  Only code
+  // ranges explicitly published by ART's JIT/AOT paths may enter this
+  // exception transformation.
+  if (published_method == 0) {
+    return false;
+  }
   uintptr_t stack_pointer = GetSp(machine_context);
   ArtMethod** stack = reinterpret_cast<ArtMethod**>(stack_pointer);
   uintptr_t return_pc = GetPc(machine_context) + 4u;
   ArtMethod* method = IsValidMethod(*stack) ? *stack : nullptr;
   if (method == nullptr) {
-    method = reinterpret_cast<ArtMethod*>(DarwinArtLookupJitMethod(GetPc(machine_context)));
+    method = reinterpret_cast<ArtMethod*>(published_method);
     if (method != nullptr) {
       // The signal throw stub walks the interrupted quick frame through this
       // slot. Publish the recovered method in-place before changing SP.

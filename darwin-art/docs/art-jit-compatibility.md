@@ -8442,3 +8442,9 @@ incomplete and still requires managed caller unwind validation.
   temporary `jit_method` signal print was removed. Next target is the native
   JNI/ELF invocation boundary and its managed-stack publication, not broader
   implicit-null recovery.
+- Checkpoint 701: Hardened the Darwin null handler to require a published
+  ART JIT/AOT PC before rewriting a signal context. Chrome now reports
+  `DARWIN signal: unresolved ... addr=0x110` for its `libchrome.so` fault
+  instead of entering ART's null-exception path; exit remains `rc=139`.
+  This confirms the previous crash was being misclassified at the process-wide
+  signal boundary. The underlying native/JNI fault is still outstanding.
