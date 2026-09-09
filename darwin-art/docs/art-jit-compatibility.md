@@ -7694,3 +7694,12 @@ incomplete and still requires managed caller unwind validation.
    safely printing the ART-side chain. The innermost reflective wrapper still
    carries no populated cause, confirming that the next work is native-call
    tracing/contract repair, not APK or DEX changes.
+
+587. **2026-09-09 — AOSP constructor boundary narrowed**
+
+   Decompiled the pinned framework DEX and confirmed that `TextView` declares
+   no native methods; its four-argument constructor first initializes `View`,
+   creates `TextPaint`, and then consumes `Typeface` state. The Calculator
+   failure is therefore narrowed to framework initialization/native Typeface
+   instance state rather than a missing TextView symbol. No APK or framework
+   bytecode was modified; the next step is targeted native-instance tracing.
