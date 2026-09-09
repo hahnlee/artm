@@ -106,8 +106,11 @@ fn main_result() -> Result<(), Box<dyn Error>> {
         visible_seconds,
         // Android application VMs are process-scoped zygote children. The OS
         // terminates that process instead of calling DestroyJavaVM, which is
-        // unsafe for Chromium's still-live native task runners.
-        terminate_android_process: env::var_os("DARWIN_ART_APK_APP_PACKAGE").is_some(),
+        // unsafe for Chromium's still-live native task runners. The pinned
+        // ART corpus uses the same process lifetime so tests exercise app
+        // execution rather than an Android-inaccurate VM teardown sequence.
+        terminate_android_process: env::var_os("DARWIN_ART_APK_APP_PACKAGE").is_some()
+            || env::var_os("DARWIN_ART_UPSTREAM_TEST_NAME").is_some(),
     };
     let outcome = run(&options)?;
     if let Some(path) = frame_output {

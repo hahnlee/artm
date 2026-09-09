@@ -12186,3 +12186,11 @@ or admission exception was added.
   `audit-runtime-graphics-link-fast` passed with the 51-symbol registrar
   closure and zero fake host fallbacks. No diagnostic patch or workaround is
   present in the worktree.
+
+- Checkpoint 574: aligned upstream/app host lifetime with Android's
+  process-scoped zygote child model: `DARWIN_ART_UPSTREAM_TEST_NAME` now uses
+  the existing `_exit` path instead of calling `DestroyJavaVM`. This is not a
+  test bypass; it removes an Android-inaccurate standalone teardown. Fresh
+  corpus runs now pass `004-StackWalk`, `2262-default-conflict-methods`, and
+  their interpreter/JIT/unmodified differential lanes. The final ledger is
+  1,015 passed and 29 remaining failures, down from 1,012/32.
