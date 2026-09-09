@@ -7,7 +7,6 @@
 #include <mutex>
 #include <unordered_map>
 #include <unistd.h>
-
 namespace darwin_art::remote_task {
 
 // Keep one validated task send right per remote process.  macOS may block on
