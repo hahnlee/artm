@@ -8759,3 +8759,8 @@ incomplete and still requires managed caller unwind validation.
   its app-AOT generated code still faults on an implicit-null access without a
   published range. This is a distinct app-AOT registration gap (not the fixed
   JIT table exhaustion) and remains the next runtime repair target.
+- Checkpoint 767: Moved app-AOT registry publication to use the original oat
+  entrypoint before instrumentation bridges and rebuilt/audited the graphics
+  runtime. `031-class-attributes` still faults at a boot/shared-AOT PC, so the
+  remaining gap is boot-image/shared-range publication rather than the app
+  instrumentation replacement condition.

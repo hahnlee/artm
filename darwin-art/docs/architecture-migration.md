@@ -13251,3 +13251,7 @@ or admission exception was added.
   app-AOT generated code still faults on an implicit-null access without a
   published range. This distinct app-AOT registration gap remains the next
   runtime repair target.
+- Checkpoint 767: Moved app-AOT registry publication to use the original oat
+  entrypoint before instrumentation bridges and rebuilt/audited the graphics
+  runtime. `031-class-attributes` still faults at a boot/shared-AOT PC; the
+  remaining gap is boot-image/shared-range publication.
