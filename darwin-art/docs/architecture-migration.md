@@ -13010,3 +13010,10 @@ or admission exception was added.
   CoreText/host ICU/fmt leakage), establishing a reproducible clean build
   boundary. Runtime compatibility work continues at the unresolved Chrome
   native/JNI fault boundary.
+- Checkpoint 706: The optimizing compiler's last Darwin-specific instruction
+  allowlist was removed via a reproducible staged patch; LoadString, LoadClass,
+  and all Invoke forms now reach the normal AOSP pipeline. Clean JIT build and
+  graphics-link audit passed (`registrar=51`, fake symbols/host ICU/fmt/CoreText
+  all zero). The old dex probe artifact lacks the exported process-exit symbol,
+  so its failure is tracked as probe ABI cleanup while runtime/JIT work
+  continues.

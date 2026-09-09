@@ -490,6 +490,18 @@ pub(crate) fn build_jit_compiler(root: &Path) -> Result<()> {
     run_command(
         Command::new("patch")
             .args(["--batch", "--forward", "-p1", "-i"])
+            .arg(root.join("patches/art/0135-darwin-remove-optimizing-allowlist.patch"))
+            .current_dir(build.join("patched-source")),
+    )?;
+    run_command(
+        Command::new("patch")
+            .args(["--batch", "--forward", "-p1", "-i"])
+            .arg(root.join("patches/art/0136-darwin-remove-optimizing-allowlist-tail.patch"))
+            .current_dir(build.join("patched-source")),
+    )?;
+    run_command(
+        Command::new("patch")
+            .args(["--batch", "--forward", "-p1", "-i"])
             .arg(root.join("patches/art/0127-darwin-arm64-boxing-allocation-boundary.patch"))
             .current_dir(build.join("patched-source")),
     )?;

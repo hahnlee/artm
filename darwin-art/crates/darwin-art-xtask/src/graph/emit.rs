@@ -723,6 +723,8 @@ pub(crate) fn emit_graph(out: &Path) -> io::Result<()> {
         "patches/art/0121-darwin-arm64-jni-monitor-boundary.patch",
         "patches/art/0122-darwin-arm64-image-method-addresses.patch",
         "patches/art/0124-darwin-arm64-implicit-null-address.patch",
+        "patches/art/0135-darwin-remove-optimizing-allowlist.patch",
+        "patches/art/0136-darwin-remove-optimizing-allowlist-tail.patch",
         "patches/art/0127-darwin-arm64-boxing-allocation-boundary.patch",
         "patches/art/0129-darwin-arm64-baker-intermediate-array-address.patch",
         "patches/art/0131-darwin-arm64-boxing-cache-address.patch",

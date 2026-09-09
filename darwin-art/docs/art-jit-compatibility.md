@@ -8474,3 +8474,11 @@ incomplete and still requires managed caller unwind validation.
   `registrar=51 fake-symbols=0 host-icu=0 host-fmt=0 CoreText=0`; the ARM64 JIT
   archive and runtime bootstrap were rebuilt from the clean shadow. This fixes
   build reproducibility only; Chrome's unresolved native fault remains open.
+- Checkpoint 706: Added a clean AOSP compiler patch that removes the remaining
+  Darwin-only LoadString/LoadClass/Invoke graph allowlist from the optimizing
+  compiler. A fresh JIT shadow compiled all 106 ARM64 objects and the graphics
+  link audit passed with `registrar=51 fake-symbols=0 host-icu=0 host-fmt=0
+  CoreText=0`; the staged compiler contains no Darwin graph-reject block. The
+  generic dex probe still cannot run because its legacy runtime-link artifact
+  does not export `darwin_art_prepare_process_exit`; this is a probe ABI
+  mismatch, not evidence of JIT completion.
