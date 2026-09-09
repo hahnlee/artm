@@ -84,7 +84,7 @@ bool NullPointerHandler::Action(int, siginfo_t* info, void* context) {
   // arbitrary native stack word happens to look like an ArtMethod.  Only code
   // ranges explicitly published by ART's JIT/AOT paths may enter this
   // exception transformation.
-  if (published_method == 0) {
+  if (!DarwinArtLookupJitCode(GetPc(machine_context))) {
     return false;
   }
   uintptr_t stack_pointer = GetSp(machine_context);

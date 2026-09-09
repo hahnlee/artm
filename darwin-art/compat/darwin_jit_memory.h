@@ -16,6 +16,8 @@ unsigned DarwinArtJitWriteDepth();
 // written by the JIT after code commit and read lock-free from the fault path.
 void DarwinArtRegisterJitMethod(uintptr_t code, size_t size, uintptr_t method);
 uintptr_t DarwinArtLookupJitMethod(uintptr_t pc);
+extern "C" void DarwinArtRegisterJitCodeRange(uintptr_t code, size_t size);
+extern "C" bool DarwinArtLookupJitCode(uintptr_t pc);
 
 // Thread-affine and nestable. Never execute JIT code inside a write scope.
 class DarwinArtJitWriteScope {

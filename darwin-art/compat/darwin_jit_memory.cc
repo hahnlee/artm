@@ -19,7 +19,7 @@ JitMethodEntry g_jit_method_entries[kJitMethodEntries];
 }
 
 void DarwinArtRegisterJitMethod(uintptr_t code, size_t size, uintptr_t method) {
-  if (code == 0 || size == 0 || method == 0) return;
+  if (code == 0 || size == 0) return;
   const uintptr_t end = code > UINTPTR_MAX - size ? UINTPTR_MAX : code + size;
   for (auto& entry : g_jit_method_entries) {
     uintptr_t current = entry.start.load(std::memory_order_acquire);
@@ -46,6 +46,20 @@ uintptr_t DarwinArtLookupJitMethod(uintptr_t pc) {
     }
   }
   return 0;
+}
+
+extern "C" void DarwinArtRegisterJitCodeRange(uintptr_t code, size_t size) {
+  DarwinArtRegisterJitMethod(code, size, 0);
+}
+
+extern "C" bool DarwinArtLookupJitCode(uintptr_t pc) {
+  if (pc == 0) return false;
+  for (const auto& entry : g_jit_method_entries) {
+    const uintptr_t start = entry.start.load(std::memory_order_acquire);
+    const uintptr_t end = entry.end.load(std::memory_order_acquire);
+    if (start != 0 && pc >= start && pc < end) return true;
+  }
+  return false;
 }
 
 void* DarwinArtMapJitCode(size_t size) {

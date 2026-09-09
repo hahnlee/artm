@@ -8448,3 +8448,10 @@ incomplete and still requires managed caller unwind validation.
   instead of entering ART's null-exception path; exit remains `rc=139`.
   This confirms the previous crash was being misclassified at the process-wide
   signal boundary. The underlying native/JNI fault is still outstanding.
+- Checkpoint 702: Unified the existing AOSP `darwin_art_register_compiled_method`
+  publication with the lock-free PC range registry, and added method identity
+  publication for the JIT/AOT ArtMethod paths. Graphics-link audit passed.
+  Chrome still exits `rc=139`; its changing `0x104…` fault PCs remain outside
+  the registry and are reported as unresolved native signals. The next target
+  is identifying that low-window code producer (nterp/trampoline versus JIT),
+  not widening the signal handler.

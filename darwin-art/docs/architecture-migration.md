@@ -12987,3 +12987,9 @@ or admission exception was added.
   an unresolved native signal (`addr=0x110`, `rc=139`) rather than a fabricated
   ART NPE. This restores the native-versus-managed fault boundary; JNI/native
   invocation remains the next implementation target.
+- Checkpoint 702: Existing compiled-method range publication is now linked to
+  the signal-safe PC registry, with ArtMethod identity added at the JIT/AOT
+  publication sites. The link audit passes, but Chrome still produces an
+  unresolved `addr=0x110` fault (`rc=139`) at low-window PCs not present in the
+  registry. Continue by tracing the low-window code producer and JNI/nterp
+  transition rather than treating arbitrary native PCs as managed frames.
