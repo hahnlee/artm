@@ -7361,3 +7361,8 @@ incomplete and still requires managed caller unwind validation.
 - Checkpoint 537: reran the authoritative `137-cfi --keep` after the task-port
   retry change. The result is unchanged: local unwind passes, while all three
   remote cases still report `PTRACE_GETREGSET ... ESRCH`.
+
+- Checkpoint 538: added diagnostic reporting for failed Darwin `task_for_pid`
+  acquisition (Mach status and child liveness) and confirmed the existing
+  generated graphics image must be rebuilt before that instrumentation can be
+  observed. The JIT/host crate check remains green; remote CFI is still open.

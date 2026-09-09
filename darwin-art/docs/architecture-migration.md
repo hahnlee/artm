@@ -11990,6 +11990,11 @@ or admission exception was added.
 - Checkpoint 537: the post-patch `137-cfi --keep` rerun still fails only in
   remote child register capture with `ESRCH`; local CFI remains passing.
 
+- Checkpoint 538: instrumented Darwin task acquisition with Mach status and
+  liveness diagnostics. The current generated graphics image is cached, so a
+  rebuild is required before interpreting those diagnostics; no compatibility
+  gate was weakened.
+
 - Checkpoint 535: attempted a host-only Darwin procfs/child compatibility
   bridge, then reverted it after confirming the remaining blocker is process
   wait/task-port ownership rather than argv reconstruction. Keep the upstream
