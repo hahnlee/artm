@@ -12909,3 +12909,9 @@ or admission exception was added.
   process lifecycle is the trigger rather than menu hit-testing. The next
   implementation step is low-window code ownership/ABI mapping; no workaround
   was added. Calculator and DeskClock acceptance remain green.
+- Checkpoint 686: A bounded fault-handler trace confirmed the Chrome fault PC
+  falls outside the generated ranges currently visible to ART despite a
+  runnable thread with the mutator lock. A temporary whole managed-window
+  bridge did not change the crash and was discarded as too broad. The next
+  implementation target is exact OAT/JIT range publication for child-loader
+  code; no signal fallback or diagnostic instrumentation remains.

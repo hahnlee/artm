@@ -8359,3 +8359,11 @@ incomplete and still requires managed caller unwind validation.
   PC changes with ASLR but remains in the low managed executable window and
   ART reports it as unresolved; Calculator and DeskClock remain green. No
   speculative signal or pointer workaround was retained.
+- Checkpoint 686: A bounded fault-handler trace confirmed the Chrome fault PC
+  (`0x106f0aa98` in that run) was outside the two ranges visible to
+  `FaultManager::IsInGeneratedCode` (`0x123af8000/32 MiB` and
+  `0x1068496e0/61152`), while the thread was runnable and held the mutator
+  lock. A temporary whole-window classification was tested and did not make
+  Chrome start, so it was reverted; the remaining fix is precise publication
+  and ownership of the missing OAT/JIT range, not a broad signal fallback.
+  Diagnostic source was removed.
