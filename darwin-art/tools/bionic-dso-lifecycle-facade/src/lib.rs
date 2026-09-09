@@ -311,13 +311,29 @@ impl Lifecycle {
         let Some(function) = function else {
             return -1;
         };
-        let dso = dso as usize;
+        let mut dso = dso as usize;
         let Ok(_coordinator) = ENTRY_COORDINATOR.lock() else {
             return -1;
         };
         let Ok(mut state) = self.state.lock() else {
             return -1;
         };
+        // Some Android C++ runtimes pass a null DSO cookie to
+        // __cxa_atexit.  The destructor code pointer still identifies the
+        // owning ELF image, so bind that registration to a synthetic,
+        // image-local cookie.  This keeps teardown safe and prevents a
+        // process-global null entry from surviving an APK unload.
+        if dso == 0 {
+            let function_address = function as usize;
+            if let Some(image) = state
+                .images
+                .iter_mut()
+                .find(|image| function_address >= image.start && function_address < image.end)
+            {
+                dso = function_address;
+                image.handles.insert(dso);
+            }
+        }
         if dso != 0 && !state.published.contains(&dso) {
             let Some(image_index) = state
                 .images

@@ -11757,3 +11757,8 @@ or admission exception was added.
   runtime; no finalizer entry/return was observed before abort. The abort is
   therefore in the graph drop path before guest fini execution (or in a
   lower-level mapped-image teardown), not in the Java callback lifecycle.
+- Checkpoint 488: owner-level tracing identified the exact invariant failure:
+  DSO lifecycle teardown saw two registrations and two images still live after
+  graph/image cleanup. Android C++ runtimes may pass a null `__cxa_atexit`
+  cookie; those registrations are now associated with their destructor's
+  owning image by code address so image finalization can drain them safely.
