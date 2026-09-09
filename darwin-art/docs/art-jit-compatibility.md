@@ -7330,3 +7330,10 @@ incomplete and still requires managed caller unwind validation.
   polymorphic/custom, and mixed-width register/stack contracts. This is broad
   differential evidence, not completion: real APK UI/native workloads and the
   explicit window/GPU gate remain required.
+
+- Checkpoint 533: ran the unmodified AOSP `137-cfi` upstream test with both
+  interpreter and JIT modes. In-process CFI unwinding passes, but the remote
+  child path returns `PTRACE_GETREGSET ... ESRCH` and reports `FAIL`; this is a
+  concrete Darwin compatibility gap in the Linux ptrace-to-Mach remote unwind
+  adapter, not a JIT arithmetic or frame-layout result. Preserve the failure
+  as a gate and implement the task-port register snapshot path next.

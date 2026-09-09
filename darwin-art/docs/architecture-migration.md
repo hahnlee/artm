@@ -11972,3 +11972,10 @@ or admission exception was added.
   inlining, VarHandle, invoke-polymorphic/custom, and mixed register/stack
   calls. Keep the scope honest: this validates the JIT/runtime contracts but
   does not yet prove Blue Archive or every real APK/native graphics workload.
+
+- Checkpoint 533: AOSP `137-cfi` was exercised without changing its Java or
+  native sources. Local unwind succeeds in both modes, while remote unwind
+  fails because the Linux `PTRACE_GETREGSET` ABI sees `ESRCH` on Darwin. This
+  isolates the next runtime work to a Mach task-port register/memory adapter
+  for libunwindstack; the failure remains authoritative rather than being
+  normalized to success.
