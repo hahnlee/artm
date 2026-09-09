@@ -13051,3 +13051,7 @@ or admission exception was added.
   JIT code-range publication in that process. The architecture must first
   identify whether the PC belongs to AOT, nterp, or a trampoline; widening the
   JIT registry or null handler would be incorrect.
+- Checkpoint 713: The repeated Chrome/system-server run preserves the same
+  low-window `SEGV_ACCERR` signature without a JIT publication event. Producer
+  classification via mapping/symbolization remains the next architecture
+  task; signal handling is intentionally unchanged.

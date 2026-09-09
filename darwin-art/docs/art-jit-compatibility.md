@@ -8519,3 +8519,8 @@ incomplete and still requires managed caller unwind validation.
   therefore not proven to be a committed optimizing-JIT range; distinguish
   AOT/nterp/trampoline code from JIT before changing ARM64 lowering or fault
   recovery.
+- Checkpoint 713: Repeated the real-app run after rebuilding publication
+  instrumentation. The fault moved to `pc=0x12d801d1c` with the same
+  `SEGV_ACCERR`/`addr=0x6060313` signature and still emitted no registry event.
+  Keep the PC classified as an unowned generated-code window until mapping
+  symbolization identifies its producer.
