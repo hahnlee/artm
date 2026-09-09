@@ -8106,3 +8106,9 @@ incomplete and still requires managed caller unwind validation.
   and Parcel compiler-surface changes across interpreter/JIT/unmodified lanes.
   Only `497-inlining-and-class-loader` remains, differing solely by the
   missing reflective `Method.invoke (Native Method)` stack frame.
+
+- Checkpoint 642: The remaining `497` discrepancy was reproduced after a clean
+  runtime rebuild. The emitted trace contains every managed frame and differs
+  only by the fast-native `java.lang.reflect.Method.invoke` frame; this points
+  to Darwin stack walking/publication for fast JNI frames rather than class
+  loading or JIT semantics. No completion claim is made.

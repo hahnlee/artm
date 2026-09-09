@@ -12699,3 +12699,8 @@ or admission exception was added.
   compiler API coverage in all three lanes. The sole remaining corpus gap is
   `497-inlining-and-class-loader`, where `Method.invoke (Native Method)` is
   absent from the emitted stack trace.
+
+- Checkpoint 642: Clean reproduction confirms `497` now differs only by the
+  fast-native `java.lang.reflect.Method.invoke` frame; all managed frames and
+  runtime behavior match AOSP. The remaining investigation is Darwin fast-JNI
+  stack publication/walking, not class loading or JIT execution.
