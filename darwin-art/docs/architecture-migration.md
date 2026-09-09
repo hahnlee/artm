@@ -12747,3 +12747,8 @@ or admission exception was added.
   still running under the isolated process-group runner. Runtime logs show
   active concurrent-copying GC and no crash/orphan; the terminal result will
   be recorded after the same process exits.
+- Checkpoint 652: Fixed stale DEX verifier contracts that made normal
+  incremental builds fail despite valid output. The baseline (`56 classes,
+  2682 methods`) and button (`112 classes, 3092 methods`) builders now pass
+  their own checks, reducing a build-system blocker without changing runtime
+  semantics.

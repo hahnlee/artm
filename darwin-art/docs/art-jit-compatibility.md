@@ -8164,3 +8164,8 @@ incomplete and still requires managed caller unwind validation.
   live and CPU-active, with repeated concurrent-copying collections and no
   crash or orphan process observed yet; its terminal PASS/FAIL result is still
   pending and is not counted as completed evidence.
+- Checkpoint 652: Refreshed the baseline/button DEX contract counts to the
+  current generated sources (`56/2682` and `112/3092`). Both `build-dex` and
+  `build-button-dex` now complete their contract verification instead of
+  failing on stale method-count expectations, restoring reproducible runtime
+  rebuilds for subsequent JIT work.
