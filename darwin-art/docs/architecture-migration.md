@@ -12223,3 +12223,11 @@ or admission exception was added.
    in interpreter, JIT, and unmodified-source lanes; the ledger is 1,027
    passed / 17 failed. Baseline/button DEX contracts were rebuilt for the
    added harness method.
+
+578. **2026-09-09 — app-image and GC-space corpus cases clear**
+
+   Re-ran `080-oom-throw`, `1000-non-moving-space-stress`,
+   `1001-app-image-regions`, and `118-noimage-dex2oat`; all interpreter, JIT,
+   and unmodified-source lanes pass. The ledger is now 1,031 passed / 13
+   failed. Remaining failures are limited to native bridge and JVMTI/class
+   unloading, loader isolation, and structural redefinition scope.
