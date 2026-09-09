@@ -12049,3 +12049,7 @@ or admission exception was added.
 - Checkpoint 548: unmodified AOSP `980-redefine-object` passes in interpreter
   and JIT modes and in the combined differential run, validating the class
   redefinition/deoptimization boundary.
+
+- Checkpoint 549: `985-re-obsolete` could not compile because the filesystem
+  was full. Generated test artifacts and untracked crash/build files were
+  moved to macOS Trash; tracked source and runtime state remain intact.

@@ -7414,3 +7414,8 @@ incomplete and still requires managed caller unwind validation.
 - Checkpoint 548: unmodified AOSP `980-redefine-object` passes in interpreter
   and JIT modes plus the combined differential run, extending validated
   coverage to JVMTI class redefinition/deoptimization behavior.
+
+- Checkpoint 549: attempted `985-re-obsolete`; compilation was blocked by
+  `No space left on device`. Generated test artifacts and untracked crash/build
+  files were moved to macOS Trash; tracked source and runtime state remain
+  preserved.
