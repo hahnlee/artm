@@ -8174,3 +8174,10 @@ incomplete and still requires managed caller unwind validation.
   continuous concurrent-copying collections and no abort or leaked sibling.
   This is a verified in-flight stress run; its result is intentionally not
   promoted to PASS until the process terminates.
+- Checkpoint 654: The `096 --gcstress` run reached its 1200s timeout without
+  a managed failure; logs showed repeated 50–150ms concurrent-copying pauses.
+  A raw `_Unwind_Backtrace` optimization was prototyped but immediately
+  rejected after it triggered SIGTRAP while crossing managed ART frames. The
+  verified Darwin unwindstack collector remains unchanged; the timeout is now
+  tracked as a GC-stress performance gap, not papered over with an unsafe
+  walker.

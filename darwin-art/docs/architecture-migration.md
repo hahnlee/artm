@@ -12755,3 +12755,8 @@ or admission exception was added.
 - Checkpoint 653: The heavy `096` GC-stress process is still live after more
   than fifteen minutes, consuming CPU while concurrent-copying collections
   continue. No crash or orphan has appeared; terminal output remains pending.
+- Checkpoint 654: `096-array-copy-concurrent-gc --gcstress` terminated at the
+  1200s runner timeout after sustained concurrent-copying pauses. An attempted
+  raw Darwin unwind walker caused SIGTRAP in managed frames and was fully
+  discarded; the existing unwindstack provider is retained while GC-stress
+  scheduling/performance is investigated separately.
