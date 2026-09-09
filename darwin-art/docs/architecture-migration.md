@@ -11920,3 +11920,10 @@ or admission exception was added.
   (notably `java.lang.Float` and filesystem provider ordering). Keep this work
   in the narrow Darwin host/provider layer while preserving the AOSP app and
   DEX contract; do not paper over it with an interpreter fallback.
+
+- Checkpoint 525: repeated the real Button launch and confirmed the provider
+  status 2 is the normal already-installed owner state, not the failure. The
+  actionable gap remains libcore registration ordering/export (surfacing as an
+  unresolved `Float.floatToRawIntBits` during graphics startup). Diagnostic
+  instrumentation was reverted; next isolate this with a forced runtime-link
+  rebuild and phase-level evidence.

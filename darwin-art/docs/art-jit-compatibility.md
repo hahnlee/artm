@@ -7270,3 +7270,10 @@ incomplete and still requires managed caller unwind validation.
   stops in the independent libcore registration boundary (`Float` native
   resolution and filesystem-provider initialization). This is now the next
   AOSP-differential target; no interpreter fallback or APK rewrite was added.
+
+- Checkpoint 525: reproduced the GPU Button failure after a clean runtime-link
+  rebuild. The filesystem process owner reports `ALREADY_INSTALLED` (expected
+  when the provider owner was installed earlier), while libcore registration
+  still aborts before the app frame and leaves `Float.floatToRawIntBits`
+  unresolved. Temporary logging was removed; the next step is to trace the
+  registration phase with the runtime-link build cache disabled.
