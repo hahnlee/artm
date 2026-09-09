@@ -12107,3 +12107,9 @@ or admission exception was added.
   DEX staging. Android system-root leftovers are tiny. Normal-return cleanup
   is present, so aborted runs explain the residue; it is material but not the
   main multi-GB storage cause.
+
+- Checkpoint 561: runtime data tracing found the persistent `_build/app-data`
+  mount at about 166 MB, including 46 MB current Chromium data and a 116 MB
+  `org.chromium.chrome.backup-*` snapshot dominated by 4 MB `BrowserMetrics`
+  files. This is Android app-private `/data/user/0` state, not the ART heap;
+  the runtime needs explicit cache/snapshot retention policy for it.

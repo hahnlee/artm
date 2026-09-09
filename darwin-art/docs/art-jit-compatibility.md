@@ -7484,3 +7484,11 @@ incomplete and still requires managed caller unwind validation.
   `darwin-art-android-system-root.*` directories are only tens of KB each.
   Runner cleanup exists on normal return, so these leftovers indicate aborted
   runs. Temporary leakage is real but not the primary multi-GB allocation.
+
+- Checkpoint 561: traced runtime Android data separately from host temp. The
+  persistent `_build/app-data` mount is about 166 MB: current Chromium data is
+  46 MB and an old `org.chromium.chrome.backup-*` snapshot is 116 MB. Most of
+  that snapshot is Chromium `BrowserMetrics/*.pma` files (about 4 MB each).
+  This is Android `/data/user/0` app-private state, not ART heap; the launcher
+  intentionally persists it, so runtime lifecycle needs an explicit cache/
+  snapshot retention policy rather than treating it as build output.
