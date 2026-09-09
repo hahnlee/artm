@@ -12204,3 +12204,11 @@ or admission exception was added.
    remaining failures are concentrated in class unloading/redefinition,
    class-loader/app-image, native bridge, and unresolved-access cases; they
    require runtime feature work rather than teardown changes.
+
+576. **2026-09-09 — access and classpath probes also clear after rerun**
+
+   Re-ran `064-field-access`, `542-unresolved-access-check`,
+   `936-search-onload`, and `938-load-transform-bcp`; all three execution
+   lanes pass for each. The ledger is now 1,023 passed / 21 failed. The
+   remaining set is dominated by GC-space/app-image stress, native bridge,
+   class unloading/redefinition, and JVMTI structural-scope tests.
