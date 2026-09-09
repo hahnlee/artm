@@ -1237,7 +1237,9 @@ bool DarwinNativeUnwindRemote(Maps* maps, JitDebug* jit_debug, DexFiles* dex_fil
     mach_msg_type_number_t count = ARM_THREAD_STATE64_COUNT;
     const kern_return_t state_status = thread_get_state(
         thread, ARM_THREAD_STATE64, reinterpret_cast<thread_state_t>(&state), &count);
-    ResumeThreadFully(thread);
+    // Remote collection owns one suspend level per sample; do not loop here,
+    // because a second resume can race the target task's own state transition.
+    thread_resume(thread);
     if (state_status != KERN_SUCCESS) return false;
     NativeWalk walk{maps, jit_debug, dex_files, output, output->max_frames.value_or(max_frames), task, memory};
     for (size_t reg = 0; reg < 29; ++reg) walk.last_registers[reg] = state.__x[reg];

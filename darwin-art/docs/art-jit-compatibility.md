@@ -7158,3 +7158,8 @@ incomplete and still requires managed caller unwind validation.
   the worker either, ruling out a single missed `thread_resume` call. The
   temporary harness workaround was removed; direct decomposition of the Mach
   thread-state path remains next.
+- Checkpoint 503: stage markers show the worker exits and joins normally; the
+  hang is inside remote-child unwind before its return. Remote sampling was
+  restored to a single suspend/resume pair (nested draining is local-thread
+  only), and diagnostic smoke edits were removed. Remote frame collection is
+  the active build-pipeline defect.

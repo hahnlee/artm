@@ -11825,3 +11825,7 @@ or admission exception was added.
 - Checkpoint 502: an external resume attempt also left the worker blocked, so
   the issue is not just one missed resume call. The diagnostic workaround was
   removed; direct decomposition of the Mach thread-state path remains.
+- Checkpoint 503: instrumentation proved worker exit/join is healthy and the
+  hang occurs inside remote-child unwind. Remote sampling now uses one
+  suspend/resume pair again; temporary smoke instrumentation was removed.
+  Remote frame collection remains to be decomposed.
