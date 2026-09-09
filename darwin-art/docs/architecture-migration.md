@@ -13265,3 +13265,8 @@ or admission exception was added.
   copy without the visitor declaration and breaking compilation. The prototype
   was removed; the next fix must use a shared compat API. `031-class-attributes`
   remains open.
+- Checkpoint 770: Added a local visitor in `ClassLinker::InitFromBootImage`
+  that publishes each boot-image method's original oat quick-code range,
+  independent of instrumentation bridges. After rebuilding and relinking,
+  `031-class-attributes` and `004-SignalTest` pass all three runner lanes.
+  Broader corpus and production APK acceptance remain open.

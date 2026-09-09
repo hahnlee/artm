@@ -8775,3 +8775,9 @@ incomplete and still requires managed caller unwind validation.
   The prototype was fully removed; the next fix must use a shared compat API
   rather than copy-sensitive class-linker insertion. `031-class-attributes`
   remains open.
+- Checkpoint 770: Added a local visitor in `ClassLinker::InitFromBootImage`
+  that publishes each boot-image method's original oat quick-code range,
+  independent of instrumentation bridges. After rebuilding and relinking,
+  `031-class-attributes` and `004-SignalTest` pass interpreter, optimized/JIT,
+  and unmodified-source lanes. Broader corpus and production APK acceptance
+  remain open.

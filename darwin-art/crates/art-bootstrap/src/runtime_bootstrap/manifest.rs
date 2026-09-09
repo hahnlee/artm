@@ -94,6 +94,7 @@ pub(super) const PATCHED_RUNTIME_PATCHES: &[&str] = &[
     "patches/art/0141-darwin-arm64-original-fault-context.patch",
     "patches/art/0177-darwin-jit-fault-method-registry.patch",
     "patches/art/0178-darwin-aot-fault-method-registry.patch",
+    "patches/art/0181-darwin-register-boot-oat-local-visitor.patch",
     "patches/art/0025-darwin-morecore-diagnostics.patch",
     "patches/art/0027-darwin-string-abi-overlay.patch",
     "patches/art/0028-darwin-minimal-runtime-start.patch",
