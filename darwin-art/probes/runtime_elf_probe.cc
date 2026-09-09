@@ -59,6 +59,17 @@ bool run_android_elf_self_test(JNIEnv* env, JavaVM* vm, jobject class_loader,
                            ? JNI_ERR
                            : reinterpret_cast<JniOnLoad>(entry)(vm, nullptr);
 
+  // JavaVMExt invokes JNI_OnUnload before releasing a NativeBridge image.
+  // The self-test calls JNI_OnLoad directly through the same trampoline, so
+  // mirror that lifecycle edge explicitly instead of asking the owner
+  // teardown to reclaim a live JNI registration set.
+  void* unload_entry = android::NativeBridgeGetTrampoline2(
+      handle, "JNI_OnUnload", nullptr, 0, android::kJNICallTypeRegular);
+  using JniOnUnload = void (*)(JavaVM*, void*);
+  if (unload_entry != nullptr) {
+    reinterpret_cast<JniOnUnload>(unload_entry)(vm, nullptr);
+  }
+
   char* close_error = nullptr;
   const bool closed =
       android::CloseNativeLibrary(handle, needs_native_bridge, &close_error);

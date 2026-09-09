@@ -7052,3 +7052,8 @@ incomplete and still requires managed caller unwind validation.
   attempted thread-state variation did not change the abort and was reverted.
   This points at the NativeBridge trampoline/return ABI or post-load owner
   transition, which is the next implementation boundary to fix.
+- Checkpoint 481: aligned the self-test lifecycle with AOSP by invoking the
+  NativeBridge `JNI_OnUnload` trampoline before releasing the graph owner.
+  The abort remains, so this is not yet sufficient; the next trace must
+  inspect owner teardown after the unload callback rather than treating the
+  JNI return value as the end of the lifecycle.
