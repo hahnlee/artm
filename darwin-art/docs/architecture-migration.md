@@ -12573,3 +12573,11 @@ or admission exception was added.
   denied-capability case, while local unwind and all JIT frame generation stay
   on the real unwindstack implementation. The unwind provider smoke gate now
   classifies task-port/maps denial as an explicit transport-unavailable state.
+
+- Checkpoint 619: Completed the Darwin remote-unwind provider plumbing. The
+  generated `AndroidRemoteUnwinder` now skips Linux architecture probing on
+  Darwin, and denied task-port/maps access is reported as a transport error.
+  `137-cfi` passes all three JIT configurations using the host-layer
+  cooperative stopped-child handoff only when Mach access is unavailable. The
+  provider smoke gate passes with strict local/register/thread/context checks;
+  no pinned AOSP test remains failing in the currently audited corpus slice.
