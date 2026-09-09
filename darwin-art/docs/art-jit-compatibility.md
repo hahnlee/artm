@@ -7345,3 +7345,9 @@ incomplete and still requires managed caller unwind validation.
   plumbing in the unwindstack provider, so the remaining implementation seam
   is child-stop/task-port lifetime synchronization rather than a JIT frame
   layout shortcut.
+
+- Checkpoint 535: investigated a Darwin `/proc/self/cmdline` shim and tested
+  retaining the AOSP CFI child contract. The child lifetime still cannot be
+  observed through the current host process model (wait/task ownership), so
+  the experiment was reverted; the authoritative gate remains the original
+  unmodified AOSP source with remote `ESRCH`.

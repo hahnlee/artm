@@ -11986,3 +11986,8 @@ or admission exception was added.
   disappeared (`PTRACE_GETREGSET ... ESRCH`). Next work is to preserve the
   AOSP SIGSTOP child lifetime and task-port permission boundary until register
   capture completes, without changing the upstream test source.
+
+- Checkpoint 535: attempted a host-only Darwin procfs/child compatibility
+  bridge, then reverted it after confirming the remaining blocker is process
+  wait/task-port ownership rather than argv reconstruction. Keep the upstream
+  CFI failure visible until that lifetime boundary is implemented correctly.
