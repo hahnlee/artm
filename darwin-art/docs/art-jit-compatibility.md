@@ -7810,3 +7810,10 @@ incomplete and still requires managed caller unwind validation.
   therefore only a host-side race guard; it cannot repair the owner-thread
   contract after shutdown has begun. Next work must move upstream-main dispatch
   to an owner-aware launcher boundary rather than adding a test-specific branch.
+
+- Checkpoint 601: Revalidated the remaining `137-cfi` JIT boundary. Local
+  unwinding passes, while remote unwinding fails because the AOSP fixture's
+  Linux `ptrace`/`/proc` path is not implemented by the Darwin provider and
+  returns `PTRACE_GETREGSET ... No such process`. This is a genuine host
+  unwind capability gap, not a JIT output adjustment; it remains open alongside
+  the owner-thread shutdown contract.
