@@ -7321,3 +7321,12 @@ incomplete and still requires managed caller unwind validation.
   exits without the prior teardown abort, but its graphics session is not
   entered in that headless invocation; the next verification is the explicit
   window/GPU gate with a fresh linked dylib.
+
+- Checkpoint 532: `tools/audit-art-jit.sh` completed successfully against the
+  current ARM64 runtime. The run exercised compiled arithmetic, field/array and
+  volatile access, JNI/native callbacks, nullable/reference returns, division
+  recovery, typed exceptions/finally, monitor contention and recursion, CC GC
+  and read-barrier paths, inlining, VarHandle/ByteBuffer views, invoke-
+  polymorphic/custom, and mixed-width register/stack contracts. This is broad
+  differential evidence, not completion: real APK UI/native workloads and the
+  explicit window/GPU gate remain required.

@@ -11965,3 +11965,10 @@ or admission exception was added.
   longer reaches the former teardown abort, while it also does not exercise a
   graphics session in that invocation. Keep the end-to-end window/GPU gate as
   the authoritative next check before declaring surface shutdown complete.
+
+- Checkpoint 532: the full `audit-art-jit.sh` acceptance completed with exit
+  status 0 on the current runtime, covering arithmetic, fields/arrays,
+  references, JNI, exceptions/finally, monitors, concurrent GC/read barriers,
+  inlining, VarHandle, invoke-polymorphic/custom, and mixed register/stack
+  calls. Keep the scope honest: this validates the JIT/runtime contracts but
+  does not yet prove Blue Archive or every real APK/native graphics workload.
