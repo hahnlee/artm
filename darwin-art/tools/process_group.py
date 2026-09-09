@@ -29,6 +29,44 @@ def _signal_group(process: subprocess.Popen[Any], signum: int) -> None:
         process.send_signal(signum)
 
 
+def _reap_orphaned_group(process: subprocess.Popen[Any]) -> None:
+    """Terminate descendants that outlived the direct child.
+
+    ART launches helper processes for dex2oat and the host runtime.  A child
+    can exit after handing one of those helpers an inherited descriptor, which
+    leaves the process group alive even though ``communicate`` has returned.
+    Probe the original process-group id and close that group before returning;
+    this keeps repeated corpus runs isolated and prevents stale hosts from
+    consuming the next test's resources.
+    """
+    if os.name != "posix":
+        return
+    try:
+        os.killpg(process.pid, 0)
+    except ProcessLookupError:
+        return
+    except PermissionError:
+        return
+    _signal_group(process, signal.SIGTERM)
+    try:
+        # A short grace period is enough for normal helper teardown while
+        # keeping the runner bounded when a descendant is stuck.
+        import time
+
+        deadline = time.monotonic() + TERMINATE_GRACE_SECONDS
+        while time.monotonic() < deadline:
+            try:
+                os.killpg(process.pid, 0)
+            except ProcessLookupError:
+                return
+            time.sleep(0.01)
+    finally:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+
+
 def run_process_group(
     arguments: Sequence[str],
     *,
@@ -64,9 +102,12 @@ def run_process_group(
         except subprocess.TimeoutExpired:
             _signal_group(process, signal.SIGKILL)
             output, error = process.communicate()
+        _reap_orphaned_group(process)
         raise subprocess.TimeoutExpired(
             list(arguments), timeout, output=output, stderr=error) \
             from original_timeout
+
+    _reap_orphaned_group(process)
 
     completed = subprocess.CompletedProcess(
         list(arguments), process.returncode, output, error)

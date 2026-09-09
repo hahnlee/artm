@@ -7983,3 +7983,10 @@ incomplete and still requires managed caller unwind validation.
   source interpreter+optimized lanes. The earlier ledger rows were timeout/
   contention artifacts, not reproducible runtime mismatches. The complete
   corpus and real-app requirements remain open.
+
+- Checkpoint 622: Fixed the ART runner's process-group lifecycle. After a
+  direct child exits (including timeout handling), the runner now probes and
+  terminates any surviving descendants in its isolated process group. This
+  prevents orphaned `darwin-art-host` instances from contaminating later
+  corpus lanes. `tools/test_process_group.py` passes; the three previously
+  affected corpus tests also pass when run serially.

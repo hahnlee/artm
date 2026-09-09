@@ -12596,3 +12596,8 @@ or admission exception was added.
   source lanes on the current runtime. The prior failures were transient
   timeout/contention artifacts. This strengthens the corpus evidence but does
   not close the full-corpus or real-application validation scope.
+
+- Checkpoint 622: Hardened runner lifecycle cleanup so every invocation owns
+  and closes its complete process group, including descendants that survive
+  direct-child exit or timeout. The process-group unit test passes, and this
+  removes the stale-host contention observed in the latest corpus ledger.
