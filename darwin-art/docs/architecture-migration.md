@@ -13115,3 +13115,7 @@ or admission exception was added.
 - Checkpoint 726: The debuggable `597-deopt-busy-loop` differential run passes
   in all three lanes, extending validation to a JIT deoptimization loop. More
   deopt/OSR cases and real-APK acceptance remain open.
+- Checkpoint 727: `570-checker-osr` passes in interpreter, optimized/JIT, and
+  unmodified-source lanes, validating checker-generated OSR transitions after
+  the compressed-reference fixes. Broader OSR/deopt and real-app coverage is
+  still required.

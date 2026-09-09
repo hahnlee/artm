@@ -8599,3 +8599,6 @@ incomplete and still requires managed caller unwind validation.
   optimized/JIT, and unmodified-source lanes after the same reference-boundary
   changes. This exercises a debuggable deoptimization loop without falling
   back from JIT; wider deopt/OSR coverage remains outstanding.
+- Checkpoint 727: `570-checker-osr` passes in all three lanes, extending the
+  regression set to checker-generated OSR loop transitions. No new fault or
+  interpreter fallback was observed; broader OSR/deopt and APK coverage remain.
