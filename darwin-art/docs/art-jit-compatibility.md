@@ -8142,3 +8142,9 @@ incomplete and still requires managed caller unwind validation.
   same Throwable. The Java loop and `StackTraceElement.toString()` are stock;
   this isolates the defect to the ART-managed `stackTrace` publication/read
   path used by print formatting, not frame discovery or native marker creation.
+- Checkpoint 648: A direct Java loop using the exact `"\tat " + element`
+  expression also loses only the native frame, while a `"STACK=" + element`
+  expression prints it. This rules out `Throwable.printStackTrace()` control
+  flow and points to the Android string-concatenation/append path when a
+  native `StackTraceElement` is formatted. The diagnostic test source was
+  restored unchanged afterward.

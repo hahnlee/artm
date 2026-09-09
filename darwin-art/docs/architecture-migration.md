@@ -12728,3 +12728,8 @@ or admission exception was added.
   `printStackTrace()` loop emits only five. This further localizes the issue to
   ART's managed stackTrace publication/read behavior during print formatting;
   frame discovery and native marker construction are not the limiting stage.
+- Checkpoint 648: Repeating the exact `"\tat " + element` concatenation in a
+  direct Java loop still drops only the native frame, whereas `"STACK=" +
+  element` prints it. The discrepancy is therefore in the Android
+  string-concat/append path for native `StackTraceElement` values, not the
+  Throwable loop itself. Diagnostic source changes were removed.
