@@ -132,8 +132,7 @@ int LoadProcessOptions(ProcessOptions* options, std::string* error) {
   options->has_apk_app_identity_environment =
       HasEnv("DARWIN_ART_APK_APP_PACKAGE") ||
       HasEnv("DARWIN_ART_APK_APP_ACTIVITY") ||
-      HasEnv("DARWIN_ART_APK_APP_DESCRIPTOR") ||
-      HasEnv("DARWIN_ART_APK_APP_SUPPORT_DEX");
+      HasEnv("DARWIN_ART_APK_APP_DESCRIPTOR");
   options->run_apk_app =
       Present(options->apk_app_package) && Present(options->apk_app_activity) &&
       options->apk_app_descriptor.size() >= 3 &&

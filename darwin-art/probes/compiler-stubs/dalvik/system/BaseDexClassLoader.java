@@ -4,6 +4,12 @@ import java.io.File;
 
 /** Compile-only hidden-platform signatures; core-libart owns the runtime class. */
 public class BaseDexClassLoader extends ClassLoader {
+    /** Hidden API used by app_process to attach secondary dex paths. */
+    public void addDexPath(String dexPath) {}
+
+    /** Trusted variant used by framework/module loaders. */
+    public void addDexPath(String dexPath, boolean isTrusted) {}
+
     public BaseDexClassLoader(
             String dexPath,
             File optimizedDirectory,

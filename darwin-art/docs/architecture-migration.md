@@ -11908,3 +11908,9 @@ or admission exception was added.
   DEX. The experiment was removed. Implement the proper pre-bootstrap
   `addDexPath`/classloader contract next, preserving the unchanged primary
   DEX and APK.
+
+- Checkpoint 523: the classloader path now follows AOSP by invoking hidden
+  `BaseDexClassLoader.addDexPath(path, false)` on the process loader before app
+  classes resolve. This keeps support/runtime code separate from the primary
+  APK DEX. ELF/JNI remains green; the standalone resource probe remains status
+  27 because it has no service-bridge support DEX by design.

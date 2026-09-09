@@ -7257,3 +7257,10 @@ incomplete and still requires managed caller unwind validation.
   original DEX, so the experiment was reverted. The correct next change is an
   AOSP-shaped classloader `addDexPath` operation before ResourcesManager
   initialization; no probe-only classpath bypass remains.
+
+- Checkpoint 523: implemented the real AOSP hidden `BaseDexClassLoader.addDexPath`
+  contract (including the untrusted `isTrusted=false` rule) instead of mutating
+  RuntimeArgumentMap after creation. The primary probe/APK DEX remains unchanged
+  and the ELF/JNI gate still passes. The baseline resource probe still returns
+  status 27 because its detached process has no service bridge; that fixture is
+  intentionally not fed the support DEX.

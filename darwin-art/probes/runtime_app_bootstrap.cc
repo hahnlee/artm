@@ -135,6 +135,44 @@ int load_classes(JNIEnv* env,
     if (env->ExceptionCheck()) env->ExceptionClear();
   }
 
+  // Android's app_process adds secondary code through BaseDexClassLoader's
+  // addDexPath before framework classes begin resolving. RuntimeArgumentMap is
+  // already consumed by Runtime::Create, so changing the string later cannot
+  // update this loader. Use the same hidden API for the compatibility service
+  // DEX and preserve the primary APK/probe DEX unchanged.
+  if (support_dex != nullptr && support_dex[0] != '\0' &&
+      std::strcmp(support_dex, app_dex) != 0) {
+    jclass base_loader = env->FindClass("dalvik/system/BaseDexClassLoader");
+    jmethodID add_dex_path =
+        base_loader == nullptr
+            ? nullptr
+            : env->GetMethodID(base_loader, "addDexPath",
+                               "(Ljava/lang/String;Z)V");
+    jstring support_path = env->NewStringUTF(support_dex);
+    if (add_dex_path == nullptr || support_path == nullptr ||
+        env->ExceptionCheck()) {
+      env->ExceptionClear();
+      env->DeleteLocalRef(support_path);
+      env->DeleteLocalRef(base_loader);
+      std::cerr << "ART Darwin DEX: support addDexPath lookup failed\n";
+      return 4;
+    }
+    // Secondary app code is untrusted application code.  Passing true asks
+    // DexFile.setTrusted() for a debuggable process and is rejected by AOSP;
+    // app_process uses the default untrusted path here.
+    env->CallVoidMethod(managed_loader, add_dex_path, support_path, JNI_FALSE);
+    const bool added = !env->ExceptionCheck();
+    if (!added) {
+      env->ExceptionClear();
+    }
+    env->DeleteLocalRef(support_path);
+    env->DeleteLocalRef(base_loader);
+    if (!added) {
+      std::cerr << "ART Darwin DEX: support addDexPath failed\n";
+      return 4;
+    }
+  }
+
   auto find = [&](const char* descriptor) -> jclass {
     art::Handle<art::mirror::Class> klass = hs.NewHandle(
         class_linker->FindClass(self, descriptor, std::strlen(descriptor),
