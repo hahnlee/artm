@@ -7522,3 +7522,9 @@ incomplete and still requires managed caller unwind validation.
   90 GB) after confirming no Capsule VM process was running. Docker reported
   zero images/containers and an unavailable daemon, so no Docker objects were
   deleted. Host free space rose from about 61 GB to 153 GB.
+
+- Checkpoint 567: after storage recovery and profile-image recreation, the
+  full Cargo workspace/all-target test suite exited 0. This includes profile
+  8/8, runtime 27/27, engine 5/5, xtask 18/18, ELF/FS/host/provider suites,
+  and all other workspace targets. The storage fix did not introduce Rust ABI
+  or lifecycle regressions.

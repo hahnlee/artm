@@ -12139,3 +12139,7 @@ or admission exception was added.
   and Capsule's stopped VM/restore data (about 90 GB), after confirming no VM
   process was active. Docker had zero images/containers and no running daemon,
   so there was no Docker cache to prune. Free space increased to about 153 GB.
+
+- Checkpoint 567: the full Cargo workspace/all-target suite now exits 0 after
+  storage recovery and profile recreation. Profile 8/8, runtime 27/27,
+  engine 5/5, xtask 18/18, and the ELF/FS/host/provider suites all pass.
