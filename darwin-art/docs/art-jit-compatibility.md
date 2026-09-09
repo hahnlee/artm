@@ -8117,3 +8117,10 @@ incomplete and still requires managed caller unwind validation.
   unchanged and no Darwin unwind callback is involved in this Throwable trace.
   The remaining gap is therefore in the managed ART stack-trace/native-frame
   contract for `@FastNative Method.invoke`, not stale linking or class loading.
+- Checkpoint 644: Graphics-runtime diagnostics show `FetchStackTraceVisitor`
+  and the internal method-to-frame conversion already contain
+  `java.lang.reflect.Method.invoke`; the omission occurs after that conversion.
+  A trial that forced the native `-2` marker in `CreateStackTraceElement` caused
+  a line-number regression and was reverted. The remaining issue is now
+  narrowed to the downstream StackTraceElement/publication path, with the
+  graphics bootstrap and link audit restored to PASS.

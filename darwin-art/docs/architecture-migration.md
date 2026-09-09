@@ -12709,3 +12709,8 @@ or admission exception was added.
   only `Method.invoke (Native Method)`, and the Darwin unwind callback is not
   on this Throwable path; the next fix must restore the AOSP managed
   fast-native frame contract rather than adjust class loading or relinking.
+- Checkpoint 644: Graphics-runtime diagnostics confirm the native reflective
+  frame is present in both stack walking and the internal conversion array.
+  Forcing the native `-2` StackTraceElement marker produced a line-number
+  regression and was reverted; the unresolved boundary is downstream frame
+  publication/formatting. Graphics bootstrap and link audit are restored.
