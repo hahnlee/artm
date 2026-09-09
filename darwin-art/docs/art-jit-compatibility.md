@@ -7150,3 +7150,7 @@ incomplete and still requires managed caller unwind validation.
   minutes with no CPU activity; the child and parent were terminated. This is
   now a separate build-pipeline hang to isolate before the updated runtime
   dylib can be probed.
+- Checkpoint 501: stage logging localized the unwind smoke hang to worker join
+  immediately after other-thread unwind. The provider now drains nested Mach
+  suspend levels before releasing a sampled thread; temporary debug prints
+  were removed. Fresh smoke confirmation is still pending.

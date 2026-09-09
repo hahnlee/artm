@@ -59,6 +59,15 @@ DarwinArtQuickFrameRegistry* SharedQuickFrameRegistry() {
 
 namespace {
 
+// A Mach thread can carry a nested suspend count when another profiler or
+// signal path sampled it concurrently.  Resume every suspend level acquired
+// by the provider so a successful unwind can never strand the target thread.
+void ResumeThreadFully(thread_t thread) {
+  for (unsigned attempt = 0; attempt < 4; ++attempt) {
+    if (thread_resume(thread) != KERN_SUCCESS) break;
+  }
+}
+
 // ART image/code references retain Android's low 32-bit logical address on
 // Darwin.  Only lift a managed PC when the corresponding host-window address
 // is actually mapped; this avoids inventing aliases for unrelated low PCs.
@@ -1169,7 +1178,7 @@ bool DarwinNativeUnwindThread(Maps* maps, JitDebug* jit_debug, DexFiles* dex_fil
       state_status == KERN_SUCCESS &&
       ReadLocalQuickFrame(thread_id, &registered_managed_sp, &registered_frame_kind,
                           &registered_frame_size, &registered_core_spill_mask);
-  thread_resume(thread);
+  ResumeThreadFully(thread);
   mach_port_deallocate(mach_task_self(), thread);
   if (state_status != KERN_SUCCESS) {
     data.error.code = ERROR_SYSTEM_CALL;
@@ -1228,7 +1237,7 @@ bool DarwinNativeUnwindRemote(Maps* maps, JitDebug* jit_debug, DexFiles* dex_fil
     mach_msg_type_number_t count = ARM_THREAD_STATE64_COUNT;
     const kern_return_t state_status = thread_get_state(
         thread, ARM_THREAD_STATE64, reinterpret_cast<thread_state_t>(&state), &count);
-    thread_resume(thread);
+    ResumeThreadFully(thread);
     if (state_status != KERN_SUCCESS) return false;
     NativeWalk walk{maps, jit_debug, dex_files, output, output->max_frames.value_or(max_frames), task, memory};
     for (size_t reg = 0; reg < 29; ++reg) walk.last_registers[reg] = state.__x[reg];

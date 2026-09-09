@@ -11819,3 +11819,6 @@ or admission exception was added.
   unwindstack smoke child, which remains sleeping with no CPU activity. The
   stalled child was terminated; JNI source state is unchanged and the updated
   dylib still needs a successful relink before end-to-end validation.
+- Checkpoint 501: stage logging localized the smoke hang to worker join after
+  other-thread sampling. Darwin resume now drains nested Mach suspend levels;
+  temporary logging was removed. Fresh smoke and relink confirmation remain.
