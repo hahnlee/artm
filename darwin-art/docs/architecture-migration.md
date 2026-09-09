@@ -12432,3 +12432,11 @@ or admission exception was added.
   returns `PTRACE_GETREGSET ... No such process`. This is a genuine host
   unwind capability gap, not a JIT output adjustment; it remains open alongside
   the owner-thread shutdown contract.
+
+- Checkpoint 602: Inspected the AOSP `137-cfi` remote path. Its success
+  criterion requires real stopped-process maps, register capture, and stack
+  memory through Linux `ptrace`/`/proc`; Darwin's current provider only has
+  in-process Mach/ucontext support, so the failure is architectural rather
+  than a missing symbol or output normalization. Implementing this requires a
+  Darwin `AndroidRemoteUnwinder` memory/regs backend (task/ptrace policy and
+  Mach map translation), which remains open.
