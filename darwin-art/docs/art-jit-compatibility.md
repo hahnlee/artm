@@ -7686,3 +7686,11 @@ incomplete and still requires managed caller unwind validation.
    `InvocationTargetException` without the prior SIGSEGV; that wrapper has no
    Java cause populated, so the next evidence point must be the TextView
    constructor's native call trace rather than another exception rethrow.
+
+586. **2026-09-09 — Calculator cause chain reproduced after rebuilt link**
+
+   The rebuilt runtime link passes its closure audit, and an unchanged
+   Calculator launch reproduces the same `TextView` inflation boundary while
+   safely printing the ART-side chain. The innermost reflective wrapper still
+   carries no populated cause, confirming that the next work is native-call
+   tracing/contract repair, not APK or DEX changes.
