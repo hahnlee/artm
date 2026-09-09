@@ -12028,3 +12028,7 @@ or admission exception was added.
 - Checkpoint 543: Rust lifecycle/ownership tests pass (`darwin-art-runtime`
   27 and `darwin-art-engine` 5). Resource shutdown and graphics/surface lease
   invariants remain intact while remote CFI transport work continues.
+
+- Checkpoint 544: audited JIT admission paths. The production compiler and
+  inliner no longer enforce the Darwin method/opcode allowlist; eligibility
+  remains only in the dedicated acceptance probe and historical patch inputs.

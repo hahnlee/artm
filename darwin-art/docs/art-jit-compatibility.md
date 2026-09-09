@@ -7378,6 +7378,11 @@ incomplete and still requires managed caller unwind validation.
   investigation has not regressed shutdown, lease, surface, or graphics owner
   safety; AOSP remote CFI remains open.
 
+- Checkpoint 544: audited current JIT admission references. Production
+  `jit_compiler` and inliner gates are removed by the pinned AOSP admission
+  patch; the remaining `darwin_jit_eligibility.h` use is confined to the
+  acceptance probe and historical patch inputs, not normal app compilation.
+
 - Checkpoint 536: hardened the Darwin remote task cache to retry
   `task_for_pid` during the fork/exec-to-SIGSTOP transition (8 attempts,
   1-second bounded wait) while checking child liveness. Host crate checks pass;
