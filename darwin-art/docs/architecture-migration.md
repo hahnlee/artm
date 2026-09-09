@@ -13194,3 +13194,6 @@ or admission exception was added.
 - Checkpoint 750: `2239-varhandle-perf-vh-unsafe-get` passes all three runner
   lanes, validating Unsafe-backed VarHandle reads across the native memory
   access path. Remaining modes and real-app acceptance remain open.
+- Checkpoint 751: `2239-varhandle-perf-vh-unsafe-put` passes all three runner
+  lanes, validating Unsafe-backed VarHandle writes and their native memory
+  access path. Remaining modes and real-app acceptance remain open.
