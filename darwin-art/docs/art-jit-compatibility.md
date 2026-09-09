@@ -7874,3 +7874,11 @@ incomplete and still requires managed caller unwind validation.
   the differential runner. The remaining known failures are the owner-thread
   shutdown contract in `136-daemon-jni-shutdown` and Darwin remote unwind in
   `137-cfi`.
+
+- Checkpoint 609: Corrected the upstream differential harness so its optimized
+  lane selects a live JIT-compiled application entrypoint by default instead
+  of silently reusing a speed AOT entry. Explicit AOT selection remains
+  available through `DARWIN_ART_UPSTREAM_PREFER_AOT`. With this real-JIT path,
+  `149-suspend-all-stress` passed interpreter, JIT, and unmodified-source
+  lanes; the prior generated-code fault was therefore an AOT-path artifact in
+  the harness rather than a SuspendAll runtime failure.

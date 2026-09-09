@@ -66,7 +66,12 @@ inline bool CompileMain(JNIEnv* env,
   art::jit::Jit* jit = art::Runtime::Current()->GetJit();
   art::ArtMethod* installed_method = nullptr;
   bool selected_aot = false;
-  if (main != nullptr) {
+  // The optimized differential lane must exercise the live JIT entrypoint;
+  // AOT selection is retained only for explicit launcher requests that model
+  // a production precompiled app process.
+  const bool prefer_aot =
+      std::getenv("DARWIN_ART_UPSTREAM_PREFER_AOT") != nullptr;
+  if (prefer_aot && main != nullptr) {
     const void* oat_code =
         main->GetOatMethodQuickCode(art::kRuntimePointerSize);
     if (oat_code != nullptr &&
