@@ -7383,6 +7383,10 @@ incomplete and still requires managed caller unwind validation.
   patch; the remaining `darwin_jit_eligibility.h` use is confined to the
   acceptance probe and historical patch inputs, not normal app compilation.
 
+- Checkpoint 545: audited ARM64 implicit-null handling. Pinned patch 0147
+  removes the former Darwin forced-explicit workaround; production JIT now
+  consumes ART's `GetImplicitNullChecks()` setting directly.
+
 - Checkpoint 536: hardened the Darwin remote task cache to retry
   `task_for_pid` during the fork/exec-to-SIGSTOP transition (8 attempts,
   1-second bounded wait) while checking child liveness. Host crate checks pass;

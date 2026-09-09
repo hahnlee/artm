@@ -12032,3 +12032,7 @@ or admission exception was added.
 - Checkpoint 544: audited JIT admission paths. The production compiler and
   inliner no longer enforce the Darwin method/opcode allowlist; eligibility
   remains only in the dedicated acceptance probe and historical patch inputs.
+
+- Checkpoint 545: verified patch 0147 removes the ARM64 forced-explicit null
+  workaround. Production JIT uses ART's `GetImplicitNullChecks()` setting as
+  in AOSP.
