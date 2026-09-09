@@ -7616,3 +7616,12 @@ incomplete and still requires managed caller unwind validation.
    and unmodified-source lanes pass. The ledger is now 1,031 passed / 13
    failed. Remaining failures are limited to native bridge and JVMTI/class
    unloading, loader isolation, and structural redefinition scope.
+
+579. **2026-09-09 — class-loader and lock-proxy cases clear**
+
+   Re-ran `141-class-unload`, `142-classloader2`,
+   `156-register-dex-file-multi-loader`, and `165-lock-owner-proxy`; all
+   interpreter, JIT, and unmodified-source lanes pass. The ledger is now
+   1,035 passed / 9 failed. Remaining work is isolated to native bridge,
+   compiler metadata regressions, SIGQUIT/static-field handling, large
+   allocation, obsolete method handles, and structural redefinition tests.
