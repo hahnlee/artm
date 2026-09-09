@@ -8566,3 +8566,9 @@ incomplete and still requires managed caller unwind validation.
   Rebuilt the full graphics/JIT closure; `004-ThreadStress` and `004-JniTest`
   now pass interpreter, optimized/JIT, and unmodified-source lanes. The
   broader compatibility matrix and real APK acceptance remain outstanding.
+- Checkpoint 721: Audited the separate ARM64 fast compiler and found its
+  invoke receiver class load still used `HeapOperand(receiver.W(), ...)`
+  directly. Added patches `0180` and `0181` to decode that receiver and to
+  include the shared reference-codegen helper. The complete graphics/JIT
+  closure rebuilt and audited successfully; the subsequent ThreadStress and
+  JniTest runs remain green across the available runner lanes.

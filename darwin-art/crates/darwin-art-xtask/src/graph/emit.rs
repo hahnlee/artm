@@ -740,6 +740,8 @@ pub(crate) fn emit_graph(out: &Path) -> io::Result<()> {
         "patches/art/0146-darwin-arm64-managed-method-pointer.patch",
         "patches/art/0147-darwin-enable-implicit-null-checks.patch",
         "patches/art/0179-darwin-arm64-clinit-reference-boundary.patch",
+        "patches/art/0180-darwin-arm64-fast-invoke-receiver-boundary.patch",
+        "patches/art/0181-darwin-fast-reference-codegen-include.patch",
     ] {
         jit_inputs.push(PathBuf::from(file));
     }

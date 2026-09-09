@@ -13089,3 +13089,8 @@ or admission exception was added.
   The new `0179` codegen patch performs the managed-to-native decode at that
   boundary. Full rebuild/audit passed, and ThreadStress plus JniTest pass in
   all three runner lanes; remaining AOSP and real-app coverage is still open.
+- Checkpoint 721: The fast compiler's receiver class dereference was brought
+  under the same managed-reference boundary as optimizing codegen (`0180`,
+  `0181`). This removes another direct compressed-reference `HeapOperand` from
+  an executable compiler path; rebuild/audit passed and the focused regression
+  lanes stayed green.
