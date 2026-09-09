@@ -8211,3 +8211,10 @@ incomplete and still requires managed caller unwind validation.
   preparation/dex2oat phases, so no managed throughput sample was obtained.
   The probe and all descendants were reaped. The optimized unwind-map path
   remains linked and audit-clean; GC-stress completion is still unproven.
+- Checkpoint 660: Added a Darwin-only thread-local cache for repeated managed
+  backtraces, keyed by the caller PC and published quick-frame SP. This avoids
+  rewalking an unchanged allocation loop while preserving a full walk when the
+  managed frame or call site changes. Incremental graphics relink and the full
+  ARM64/JIT audit pass, including GC, OSR, deopt, JNI, and framework fixtures.
+  The cache is not credited with clearing the forced-GC timeout until a full
+  stress run terminates successfully.

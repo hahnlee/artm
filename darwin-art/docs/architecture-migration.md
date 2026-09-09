@@ -12788,3 +12788,8 @@ or admission exception was added.
   it yielded no managed throughput sample and was fully reaped. The optimized
   map-publication implementation is linked and audit-clean, but the stress
   timeout remains an open performance item.
+- Checkpoint 660: Introduced a Darwin host-side thread-local managed-backtrace
+  cache keyed by caller PC plus published managed SP. Repeated allocations in
+  one quick frame reuse the prior unwind result; recursive/frame transitions
+  force a normal walk. Incremental relink and the complete ARM64/JIT audit
+  pass, while forced-GC stress still requires a terminating end-to-end run.
