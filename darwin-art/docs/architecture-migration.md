@@ -12347,3 +12347,14 @@ or admission exception was added.
    unmodified-source interpreter+optimized lanes. These are regression
    evidence for the current ARM64 JIT/runtime path only; the full corpus,
    stress matrix, and real-app completion criteria remain open.
+
+591. **2026-09-09 — join-main exposes launcher lifecycle gap**
+
+   A parallel 120-test shard completed 119 tests and reproduced one stable
+   timeout in unchanged `039-join-main`. Its output reaches `JoinMain starter
+   returning` but never observes the worker joining the launcher thread.
+   `UpstreamTestHarness.finishRun()` waits for new non-daemon threads while the
+   detached harness invokes `Main.main` directly, so the launcher peer is not
+   transitioned through dalvikvm's normal thread-exit path. Two experimental
+   monitor/native-peer fixes were reverted after failing to prove the result;
+   the lifecycle boundary remains an open runtime/harness integration task.
