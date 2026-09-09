@@ -12833,3 +12833,7 @@ or admission exception was added.
   registry drain, and `_exit`; output writes are synchronous but their exact
   loss ordering is still unproven. The safe DestroyJavaVM lifecycle therefore
   remains authoritative and no speculative shortcut was kept.
+- Checkpoint 670: Re-tested `_exit` with explicit Java stream flushing; output
+  was still empty (`stdout=0/42`) in AOSP 096 GC stress, proving that flush alone
+  does not establish the run-test output contract. The experiment was fully
+  reverted, the host rebuilt, and the ordinary 497 three-lane regression passed.

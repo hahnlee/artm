@@ -8268,3 +8268,8 @@ incomplete and still requires managed caller unwind validation.
   harness writes output through synchronous native file operations. The exact
   output-loss ordering is not yet proven, so the safe DestroyJavaVM path stays
   active; no speculative lifecycle shortcut was retained.
+- Checkpoint 670: Re-tested the process-style `_exit` experiment after adding
+  an explicit Java `System.out`/`System.err` flush; the AOSP 096 stress lane
+  still observed `stdout=0/42`, so the flush was insufficient and all changes
+  were reverted. The host was rebuilt and unmodified 497 passed interpreter,
+  JIT, and interpreter+optimized lanes; DestroyJavaVM remains authoritative.
