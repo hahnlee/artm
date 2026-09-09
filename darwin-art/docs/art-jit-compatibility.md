@@ -8650,3 +8650,7 @@ incomplete and still requires managed caller unwind validation.
   and unmodified-source lanes, exercising VarHandle metadata/reference loads
   through the native decode helper. Broader VarHandle modes and real APK
   acceptance remain open.
+- Checkpoint 740: `2239-varhandle-perf-vh-unsafe-cas` passes all three lanes,
+  covering VarHandle atomic CAS/set operations and their memory-ordering paths.
+  Broader VarHandle modes, JNI/exception matrix, and real APK acceptance remain
+  outstanding.

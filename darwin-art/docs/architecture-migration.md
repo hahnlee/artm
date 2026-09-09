@@ -13160,3 +13160,6 @@ or admission exception was added.
 - Checkpoint 739: `2239-varhandle-perf-vh-get` passes all three runner lanes,
   validating VarHandle metadata/reference loads through the native decode
   helper. Additional VarHandle modes and real-app acceptance remain open.
+- Checkpoint 740: `2239-varhandle-perf-vh-unsafe-cas` passes interpreter,
+  optimized/JIT, and unmodified-source lanes, validating VarHandle atomic CAS
+  and memory-ordering behavior. More modes and real-app acceptance remain open.
