@@ -7536,3 +7536,10 @@ incomplete and still requires managed caller unwind validation.
   Host free space remains about 153 GB. The existing AOSP corpus ledger still
   records 1,012 passing and 32 known failing/timeout cases; those failures
   remain the next compatibility work rather than being masked as passes.
+
+- Checkpoint 569: fresh app/runtime probes after the rebuild reconfirmed
+  `004-JniTest` interpreter, JIT, and unmodified-source differential PASS.
+  Parallel reprobes of `004-StackWalk` and `2262-default-conflict-methods`
+  still hit the 120-second host timeout, so they remain explicit blockers for
+  the AOSP compatibility target rather than being relabeled as functional
+  failures.
