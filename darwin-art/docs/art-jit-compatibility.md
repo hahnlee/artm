@@ -8531,3 +8531,8 @@ incomplete and still requires managed caller unwind validation.
   repeated because the previously materialized Chrome APK is no longer present
   in the profile store; no producer classification is claimed until a fresh APK
   is installed and the map evidence is captured.
+- Checkpoint 715: Ran AOSP ART tests `507-boolean-test` and
+  `003-omnibus-opcodes` through the pinned runner. Both passed in interpreter,
+  optimized/JIT, and unmodified-source modes, covering boolean, arithmetic,
+  branch, and omnibus opcode lowering. The full compatibility matrix and real
+  APK startup remain outstanding.

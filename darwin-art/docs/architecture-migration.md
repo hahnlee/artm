@@ -13061,3 +13061,8 @@ or admission exception was added.
   classification while preserving normal recovery semantics. A fresh Chrome
   APK is required before collecting the next acceptance trace because the prior
   profile copy is absent.
+- Checkpoint 715: The pinned AOSP runner passes `507-boolean-test` and
+  `003-omnibus-opcodes` in interpreter, optimized/JIT, and unmodified-source
+  modes. This validates unrestricted ARM64 lowering for a representative
+  primitive/branch opcode set while exceptions, monitors, GC, JNI,
+  deoptimization, and real APK startup remain in scope.
