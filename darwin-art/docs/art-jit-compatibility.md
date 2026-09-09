@@ -8627,3 +8627,7 @@ incomplete and still requires managed caller unwind validation.
   coverage to Java NIO file-channel native interactions after the referent
   boundary hardening. Full JNI/exception matrix and real APK acceptance remain
   outstanding.
+- Checkpoint 734: `004-ThreadStress` passes interpreter, optimized/JIT, and
+  unmodified-source lanes after patch 0184, confirming the earlier clinit/JNI
+  transition regression remains fixed under multithreaded execution. Full
+  concurrency matrix and real APK acceptance remain open.

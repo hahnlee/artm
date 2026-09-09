@@ -13141,3 +13141,6 @@ or admission exception was added.
 - Checkpoint 733: `2036-jni-filechannel` passes interpreter, optimized/JIT, and
   unmodified-source lanes, validating Java NIO file-channel/native interaction.
   Broader JNI/exception coverage and real-app acceptance remain open.
+- Checkpoint 734: `004-ThreadStress` passes all three runner lanes after the
+  referent boundary patch, validating multithreaded JNI/transition behavior.
+  The complete concurrency matrix and real-app acceptance remain outstanding.
