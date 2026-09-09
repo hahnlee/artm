@@ -8662,3 +8662,7 @@ incomplete and still requires managed caller unwind validation.
   validating reflection-created VarHandle access and runtime type resolution.
   Remaining VarHandle modes plus full JNI/exception and real APK coverage stay
   open.
+- Checkpoint 743: `2239-varhandle-perf-vh-cae` passes interpreter, optimized/JIT,
+  and unmodified-source lanes, covering VarHandle compare-and-exchange return
+  values and failure paths. Broader mode coverage and real APK acceptance stay
+  open.

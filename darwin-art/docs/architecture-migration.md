@@ -13170,3 +13170,6 @@ or admission exception was added.
   optimized/JIT, and unmodified-source lanes, validating reflection-created
   VarHandle access and runtime type resolution. More modes and real-app
   acceptance remain open.
+- Checkpoint 743: `2239-varhandle-perf-vh-cae` passes all three runner lanes,
+  validating VarHandle compare-and-exchange return and failure paths. More
+  modes and real-app acceptance remain outstanding.
