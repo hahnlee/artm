@@ -7264,3 +7264,9 @@ incomplete and still requires managed caller unwind validation.
   and the ELF/JNI gate still passes. The baseline resource probe still returns
   status 27 because its detached process has no service bridge; that fixture is
   intentionally not fed the support DEX.
+
+- Checkpoint 524: exercised the real GPU Button bootstrap after the classloader
+  change. The secondary-Dex attach path is reached, but graphics startup still
+  stops in the independent libcore registration boundary (`Float` native
+  resolution and filesystem-provider initialization). This is now the next
+  AOSP-differential target; no interpreter fallback or APK rewrite was added.

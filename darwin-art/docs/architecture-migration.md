@@ -11914,3 +11914,9 @@ or admission exception was added.
   classes resolve. This keeps support/runtime code separate from the primary
   APK DEX. ELF/JNI remains green; the standalone resource probe remains status
   27 because it has no service-bridge support DEX by design.
+
+- Checkpoint 524: the real GPU Button launch reached the post-classloader
+  bootstrap and exposed the next compatibility gap: libcore native registration
+  (notably `java.lang.Float` and filesystem provider ordering). Keep this work
+  in the narrow Darwin host/provider layer while preserving the AOSP app and
+  DEX contract; do not paper over it with an interpreter fallback.
