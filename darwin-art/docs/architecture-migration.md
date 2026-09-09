@@ -12903,3 +12903,9 @@ or admission exception was added.
   (`0x110`) access after isolated child-process churn. Treat this as the next
   native Android contract boundary to repair; no diagnostic instrumentation or
   fallback behavior was retained.
+
+- Checkpoint 685: Chrome now reproduces the same unresolved generated-code
+  null-offset fault even with pointer input disabled, proving startup/native
+  process lifecycle is the trigger rather than menu hit-testing. The next
+  implementation step is low-window code ownership/ABI mapping; no workaround
+  was added. Calculator and DeskClock acceptance remain green.

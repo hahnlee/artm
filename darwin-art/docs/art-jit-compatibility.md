@@ -8352,3 +8352,10 @@ incomplete and still requires managed caller unwind validation.
   child-process lifecycle churn. This is a real native/ABI compatibility bug,
   not a screenshot or probe failure; the next step is to map that stripped
   `libchrome.so` fault to its Android contract before changing runtime code.
+
+- Checkpoint 685: Reproduced the same `0x110` generated-code fault on an
+  unchanged Chrome launch with no synthetic pointer input, so the failure is
+  in Chrome/native-process startup rather than the menu event path. The fault
+  PC changes with ASLR but remains in the low managed executable window and
+  ART reports it as unresolved; Calculator and DeskClock remain green. No
+  speculative signal or pointer workaround was retained.
