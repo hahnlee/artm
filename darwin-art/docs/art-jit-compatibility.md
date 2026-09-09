@@ -7646,3 +7646,14 @@ incomplete and still requires managed caller unwind validation.
    passed / 0 failed**. This closes corpus coverage only; real APK validation
    (including Blue Archive) and unrestricted production-JIT app validation
    remain required for the overall goal.
+
+582. **2026-09-09 — transition from corpus closure to real APK acceptance**
+
+   The unchanged installed Chromium APK path was exercised after the corpus
+   reached 1,044/1,044. Startup reached Chromium's native registration
+   (309 Conscrypt methods and projected system roots), but this standalone
+   validation did not return within the requested eight-second window and was
+   stopped as an orphaned host. No APK bytes were modified. The next runtime
+   task is to make the real-APK host lifetime/window completion deterministic,
+   then collect a bounded Chrome interaction/JIT trace and repeat the same
+   path for Blue Archive.
