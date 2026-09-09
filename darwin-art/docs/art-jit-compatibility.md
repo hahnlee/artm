@@ -7419,3 +7419,8 @@ incomplete and still requires managed caller unwind validation.
   `No space left on device`. Generated test artifacts and untracked crash/build
   files were moved to macOS Trash; tracked source and runtime state remain
   preserved.
+
+- Checkpoint 550: verified the host still has only about 150 MB free after
+  moving generated test artifacts to Trash. The large tracked/ignored Android
+  build closure remains intact; further upstream compilation is intentionally
+  paused until macOS Trash is emptied or equivalent storage is reclaimed.

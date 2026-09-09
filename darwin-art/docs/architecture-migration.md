@@ -12053,3 +12053,7 @@ or admission exception was added.
 - Checkpoint 549: `985-re-obsolete` could not compile because the filesystem
   was full. Generated test artifacts and untracked crash/build files were
   moved to macOS Trash; tracked source and runtime state remain intact.
+
+- Checkpoint 550: host storage remains at roughly 150 MB free after generated
+  test artifacts were moved to Trash. The Android build closure was preserved;
+  upstream compilation must wait for Trash emptying or equivalent reclamation.
