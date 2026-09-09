@@ -11838,3 +11838,7 @@ or admission exception was added.
 - Checkpoint 506: confirmed the remote AOSP call chain is architecture probe,
   map parse, register fetch, then frame unwind. The current hang precedes
   frame records; targeted boundary instrumentation is the next step.
+- Checkpoint 507: instrumentation confirmed maps return successfully, while
+  remote register capture blocks in `FindThread → task_threads` on the forked
+  child. The remote Mach thread-port acquisition path is the active defect;
+  diagnostics were removed.

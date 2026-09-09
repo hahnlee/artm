@@ -7176,3 +7176,7 @@ incomplete and still requires managed caller unwind validation.
   before frame records are returned, so next instrumentation will distinguish
   remote register acquisition from map parsing rather than changing the frame
   walker blindly.
+- Checkpoint 507: boundary instrumentation showed remote map parsing returns,
+  then `Regs::RemoteGet` blocks in `FindThread → task_threads` for a forked
+  child. The issue is Darwin remote thread-port acquisition; all temporary
+  logging was removed. This is now the direct implementation target.
