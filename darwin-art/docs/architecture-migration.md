@@ -13311,3 +13311,9 @@ or admission exception was added.
   now processing the 980-series JVMTI tests. The ledger is still 1,061 passed
   and 15 failed; these failures remain provisional until the run terminates
   and each entry is rerun against the current boot-image range registration.
+- Checkpoint 781 (2026-09-10): Corpus completed at 1,062 passed and 14
+  provisional failures. Rechecks against the rebuilt graphics link cleared
+  `031-class-attributes`, `046-reflect`, `082-inline-execute`,
+  `083-compiler-regressions`, `115-native-bridge`, `128-reg-spill-on-implicit-nullcheck`,
+  `140-dce-regression`, and `064-field-access`; remaining faults are isolated
+  to malformed/implicit-null cases and require a dedicated fault-frame fix.

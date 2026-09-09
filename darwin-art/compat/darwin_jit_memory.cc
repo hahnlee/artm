@@ -24,22 +24,12 @@ struct JitMethodEntry {
 // the signal-safe, bounded representation.
 constexpr size_t kJitMethodEntries = 16384;
 // ART's quick-code size describes the instruction stream but may omit the
-// short signal/epilogue/alignment tail reached by the PC reported on Darwin.
-// Keep the published range inclusive of that tail so implicit-null faults are
-// still recognized as managed code. ART's AOT headers can describe a compact
-// code span while the mapped quick-code page contains its aligned epilogue.
-constexpr uintptr_t kJitCodeTailBytes = 4096u;
 JitMethodEntry g_jit_method_entries[kJitMethodEntries];
 }
 
 void DarwinArtRegisterJitMethod(uintptr_t code, size_t size, uintptr_t method) {
   if (code == 0 || size == 0) return;
-  uintptr_t end = code > UINTPTR_MAX - size ? UINTPTR_MAX : code + size;
-  if (end != UINTPTR_MAX) {
-    end = end > UINTPTR_MAX - kJitCodeTailBytes
-              ? UINTPTR_MAX
-              : end + kJitCodeTailBytes;
-  }
+  const uintptr_t end = code > UINTPTR_MAX - size ? UINTPTR_MAX : code + size;
   for (auto& entry : g_jit_method_entries) {
     uintptr_t current = entry.start.load(std::memory_order_acquire);
     if (current == code || current == 0) {
