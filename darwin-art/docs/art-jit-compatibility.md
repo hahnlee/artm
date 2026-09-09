@@ -8193,3 +8193,9 @@ incomplete and still requires managed caller unwind validation.
   unmodified `096-array-copy-concurrent-gc` also passes all three lanes without
   `--gcstress` in 18.7s, isolating the remaining gap to the forced-GC stress
   workload rather than array-copy or JIT correctness.
+- Checkpoint 657: A bounded live-process inspection of the forced-GC run was
+  stopped after startup/compilation because the runner did not expose a stable
+  managed child for sampling; all spawned processes were explicitly reaped.
+  No source or runtime behavior was changed, and the ordinary 096 three-lane
+  PASS plus the full JIT audit remain the authoritative evidence while the
+  stress-performance profile is revisited with a lower-overhead capture path.

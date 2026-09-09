@@ -12772,3 +12772,8 @@ or admission exception was added.
   passes interpreter, JIT, and unmodified-source lanes in 18.7s when GC stress
   is disabled; only the forced concurrent-GC workload remains a performance
   investigation target.
+- Checkpoint 657: A bounded attempt to sample the forced-GC process reached
+  the startup/compilation phase but did not yield a stable managed child, so it
+  was terminated and all descendants were reaped. This produced no new
+  runtime failure or code change; the next profiling pass must use a lower
+  overhead capture mechanism rather than extending an uninstrumented timeout.
