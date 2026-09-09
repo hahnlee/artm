@@ -13103,3 +13103,7 @@ or admission exception was added.
   all audited invoke and instance field receiver accesses. A clean closure
   rebuild/audit and the omnibus differential test passed in all runner lanes;
   this is a boundary hardening step, not completion of the overall matrix.
+- Checkpoint 724: Fast-compiler check-cast now decodes the compressed object
+  before loading its class pointer (`0183`). Rebuild/audit and the omnibus
+  differential lanes passed; broader type-check, GC, and real-app coverage
+  remains required.

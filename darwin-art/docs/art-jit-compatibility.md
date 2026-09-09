@@ -8584,3 +8584,8 @@ incomplete and still requires managed caller unwind validation.
   reran `003-omnibus-opcodes`; interpreter, optimized/JIT, and unmodified
   source lanes all passed. The full feature matrix and real APK acceptance
   are still open.
+- Checkpoint 724: Audited fast-compiler `check-cast` lowering and found the
+  object-class load still treated a compressed object register as a host
+  pointer. Added `0183-darwin-arm64-fast-checkcast-reference-boundary.patch`
+  to decode it into a scratch native register. Closure rebuild/audit and the
+  post-change `003-omnibus-opcodes` three-lane differential run passed.
