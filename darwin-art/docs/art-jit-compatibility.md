@@ -7564,3 +7564,10 @@ incomplete and still requires managed caller unwind validation.
   after the bootstrap patch application rejected its malformed hunk. No
   runtime artifact or behavior was changed; the authoritative blocker remains
   the previously observed hang at the DestroyJavaVM boundary.
+
+- Checkpoint 573: discarded generated patched-source state after the failed
+  diagnostic attempt and rebuilt the graphics runtime cleanly. The rebuild
+  compiled 108 runtime objects and reused 150 cached objects; the subsequent
+  `audit-runtime-graphics-link-fast` passed with the 51-symbol registrar
+  closure and zero fake host fallbacks. No diagnostic patch or workaround is
+  present in the worktree.
