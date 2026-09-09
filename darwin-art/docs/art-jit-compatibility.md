@@ -8734,3 +8734,7 @@ incomplete and still requires managed caller unwind validation.
   single-step/deoptimization behavior immediately before exception catch
   dispatch; all interpreter, optimized/JIT, and unmodified-source lanes pass.
   Remaining corpus failures and production APK acceptance remain open.
+- Checkpoint 761: Re-ran `497-inlining-and-class-loader`, validating
+  inlined calls across class-loader boundaries; interpreter, optimized/JIT,
+  and unmodified-source lanes all pass. Remaining corpus failures and
+  production APK acceptance remain open.

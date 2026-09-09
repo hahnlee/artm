@@ -13229,3 +13229,6 @@ or admission exception was added.
   single-step/deoptimization immediately before exception catch dispatch; all
   three runner lanes pass. Remaining corpus failures and production APK
   acceptance remain open.
+- Checkpoint 761: Re-ran `497-inlining-and-class-loader`, validating inlined
+  calls across class-loader boundaries; all three runner lanes pass. Remaining
+  corpus failures and production APK acceptance remain open.
