@@ -122,7 +122,10 @@ public final class UpstreamTestHarness {
         private volatile boolean failureOutputDispatched;
 
         TestMainThread(String className, String[] arguments) {
-            super("ART run-test main");
+            // dalvikvm invokes the application entry point on the process
+            // main thread. Keep that observable identity (and pthread name)
+            // instead of exposing the harness implementation name.
+            super("main");
             this.className = className;
             this.arguments = arguments;
         }

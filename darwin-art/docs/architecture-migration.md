@@ -12526,3 +12526,15 @@ or admission exception was added.
   its output shows the JVMTI `VMInit` callback is missing and the harness-owned
   thread is reported as `ART run-test main`, so this is an agent-install/event
   ordering and launcher thread identity gap rather than a JIT codegen failure.
+
+- Checkpoint 614: Ran the next AOSP slice `2230-profile-save-hotness` through
+  `2286-method-tracing-aot-code` (45 discovered tests) in parallel. Forty-three
+  tests passed across interpreter/live-JIT/unmodified lanes, including checker
+  loop/inlining, VarHandle, method-handle, class-unloading, profile, and method
+  tracing coverage. `2246-trace-stream` and `2246-trace-v2` still fail because
+  the runtime trace contains the worker-thread section but omits the later
+  caller/main section (stdout is 48,430/89,426 and 49,282/90,958 bytes).
+  `2275-pthread-name` and `2282-single-step-before-catch` exposed the same
+  launcher identity issue: the runtime reports `ART run-test main` instead of
+  AOSP's `main`; the harness source now requests `main`, but the native launch
+  path still overwrites that logical name and requires a runtime-side fix.
