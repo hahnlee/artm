@@ -11735,3 +11735,8 @@ or admission exception was added.
   change; the first libc++ image still aborts during teardown, before the
   graph-unload result is surfaced. The failure is therefore below the Java
   lifecycle and remains an active NativeBridge/ELF owner teardown defect.
+- Checkpoint 483: invalidated the stale runtime-common cache and confirmed the
+  lifecycle diagnostics are present in the linked runtime. Reproduction still
+  aborts in the first libc++ `LoadedElf` drop, so the next fix must preserve
+  the graph's DSO lifecycle state through owner destruction rather than rely
+  on a stale object or a Java-side unload callback.
