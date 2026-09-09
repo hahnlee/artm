@@ -11803,3 +11803,7 @@ or admission exception was added.
   and reaches JNI_OnLoad/RegisterNatives; the next failure is the JNI ABI
   narrow-stack argument test (`nativeNarrowStack` returns -4), exposing a
   separate ARM64 trampoline argument-packing defect.
+- Checkpoint 497: regular-JNI ARM64 trampolines now reserve unwind callback
+  scratch slots after, rather than inside, Android's stack-argument area. This
+  removes the first-stack-argument overwrite; mixed spill/return execution
+  still aborts later and remains the active compatibility defect.

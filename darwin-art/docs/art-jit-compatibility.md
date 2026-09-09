@@ -7129,3 +7129,9 @@ incomplete and still requires managed caller unwind validation.
   and reaches JNI_OnLoad/RegisterNatives; the next failure is the JNI ABI
   narrow-stack argument test (`nativeNarrowStack` returns -4), exposing a
   separate ARM64 trampoline argument-packing defect.
+- Checkpoint 497: fixed the regular-JNI ARM64 thunk's private scratch layout.
+  Its unwind callback preservation slots had overlapped Android's first stack
+  argument at `[sp]`; scratch is now allocated after the 8-byte Android stack
+  tail. The narrow-stack failure no longer reports -4, but the end-to-end ELF
+  probe still aborts later in the mixed JNI acceptance path, so the remaining
+  spill/return boundary needs isolation before claiming completion.

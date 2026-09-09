@@ -141,10 +141,12 @@ bool PlanShorty(const char* shorty, ShortyPlan* plan, std::string* error) {
     darwin_offset += size;
     android_offset += 8;
   }
-  // The generated thunk uses the first two stack slots as scratch while it
-  // publishes the managed frame around the guest call. Keep the Android ABI
-  // tail at least one 16-byte pair even when the method has no stack args.
-  plan->android_stack_size = RoundUp(std::max(android_offset, size_t{16}), 16);
+  // Keep the Android ABI tail at least one 16-byte pair even when the method
+  // has no stack args, then reserve two private scratch slots after it.
+  // Keep two private scratch slots after the guest argument tail.  The
+  // trampoline must preserve x0 across the unwind-frame callback, but using
+  // [sp] for that scratch would overwrite the first Android stack argument.
+  plan->android_stack_size = RoundUp(std::max(android_offset, size_t{16}), 16) + 16;
   return true;
 }
 
@@ -364,6 +366,7 @@ TrampolineSet* CreateRegularTrampolines(void* proxy_jni_env,
     const GeneratedThunk& thunk = generated[index];
     const size_t source_request = thunk.source_request;
     const ShortyPlan& plan = plans[source_request];
+    const size_t scratch_offset = plan.android_stack_size - 16u;
     size_t cursor = thunk.offset;
     Write32(bytes, cursor, 0xa9bf7bfdu);  // stp x29, x30, [sp, #-16]!
     cursor += 4;
@@ -389,7 +392,8 @@ TrampolineSet* CreateRegularTrampolines(void* proxy_jni_env,
     // pass through ART's quick JNI entrypoints. Publish the same managed frame
     // contract around the guest call so a concurrent remote unwind can cross
     // this host-only ABI boundary.
-    Write32(bytes, cursor, EncodeStore(0, kSp, 0, 8));  // str x0, [sp]
+    Write32(bytes, cursor,
+            EncodeStore(0, kSp, scratch_offset, 8));  // str x0, scratch
     cursor += 4;
     Write32(bytes, cursor, 0xaa1c03e0u);  // mov x0, x28
     cursor += 4;
@@ -397,7 +401,8 @@ TrampolineSet* CreateRegularTrampolines(void* proxy_jni_env,
     cursor += 4;
     Write32(bytes, cursor, 0xd63f0200u);  // blr x16
     cursor += 4;
-    Write32(bytes, cursor, EncodeLoad(0, kSp, 0, 8));  // ldr x0, [sp]
+    Write32(bytes, cursor,
+            EncodeLoad(0, kSp, scratch_offset, 8));  // ldr x0, scratch
     cursor += 4;
     Write32(bytes, cursor, EncodeLdrLiteralX(0, cursor, proxy_literal));
     cursor += 4;
@@ -405,13 +410,15 @@ TrampolineSet* CreateRegularTrampolines(void* proxy_jni_env,
     cursor += 4;
     Write32(bytes, cursor, 0xd63f0200u);  // blr x16
     cursor += 4;
-    Write32(bytes, cursor, EncodeStore(0, kSp, 8, 8));  // str x0, [sp, #8]
+    Write32(bytes, cursor,
+            EncodeStore(0, kSp, scratch_offset + 8u, 8));  // str x0, scratch+8
     cursor += 4;
     Write32(bytes, cursor, EncodeLdrLiteralX(16, cursor, pop_literal));
     cursor += 4;
     Write32(bytes, cursor, 0xd63f0200u);  // blr x16
     cursor += 4;
-    Write32(bytes, cursor, EncodeLoad(0, kSp, 8, 8));  // ldr x0, [sp, #8]
+    Write32(bytes, cursor,
+            EncodeLoad(0, kSp, scratch_offset + 8u, 8));  // ldr x0, scratch+8
     cursor += 4;
     Write32(bytes, cursor, 0x910003bfu);  // mov sp, x29
     cursor += 4;
