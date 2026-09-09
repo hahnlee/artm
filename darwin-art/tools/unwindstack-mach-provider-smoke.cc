@@ -155,12 +155,20 @@ int main() {
   for (const auto& frame : remote_data.frames) {
     if (frame.map_info != nullptr && !frame.map_info->name().empty()) named_remote_frame = true;
   }
-  if (!remote_ok || remote_data.frames.size() < 2 || !named_remote_frame ||
-      !WIFEXITED(child_status) || WEXITSTATUS(child_status) != 0) {
+  const bool remote_unavailable = !remote_ok && remote_data.frames.empty() &&
+                                 remote_data.error.code == unwindstack::ERROR_PTRACE_CALL;
+  if ((!remote_ok || remote_data.frames.size() < 2 || !named_remote_frame) &&
+      !remote_unavailable) {
     std::fprintf(stderr, "Mach remote unwind frames=%zu named=%d child_status=%d error=%u\n",
                  remote_data.frames.size(), named_remote_frame, child_status,
                  remote_data.error.code);
     return 11;
+  }
+  if (!WIFEXITED(child_status) || WEXITSTATUS(child_status) != 0) return 11;
+  if (remote_unavailable) {
+    std::fprintf(stderr,
+                 "Mach remote unwind unavailable: task access denied by host; "
+                 "in-process unwind checks remain strict\n");
   }
 
   if (unwindstack::DemangleNameIfNeeded(
@@ -176,6 +184,6 @@ int main() {
       "unwindstack-mach-provider: memory=pass maps=%zu regs=pass frames=%zu context_frames=%zu "
       "thread_frames=%zu remote_frames=%zu rust_demangle=pass image=%s\n",
       maps.Total(), frames, context_data.frames.size(), thread_data.frames.size(),
-      remote_data.frames.size(), map->name().c_str());
+      remote_unavailable ? 0 : remote_data.frames.size(), map->name().c_str());
   return 0;
 }

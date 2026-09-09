@@ -11867,3 +11867,9 @@ or admission exception was added.
   with `ERROR_PTRACE_CALL` rather than deadlocking. The smoke still fails its
   remote assertion, so this capability must be separated from the in-process
   ART runtime link gate.
+
+- Checkpoint 516: provisioned a separate `clean-api29` profile directory with
+  zero allocated bytes; existing profiles were not modified. Confirmed the
+  prior `default` damage is an APFS sparsebundle lifecycle failure from live
+  mounted compaction, not APK/Git corruption. The 61G default profile remains
+  the storage bottleneck and must never be compacted while mounted.

@@ -7211,3 +7211,9 @@ incomplete and still requires managed caller unwind validation.
   `frames=0` and exits 11 because remote task access is unavailable. This is
   an explicit host capability failure, not an ART frame-walk success; runtime
   relink must keep remote diagnostics separate from in-process execution.
+
+- Checkpoint 516: created isolated `clean-api29` profile without touching
+  `default`, `recovery`, or `aosp-api29`; it is empty until explicitly
+  ensured/mounted. The damaged `default` profile remains APFS sparsebundle
+  corruption caused by compacting a mounted live bundle; APK and Git objects
+  were not damaged. Disk pressure is dominated by the 61G default bundle.
