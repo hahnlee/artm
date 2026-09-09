@@ -12965,3 +12965,8 @@ or admission exception was added.
   methods that do not require the current method, whereas the signal handler
   reads `sp[0]` as a method. This frame-contract mismatch is now the next
   measured target; implementation remains unchanged pending PC/frame proof.
+- Checkpoint 698: Direct signal diagnostics show Chrome's faulting thread is
+  attached to ART, but its `ManagedStack` has no published quick frame or JNI
+  tag at the moment generated code faults. The boundary is therefore the
+  Darwin host/JNI invocation transition; the temporary diagnostic was removed
+  and the next implementation must publish/pop the AOSP frame contract there.

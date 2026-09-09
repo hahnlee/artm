@@ -8423,3 +8423,10 @@ incomplete and still requires managed caller unwind validation.
   for Chrome's fault-frame `sp[0]`; both returned zero. This rules out a simple
   image-pointer-size selection bug. The slot is likely not the executing
   method, so next target is quick-frame boundary/tag publication.
+- Checkpoint 698: Fault-context tracing now compares ART TLS directly. Chrome's
+  failing JIT signal runs on a valid attached `Thread` (`self` is non-null), but
+  `ManagedStack::HasTopQuickFrame()` is false and all top-frame/tag accessors
+  are zero. This proves the failure is an un-published managed-frame boundary,
+  not pointer-size selection or a null `ArtMethod` entrypoint. The temporary
+  logging was removed; next repair the host/JNI invocation transition so the
+  AOSP managed-stack contract is published before entering generated code.
