@@ -8589,3 +8589,9 @@ incomplete and still requires managed caller unwind validation.
   pointer. Added `0183-darwin-arm64-fast-checkcast-reference-boundary.patch`
   to decode it into a scratch native register. Closure rebuild/audit and the
   post-change `003-omnibus-opcodes` three-lane differential run passed.
+- Checkpoint 725: Regression coverage after the check-cast boundary fix is
+  green for `426-monitor`, `160-read-barrier-stress`, and `102-concurrent-gc`:
+  interpreter, optimized/JIT, and unmodified-source lanes all pass. The
+  runtime still emits the known Darwin membarrier/sentinel-page warnings;
+  these runs did not reproduce a fault. Full compatibility matrix and real
+  APK acceptance remain open.

@@ -13107,3 +13107,8 @@ or admission exception was added.
   before loading its class pointer (`0183`). Rebuild/audit and the omnibus
   differential lanes passed; broader type-check, GC, and real-app coverage
   remains required.
+- Checkpoint 725: Post-fix differential regressions `426-monitor`,
+  `160-read-barrier-stress`, and `102-concurrent-gc` all pass in interpreter,
+  optimized/JIT, and unmodified-source lanes. This validates monitor, read
+  barrier, and concurrent-GC paths after the reference-boundary changes;
+  broader AOSP and real-APK coverage is still required.
