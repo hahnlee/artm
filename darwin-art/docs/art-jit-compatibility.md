@@ -8159,3 +8159,8 @@ incomplete and still requires managed caller unwind validation.
   corpus with the AOSP `--gcstress` contract. Interpreter, JIT, and
   unmodified-source interpreter+optimized lanes all pass, extending the
   reflection/inlining result through forced concurrent GC pressure.
+- Checkpoint 651: Started the heavier unmodified AOSP
+  `096-array-copy-concurrent-gc --gcstress` run. The isolated host remains
+  live and CPU-active, with repeated concurrent-copying collections and no
+  crash or orphan process observed yet; its terminal PASS/FAIL result is still
+  pending and is not counted as completed evidence.

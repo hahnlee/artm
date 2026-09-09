@@ -12743,3 +12743,7 @@ or admission exception was added.
   `--gcstress`. Interpreter, JIT, and unmodified-source interpreter+optimized
   all pass under the forced GC contract, so the corrected harness boundary
   does not hide a GC/read-barrier regression in this coverage.
+- Checkpoint 651: The `096-array-copy-concurrent-gc --gcstress` validation is
+  still running under the isolated process-group runner. Runtime logs show
+  active concurrent-copying GC and no crash/orphan; the terminal result will
+  be recorded after the same process exits.
