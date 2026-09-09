@@ -12659,3 +12659,9 @@ or admission exception was added.
   status 122 following the Darwin unsupported-`membarrier` warning. Both await
   serial reproduction after terminal replay; no synchronization or exception
   implementation change is inferred from parallel results alone.
+
+- Checkpoint 635: The live replay has advanced into `913–923` heap,
+  obsolete-JIT, object/property, and monitor coverage after more than
+  thirty-two minutes. Parent/worker lifecycle remains clean with no orphaned
+  ART hosts. Terminal summary and serial failure reproduction are still
+  outstanding.

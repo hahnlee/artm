@@ -8061,3 +8061,9 @@ incomplete and still requires managed caller unwind validation.
   `membarrier` unsupported warning. These are provisional under parallel load;
   serial reproduction is required before changing exception or synchronization
   paths.
+
+- Checkpoint 635: The replay has reached the `913–923` heap, obsolete-JIT,
+  object/property, and monitor cases after more than thirty-two minutes. The
+  parent remains live with active workers and no orphaned ART hosts. Final
+  ledger generation is still pending; provisional failures remain queued for
+  serial reproduction.
