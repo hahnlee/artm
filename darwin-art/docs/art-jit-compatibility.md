@@ -8642,3 +8642,7 @@ incomplete and still requires managed caller unwind validation.
 - Checkpoint 737: `471-deopt-environment` passes all three lanes, validating
   preservation and reconstruction of compiled locals across deoptimization.
   Additional OSR/deopt combinations and real APK acceptance remain open.
+- Checkpoint 738: Re-ran `003-omnibus-opcodes` after the referent intrinsic
+  patch; interpreter, optimized/JIT, and unmodified-source lanes all pass.
+  The suite still reports only the expected compiler instruction-size limit for
+  its intentionally huge method; full matrix and real APK coverage remain.

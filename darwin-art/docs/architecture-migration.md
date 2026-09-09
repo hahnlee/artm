@@ -13154,3 +13154,6 @@ or admission exception was added.
 - Checkpoint 737: `471-deopt-environment` passes interpreter, optimized/JIT,
   and unmodified-source lanes, validating compiled-local reconstruction during
   deoptimization. More OSR/deopt cases and real-app acceptance remain open.
+- Checkpoint 738: `003-omnibus-opcodes` remains green in all three lanes after
+  the referent intrinsic patch. Its expected oversized-method compiler limit
+  warning is unchanged; broader matrix and real-app acceptance remain open.
