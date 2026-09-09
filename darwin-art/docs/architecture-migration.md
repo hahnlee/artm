@@ -12633,3 +12633,8 @@ or admission exception was added.
   `305-other-fault-handler` ranges without stale ART hosts. Lifecycle-heavy
   execution remains stable; only the terminal ledger can establish the final
   corpus status.
+
+- Checkpoint 630: The active replay has updated the ledger to 1,073 passing
+  rows and is continuing through the hash-invalidated 436–438 compiler range.
+  The three prior non-pass rows are still pending terminal recheck, and no
+  orphaned ART hosts have been observed.

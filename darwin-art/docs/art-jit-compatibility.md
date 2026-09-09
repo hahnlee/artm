@@ -8030,3 +8030,9 @@ incomplete and still requires managed caller unwind validation.
   orphaned ART hosts or process-group leaks after repeated lifecycle-heavy
   cases. The terminal ledger is still pending and remains the source of truth
   for the final corpus result.
+
+- Checkpoint 630: The replay ledger has advanced to 1,073 passing rows while
+  still processing the remaining hash-invalidated inputs (currently the
+  436–438 compiler cases). Three rows remain from the prior ledger and are not
+  yet terminally rechecked. No orphaned `darwin-art-host` process has appeared;
+  the final result remains pending.
