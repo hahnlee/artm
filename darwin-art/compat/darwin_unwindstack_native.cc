@@ -33,6 +33,8 @@
 #include <unwindstack/RegsArm64.h>
 #include <unwindstack/Unwinder.h>
 
+#include "darwin_remote_task_cache.h"
+
 namespace android {
 // The standalone unwindstack provider smoke binary does not link the ART
 // thread owner. Keep a weak no-op there; the runtime's strong implementation
@@ -1223,8 +1225,8 @@ bool DarwinNativeUnwindRemote(Maps* maps, JitDebug* jit_debug, DexFiles* dex_fil
   DarwinPublishAotCodeMaps(maps);
   data.frames.clear();
   data.error = {ERROR_NONE, 0};
-  mach_port_t task = MACH_PORT_NULL;
-  if (task_for_pid(mach_task_self(), process_id, &task) != KERN_SUCCESS) {
+  mach_port_t task = darwin_art::remote_task::Acquire(process_id);
+  if (task == MACH_PORT_NULL) {
     data.error.code = ERROR_SYSTEM_CALL;
     return false;
   }

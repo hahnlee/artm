@@ -7357,6 +7357,12 @@ incomplete and still requires managed caller unwind validation.
   fake symbols). Retested `137-cfi`; remote register capture still reports
   `ESRCH` despite the debugger entitlement.
 
+- Checkpoint 540: routed the native remote unwind provider itself through the
+  shared retrying Mach task cache (the provider had still called
+  `task_for_pid` directly). Rebuilt the strict graphics closure successfully,
+  but `137-cfi` remains failing at remote register capture; this removes a
+  concrete bypass while leaving the entitlement/task-port limitation visible.
+
 - Checkpoint 536: hardened the Darwin remote task cache to retry
   `task_for_pid` during the fork/exec-to-SIGSTOP transition (8 attempts,
   1-second bounded wait) while checking child liveness. Host crate checks pass;

@@ -12009,3 +12009,8 @@ or admission exception was added.
   pinned NDK environment; strict graphics link passes (`registrar=51`, no
   fake symbols). Retested `137-cfi`; remote register capture still reports
   `ESRCH` despite the debugger entitlement.
+
+- Checkpoint 540: changed the native remote unwind provider to use the shared
+  retrying Mach task cache instead of a direct `task_for_pid` call. The strict
+  graphics closure rebuild passes, but `137-cfi` still fails during remote
+  register capture, so the task-port limitation remains unresolved.
