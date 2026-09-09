@@ -13046,3 +13046,8 @@ or admission exception was added.
   remaining work is an actual ARM64 lowering/address or W^X publication bug,
   not merely graphics or probe plumbing; symbolization and boundary repair
   are now the next implementation target.
+- Checkpoint 712: Debug-only publication tracing shows the Chrome/system-server
+  fault (`pc=0x12d801d1c`, `SEGV_ACCERR`, `addr=0x6060313`) occurs without any
+  JIT code-range publication in that process. The architecture must first
+  identify whether the PC belongs to AOT, nterp, or a trampoline; widening the
+  JIT registry or null handler would be incorrect.

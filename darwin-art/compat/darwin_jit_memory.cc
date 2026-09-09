@@ -4,6 +4,8 @@
 #include <cerrno>
 #include <libkern/OSCacheControl.h>
 #include <pthread.h>
+#include <cstdio>
+#include <cstdlib>
 #include <sys/mman.h>
 
 namespace { thread_local unsigned write_depth = 0; }
@@ -31,6 +33,11 @@ void DarwinArtRegisterJitMethod(uintptr_t code, size_t size, uintptr_t method) {
       }
       entry.end.store(end, std::memory_order_relaxed);
       entry.method.store(method, std::memory_order_release);
+      if (std::getenv("DARWIN_ART_DEBUG_JIT") != nullptr) {
+        std::fprintf(stderr, "DARWIN JIT publish code=%p end=%p size=%zu method=%p\n",
+                     reinterpret_cast<void*>(code), reinterpret_cast<void*>(end), size,
+                     reinterpret_cast<void*>(method));
+      }
       return;
     }
   }

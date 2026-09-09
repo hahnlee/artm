@@ -8512,3 +8512,10 @@ incomplete and still requires managed caller unwind validation.
   lowering/managed-address fault exposed by unrestricted JIT, not a test
   harness success; the next step is symbolizing this generated PC and fixing
   its ARM64 reference or W^X transition boundary.
+- Checkpoint 712: Added debug-only JIT publication logging and reran the real
+  Chrome/system-server acceptance. The generated-code fault persists with a
+  new PC (`0x12d801d1c`, `SEGV_ACCERR`, `addr=0x6060313`), but no
+  `DarwinArtRegisterJitMethod` publication precedes it. The failing producer is
+  therefore not proven to be a committed optimizing-JIT range; distinguish
+  AOT/nterp/trampoline code from JIT before changing ARM64 lowering or fault
+  recovery.
