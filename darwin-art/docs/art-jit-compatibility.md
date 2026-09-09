@@ -8181,3 +8181,9 @@ incomplete and still requires managed caller unwind validation.
   verified Darwin unwindstack collector remains unchanged; the timeout is now
   tracked as a GC-stress performance gap, not papered over with an unsafe
   walker.
+- Checkpoint 655: After restoring the verified unwindstack collector, the
+  graphics runtime was relinked from a clean bootstrap. The earlier 497
+  GC-stress SIGTRAP was confirmed to be a stale dylib containing the rejected
+  raw walker: the freshly relinked `497-inlining-and-class-loader --gcstress`
+  passed interpreter, JIT, and unmodified-source lanes. The heavy 096 timeout
+  remains an open performance target.

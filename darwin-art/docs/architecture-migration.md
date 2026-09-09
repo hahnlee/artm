@@ -12760,3 +12760,9 @@ or admission exception was added.
   raw Darwin unwind walker caused SIGTRAP in managed frames and was fully
   discarded; the existing unwindstack provider is retained while GC-stress
   scheduling/performance is investigated separately.
+- Checkpoint 655: A clean graphics relink after restoring the unwindstack
+  collector made `497-inlining-and-class-loader --gcstress` pass all three
+  lanes (interpreter, JIT, and unmodified source). This isolates the prior
+  short-test SIGTRAP to a stale dylib from the rejected raw walker; no runtime
+  source change is needed for that crash. The 096 long-run timeout is still
+  tracked as the next GC-stress performance milestone.
