@@ -12628,3 +12628,8 @@ or admission exception was added.
 - Checkpoint 628: The replay reached `1971-multi-force-early-return` after ten
   minutes and continues without process-group leaks. Structural and later
   compiler cases remain in flight, so no interim ledger count is final.
+
+- Checkpoint 629: The four-way replay progressed through the 2243 and
+  `305-other-fault-handler` ranges without stale ART hosts. Lifecycle-heavy
+  execution remains stable; only the terminal ledger can establish the final
+  corpus status.

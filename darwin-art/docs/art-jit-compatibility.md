@@ -8024,3 +8024,9 @@ incomplete and still requires managed caller unwind validation.
   `1971-multi-force-early-return` deoptimization/JVMTI boundary after ten
   minutes. Four-way execution remains live with no orphaned hosts; terminal
   results are still pending.
+
+- Checkpoint 629: Continued the fresh four-way replay into the 2243 and
+  `305-other-fault-handler` ranges. The long-running run has produced no
+  orphaned ART hosts or process-group leaks after repeated lifecycle-heavy
+  cases. The terminal ledger is still pending and remains the source of truth
+  for the final corpus result.
