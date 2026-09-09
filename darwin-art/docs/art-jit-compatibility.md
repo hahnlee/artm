@@ -8078,3 +8078,11 @@ incomplete and still requires managed caller unwind validation.
   transformation, recursive/reflective obsolete-method, and annotation cases.
   The parent and four workers remain healthy without orphaned ART hosts. The
   final summary is still pending as the remaining tail is processed.
+
+- Checkpoint 638: The fresh replay terminated with 1,068/1,076 passes and
+  eight provisional failures. Serial reruns proved `039`, `2275`, and `2282`
+  pass; after rebuilding the runtime, the new uncaught-exception dispatch path
+  made `714-invoke-custom-lambda-metafactory` and `844-exception2` pass in all
+  interpreter/JIT/unmodified lanes. Remaining actionable cases are `497`
+  (reflection stack frame), `629` (VDEX AOT selection), and `9999` (Parcel API
+  compiler surface).

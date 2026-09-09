@@ -12675,3 +12675,10 @@ or admission exception was added.
   BCP transformation, recursive/reflective obsolete-method, and annotation
   cases. Parent and workers remain healthy with no orphaned ART hosts; final
   summary generation is still pending.
+
+- Checkpoint 638: The fresh replay terminated at 1,068/1,076 passes with eight
+  provisional failures. Serial reruns confirmed `039`, `2275`, and `2282`; the
+  runtime rebuild plus real uncaught-exception dispatch then made `714` and
+  `844` pass across interpreter/JIT/unmodified lanes. Remaining work is
+  narrowed to `497` reflection stack framing, `629` VDEX AOT selection, and
+  `9999` Parcel compiler API coverage.

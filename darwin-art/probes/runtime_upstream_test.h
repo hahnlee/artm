@@ -321,7 +321,17 @@ inline int Run(JNIEnv* env, jclass harness) {
     env->CallStaticVoidMethod(main_class, main_method, arguments);
   }
   if (env->ExceptionCheck()) {
-    env->ExceptionClear();
+    // Match ART's dalvikvm thread teardown: dispatch the pending Throwable
+    // through Thread's uncaught-exception handler.  This both preserves the
+    // application's handler (for example exception2's System.exit path) and
+    // gives the default handler the AOSP-compatible "Exception in thread"
+    // prefix for uncaught BootstrapMethodError cases.
+    art::Thread* current = art::Thread::Current();
+    art::ObjPtr<art::mirror::Throwable> exception = current->GetException();
+    current->ClearException();
+    art::WellKnownClasses::java_lang_Thread_dispatchUncaughtException
+        ->InvokeFinal<'V', 'L'>(current, current->GetPeer(), exception);
+    current->ClearException();
     env->DeleteLocalRef(main_class);
     env->DeleteLocalRef(arguments);
     env->DeleteLocalRef(string_class);
