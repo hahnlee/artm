@@ -8309,3 +8309,7 @@ incomplete and still requires managed caller unwind validation.
   earlier profiler limitation. Rechecked AOSP metadata: 149-suspend-all-stress
   is explicitly a known flaky-output failure upstream. No unsupported lifecycle
   shortcut or test gate was added; forced-GC completion remains open.
+- Checkpoint 677: Re-ran unmodified 149-suspend-all-stress without GC stress;
+  interpreter, JIT, and interpreter+optimized lanes all pass. This confirms
+  its historical corpus failure is not an ordinary ARM64/JIT regression. The
+  forced-GC 096 cadence issue remains the only reproduced stress gap.

@@ -12866,3 +12866,7 @@ or admission exception was added.
   marks 149-suspend-all-stress as flaky output, while 096 normal lanes remain
   green. The runtime still needs a real forced-GC cadence result; no fallback or
   allowlist relaxation was used.
+- Checkpoint 677: 149-suspend-all-stress was rerun without forced GC and passed
+  all interpreter/JIT/optimized lanes. Its old corpus failure is therefore not
+  an ordinary runtime regression; only the forced-GC 096 cadence remains under
+  investigation.
