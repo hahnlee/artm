@@ -11777,3 +11777,8 @@ or admission exception was added.
   destroyed. ELF fixture/self-tests and runtime link audit pass; the full
   acceptance probe still aborts later in its intentional generic JNI failure
   cleanup path and needs a separate teardown audit.
+- Checkpoint 492: forced a clean provider-closure/runtime relink and verified
+  the cache fix in the final dylib: all graph images now finalize and owner
+  slots release successfully. The remaining acceptance failure is earlier in
+  the generic fixture's JNI_OnLoad, where java.nio FileSystems initialization
+  raises UnixException; this is now isolated from ELF unload correctness.
