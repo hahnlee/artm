@@ -16,7 +16,13 @@ struct JitMethodEntry {
   std::atomic<uintptr_t> end{0};
   std::atomic<uintptr_t> method{0};
 };
-constexpr size_t kJitMethodEntries = 1024;
+// The registry is consulted from ART's signal path and must remain lock-free.
+// A boot image can publish several thousand AOT entry ranges before the first
+// application method is JIT-compiled; a small fixed table silently dropped
+// the application's range and caused implicit-null faults to reach the user
+// SIGSEGV handler. Keep ample headroom for boot plus app code while retaining
+// the signal-safe, bounded representation.
+constexpr size_t kJitMethodEntries = 16384;
 JitMethodEntry g_jit_method_entries[kJitMethodEntries];
 }
 

@@ -8750,3 +8750,8 @@ incomplete and still requires managed caller unwind validation.
   catch handling, and optimized/JIT deoptimization; all interpreter,
   optimized/JIT, and unmodified-source lanes pass. Remaining corpus failures
   and production APK acceptance remain open.
+- Checkpoint 765: Expanded the lock-free Darwin JIT fault-method registry from
+  1,024 to 16,384 ranges. Boot-image AOT publication had exhausted the old
+  table, dropping application JIT ranges and misrouting implicit-null faults
+  to user SIGSEGV handlers. Rebuilt and audited the graphics runtime link,
+  then `004-SignalTest` passed all three lanes.

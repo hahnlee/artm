@@ -13242,3 +13242,8 @@ or admission exception was added.
 - Checkpoint 764: Re-ran `844-exception2`, validating exception propagation,
   catch handling, and optimized/JIT deoptimization; all three runner lanes
   pass. Remaining corpus failures and production APK acceptance remain open.
+- Checkpoint 765: Expanded the lock-free Darwin JIT fault-method registry from
+  1,024 to 16,384 ranges. Boot-image AOT publication had exhausted the old
+  table, dropping application JIT ranges and misrouting implicit-null faults
+  to user SIGSEGV handlers. Graphics runtime link audit and `004-SignalTest`
+  now pass all three lanes.
