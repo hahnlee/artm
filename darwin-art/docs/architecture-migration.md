@@ -12843,3 +12843,8 @@ or admission exception was added.
   unmodified optimized lanes individually. Historical summaries must not be
   treated as current failures; forced-GC stress (149/096) remains the active
   performance/lifecycle gap.
+- Checkpoint 672: Reordered Darwin local-unwind handling so the per-thread
+  managed-frame cache is checked before constructing `NativeWalk` or publishing
+  AOT maps. This is the first hot-path reduction aimed at the allocation-heavy
+  GC-stress cadence; ordinary 096 and 497 three-lane regressions remain green,
+  while bounded 096 GC-stress still times out at 45 seconds.

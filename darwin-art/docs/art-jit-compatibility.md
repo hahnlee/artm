@@ -8280,3 +8280,10 @@ incomplete and still requires managed caller unwind validation.
   outstanding reproduced stress concern is 149-suspend-all-stress/096 GC
   stress runtime, which remains a teardown/cadence investigation rather than
   a bytecode correctness failure.
+- Checkpoint 672: Moved the Darwin managed-backtrace cache lookup ahead of
+  `NativeWalk` construction, AOT map publication, and Mach-backed memory
+  initialization. This removes those repeated setup costs on GC-stress cache
+  hits while retaining caller-PC plus managed-frame identity keys. The rebuilt
+  provider passes 096 normally and 497 across interpreter/JIT/optimized lanes;
+  096 GC-stress still exceeds a bounded 45-second run, so no completion or
+  speedup claim is made yet.

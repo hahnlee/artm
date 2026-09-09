@@ -1085,10 +1085,53 @@ uint64_t DarwinFindGlobalVariable(Maps* maps, const char* variable) {
 
 bool DarwinNativeUnwind(Maps* maps, JitDebug* jit_debug, DexFiles* dex_files, size_t max_frames,
                         AndroidUnwinderData& data) {
-  DarwinPublishAotCodeMaps(maps);
   data.frames.clear();
   data.error = {ERROR_NONE, 0};
-  NativeWalk walk{maps, jit_debug, dex_files, &data, data.max_frames.value_or(max_frames), mach_task_self(),
+  const size_t limit = data.max_frames.value_or(max_frames);
+  // Resolve the caller and managed-frame identity before constructing the
+  // unwind walk. GC-stress requests a backtrace for every allocation; once the
+  // same managed frame repeats, the cache hit must avoid NativeWalk setup,
+  // map publication, and Mach-backed memory initialization entirely.
+  const uint64_t frame_pointer = reinterpret_cast<uint64_t>(__builtin_frame_address(0));
+  uint64_t caller_record[2]{};
+  if (!ReadFrameRecord(mach_task_self(), frame_pointer, caller_record)) {
+    data.error.code = ERROR_MEMORY_INVALID;
+    return false;
+  }
+  const uint64_t caller_pc = StripReturnAddress(caller_record[1]);
+  uint64_t registered_managed_sp = 0;
+  uint64_t registered_frame_kind = 0;
+  uint64_t registered_frame_size = 0;
+  uint64_t registered_core_spill_mask = 0;
+  uint64_t thread_id = 0;
+  const bool have_thread_id = pthread_threadid_np(nullptr, &thread_id) == 0 && thread_id != 0;
+  const bool has_registered_quick_frame =
+      have_thread_id && ReadLocalQuickFrame(thread_id, &registered_managed_sp, &registered_frame_kind,
+                                            &registered_frame_size, &registered_core_spill_mask);
+  if (!has_registered_quick_frame) {
+    uint64_t generic_jni_sp = 0;
+    if (android::CurrentGenericJniFrame != nullptr &&
+        android::CurrentGenericJniFrame(&generic_jni_sp)) {
+      registered_managed_sp = generic_jni_sp;
+    }
+  }
+  uint64_t shadow_frame = 0;
+  const bool has_shadow_frame = android::CurrentInterpreterFrame(&shadow_frame);
+  const bool cache_key_matches =
+      g_local_managed_backtrace_cache.caller_pc == caller_pc &&
+      !g_local_managed_backtrace_cache.frames.empty() &&
+      ((registered_managed_sp != 0 &&
+        g_local_managed_backtrace_cache.managed_sp == registered_managed_sp) ||
+       (registered_managed_sp == 0 && has_shadow_frame &&
+        g_local_managed_backtrace_cache.shadow_frame == shadow_frame));
+  if (cache_key_matches) {
+    data.frames = g_local_managed_backtrace_cache.frames;
+    if (data.frames.size() > limit) data.frames.resize(limit);
+    return true;
+  }
+
+  DarwinPublishAotCodeMaps(maps);
+  NativeWalk walk{maps, jit_debug, dex_files, &data, limit, mach_task_self(),
                   Memory::CreateProcessMemoryThreadCached(getpid())};
   // The generic-JNI trampoline deliberately leaves no unwindable native frame
   // between the JNI entry and the managed caller.  It publishes the managed
@@ -1096,10 +1139,12 @@ bool DarwinNativeUnwind(Maps* maps, JitDebug* jit_debug, DexFiles* dex_files, si
   // consume that publication for local unwinds as well.  Relying on the last
   // native symbol name is insufficient because libunwind may stop at the
   // native callback before visiting the trampoline's CFI range.
-  uint64_t thread_id = 0;
-  if (pthread_threadid_np(nullptr, &thread_id) == 0 && thread_id != 0) {
-    if (ReadLocalQuickFrame(thread_id, &walk.registered_managed_sp, &walk.registered_frame_kind,
-                            &walk.registered_frame_size, &walk.registered_core_spill_mask)) {
+  if (have_thread_id) {
+    if (has_registered_quick_frame) {
+      walk.registered_managed_sp = registered_managed_sp;
+      walk.registered_frame_kind = registered_frame_kind;
+      walk.registered_frame_size = registered_frame_size;
+      walk.registered_core_spill_mask = registered_core_spill_mask;
       walk.last_x28 = walk.registered_managed_sp;
       walk.has_registered_quick_frame = true;
     }
@@ -1109,10 +1154,8 @@ bool DarwinNativeUnwind(Maps* maps, JitDebug* jit_debug, DexFiles* dex_files, si
   // SaveRefsAndArgs frame directly for local unwinds so a native callback can
   // continue through the managed caller without relying on a host trampoline.
   if (!walk.has_registered_quick_frame) {
-    uint64_t generic_jni_sp = 0;
-    if (android::CurrentGenericJniFrame != nullptr &&
-        android::CurrentGenericJniFrame(&generic_jni_sp)) {
-      walk.registered_managed_sp = generic_jni_sp;
+    if (registered_managed_sp != 0) {
+      walk.registered_managed_sp = registered_managed_sp;
       walk.registered_frame_kind = 0;
       walk.registered_frame_size = 224;
       walk.registered_core_spill_mask = 0;
@@ -1127,34 +1170,6 @@ bool DarwinNativeUnwind(Maps* maps, JitDebug* jit_debug, DexFiles* dex_files, si
   // managed main). Walk Darwin's ordinary frame records just as the remote
   // Mach-task path does and strip, rather than authenticate, saved return
   // addresses at the host boundary.
-  const uint64_t frame_pointer =
-      reinterpret_cast<uint64_t>(__builtin_frame_address(0));
-  uint64_t caller_record[2]{};
-  if (!ReadFrameRecord(mach_task_self(), frame_pointer, caller_record)) {
-    data.error.code = ERROR_MEMORY_INVALID;
-    return false;
-  }
-  const uint64_t caller_pc = StripReturnAddress(caller_record[1]);
-  uint64_t shadow_frame = 0;
-  const bool has_shadow_frame = android::CurrentInterpreterFrame(&shadow_frame);
-  if (walk.has_registered_quick_frame &&
-      g_local_managed_backtrace_cache.caller_pc == caller_pc &&
-      g_local_managed_backtrace_cache.managed_sp == walk.registered_managed_sp &&
-      !g_local_managed_backtrace_cache.frames.empty()) {
-    data.frames = g_local_managed_backtrace_cache.frames;
-    const size_t limit = data.max_frames.value_or(max_frames);
-    if (data.frames.size() > limit) data.frames.resize(limit);
-    return true;
-  }
-  if (has_shadow_frame && !walk.has_registered_quick_frame &&
-      g_local_managed_backtrace_cache.caller_pc == caller_pc &&
-      g_local_managed_backtrace_cache.shadow_frame == shadow_frame &&
-      !g_local_managed_backtrace_cache.frames.empty()) {
-    data.frames = g_local_managed_backtrace_cache.frames;
-    const size_t limit = data.max_frames.value_or(max_frames);
-    if (data.frames.size() > limit) data.frames.resize(limit);
-    return true;
-  }
   const bool collected = caller_pc != 0 && CollectFrameRecords(
       mach_task_self(), caller_pc - 1, frame_pointer + sizeof(caller_record),
       caller_record[0], &walk);
