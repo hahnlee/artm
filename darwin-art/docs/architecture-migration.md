@@ -13307,3 +13307,7 @@ or admission exception was added.
   `940-recursive-obsolete`, covering JVMTI transformation and recursive
   obsolete-method paths. Intermediate counts remain 1,061 passed and 15
   failed; the final matrix is still pending worker termination.
+- Checkpoint 780 (2026-09-10): The resumed four-worker corpus remains active,
+  now processing the 980-series JVMTI tests. The ledger is still 1,061 passed
+  and 15 failed; these failures remain provisional until the run terminates
+  and each entry is rerun against the current boot-image range registration.
