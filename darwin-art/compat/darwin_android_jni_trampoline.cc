@@ -146,7 +146,11 @@ bool PlanShorty(const char* shorty, ShortyPlan* plan, std::string* error) {
   // Keep two private scratch slots after the guest argument tail.  The
   // trampoline must preserve x0 across the unwind-frame callback, but using
   // [sp] for that scratch would overwrite the first Android stack argument.
-  plan->android_stack_size = RoundUp(std::max(android_offset, size_t{16}), 16) + 16;
+  const size_t guest_stack_size = RoundUp(std::max(android_offset, size_t{16}), 16);
+  // Preserve the historical 16-byte frame for register-only calls.  ART's
+  // unwind bridge observes that frame even though no guest stack arguments
+  // exist; only calls with a real Android stack tail need extra scratch.
+  plan->android_stack_size = guest_stack_size + (android_offset == 0 ? 0 : 16);
   return true;
 }
 
@@ -366,7 +370,8 @@ TrampolineSet* CreateRegularTrampolines(void* proxy_jni_env,
     const GeneratedThunk& thunk = generated[index];
     const size_t source_request = thunk.source_request;
     const ShortyPlan& plan = plans[source_request];
-    const size_t scratch_offset = plan.android_stack_size - 16u;
+    const size_t scratch_offset =
+        plan.android_stack_size == 16 ? 0 : plan.android_stack_size - 16;
     size_t cursor = thunk.offset;
     Write32(bytes, cursor, 0xa9bf7bfdu);  // stp x29, x30, [sp, #-16]!
     cursor += 4;

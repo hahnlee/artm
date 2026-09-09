@@ -7135,3 +7135,9 @@ incomplete and still requires managed caller unwind validation.
   tail. The narrow-stack failure no longer reports -4, but the end-to-end ELF
   probe still aborts later in the mixed JNI acceptance path, so the remaining
   spill/return boundary needs isolation before claiming completion.
+- Checkpoint 498: narrowed the remaining abort: it also occurs on the
+  register-only `nativeUsesEnv` return, so extra stack allocation itself can
+  violate the ART unwind contract. Register-only thunks now retain the legacy
+  16-byte frame; only calls with a guest stack tail receive post-tail scratch.
+  The focused trampoline audit remains PASS; end-to-end relink/probe is still
+  pending and the full compatibility goal remains open.

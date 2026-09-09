@@ -11807,3 +11807,7 @@ or admission exception was added.
   scratch slots after, rather than inside, Android's stack-argument area. This
   removes the first-stack-argument overwrite; mixed spill/return execution
   still aborts later and remains the active compatibility defect.
+- Checkpoint 498: register-only JNI calls retain their original 16-byte
+  unwind frame, while stack-bearing calls reserve scratch after the guest
+  tail. This isolates a frame-size interaction observed on `nativeUsesEnv`;
+  the full runtime relink and mixed-call probe remain to be completed.
