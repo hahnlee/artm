@@ -7776,3 +7776,12 @@ incomplete and still requires managed caller unwind validation.
   thread and suppresses duplicate stderr output; `054-uncaught` passes
   interpreter, JIT, and unmodified-source lanes. The remaining full-corpus,
   GC/JIT stress, and real-app criteria remain open.
+
+- Checkpoint 597: reran the 050–079 window after the launcher and uncaught
+  handler fixes. `054-uncaught` now passes interpreter, JIT, and
+  unmodified-source lanes. The remaining three failures are
+  `136-daemon-jni-shutdown` (owner-thread VM destruction/native stdout),
+  `137-cfi` (JIT CFI/unwind frame contract), and `150-loadlibrary` (JNI
+  unload during host VM shutdown); 27/30 tests pass in this fresh window.
+  These are runtime lifecycle/native boundaries, not APK or test-source
+  mutations, and remain open.
