@@ -12820,3 +12820,8 @@ or admission exception was added.
   `sample` stalled while attaching and emitted no usable stack report. The
   sampler and stress descendants were reaped; this is a tooling limitation,
   not evidence of a runtime failure or a completed stress run.
+- Checkpoint 667: Tried using Android-style `_exit` for AOSP run-test hosts to
+  skip the expensive DestroyJavaVM teardown. It caused the native harness
+  output stream to be lost (`stdout=0`), so the lifecycle change was reverted.
+  A future exit fast path must explicitly finalize the harness output before
+  process termination.

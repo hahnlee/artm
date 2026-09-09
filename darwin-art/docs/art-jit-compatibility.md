@@ -8252,3 +8252,9 @@ incomplete and still requires managed caller unwind validation.
   attach operation stalled, so the sampler was terminated and all test
   descendants were reaped. This rules out the current sampling command as a
   low-overhead profiler; no runtime change or stress PASS is claimed.
+- Checkpoint 667: Tested routing AOSP run-test processes through the host's
+  `_exit` lifecycle to avoid the long DestroyJavaVM/HeapTrim tail. The process
+  exited quickly but bypassed the harness's native output finalization, yielding
+  `stdout=0` and a false mismatch. The experiment was reverted; corpus tests
+  retain the existing destroy path until a flush-safe process-exit contract is
+  implemented.
