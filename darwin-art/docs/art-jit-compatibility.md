@@ -8136,3 +8136,9 @@ incomplete and still requires managed caller unwind validation.
   not apply that hunk reliably and the experiment was discarded. The graphics
   bootstrap was regenerated from the unmodified manifest and remains healthy;
   no unverified stack-walk workaround is retained.
+- Checkpoint 647: A same-object probe confirmed `Throwable.getStackTrace()`
+  returns an array of six elements containing `Method.invoke (Native Method)`,
+  but `printStackTrace()` immediately iterates a five-frame result for that
+  same Throwable. The Java loop and `StackTraceElement.toString()` are stock;
+  this isolates the defect to the ART-managed `stackTrace` publication/read
+  path used by print formatting, not frame discovery or native marker creation.

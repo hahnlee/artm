@@ -12723,3 +12723,8 @@ or admission exception was added.
   the shared staging patcher could not apply the replacement hunk reliably.
   It was fully removed; the graphics bootstrap was regenerated from the
   canonical manifest with no workaround left in the runtime.
+- Checkpoint 647: A same-Throwable probe showed `getStackTrace()` exposing six
+  frames including `Method.invoke (Native Method)`, while the stock
+  `printStackTrace()` loop emits only five. This further localizes the issue to
+  ART's managed stackTrace publication/read behavior during print formatting;
+  frame discovery and native marker construction are not the limiting stage.
