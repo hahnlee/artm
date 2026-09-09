@@ -7625,3 +7625,24 @@ incomplete and still requires managed caller unwind validation.
    1,035 passed / 9 failed. Remaining work is isolated to native bridge,
    compiler metadata regressions, SIGQUIT/static-field handling, large
    allocation, obsolete method handles, and structural redefinition tests.
+
+580. **2026-09-09 — native bridge and compiler metadata cases clear**
+
+   Re-ran `115-native-bridge`, `140-dce-regression`, `140-field-packing`, and
+   `144-static-field-sigquit`; all execution lanes pass for each. The ledger
+   is now 1,039 passed / 5 failed. Only `175-alloc-big-bignums`, obsolete
+   method-handle behavior, and three structural-redefinition scope tests
+   remain.
+
+581. **2026-09-09 — pinned AOSP corpus reaches zero failures**
+
+   Added signature-only `android.os` compiler stubs required by the
+   `2000-virtual-list-structural` hidden-API compile path, then re-ran the
+   final five cases (`175-alloc-big-bignums`, `1948-obsolete-const-method-handle`,
+   `1986-structural-redefine-multi-thread-stack-scope`,
+   `1987-structural-redefine-recursive-stack-scope`, and
+   `2000-virtual-list-structural`). All interpreter, JIT, and
+   unmodified-source lanes pass. The pinned corpus ledger is now **1,044
+   passed / 0 failed**. This closes corpus coverage only; real APK validation
+   (including Blue Archive) and unrestricted production-JIT app validation
+   remain required for the overall goal.

@@ -1355,6 +1355,11 @@ def main() -> int:
             # InputChannel is a hidden framework API absent from the public
             # SDK jar but required by the endpoint/Parcel compatibility smoke.
             root / "probes/compile-stubs/android/view/InputChannel.java",
+            root / "probes/compiler-stubs/android/os/Parcelable.java",
+            root / "probes/compiler-stubs/android/os/IBinder.java",
+            root / "probes/compiler-stubs/android/os/Binder.java",
+            root / "probes/compiler-stubs/android/os/Parcel.java",
+            root / "probes/compiler-stubs/android/os/ParcelFileDescriptor.java",
             root / "probes/compiler-stubs/libcore/util/EmptyArray.java",
             root / "probes/compiler-stubs/dalvik/annotation/optimization/DeadReferenceSafe.java",
             root / "probes/compiler-stubs/dalvik/annotation/optimization/NeverInline.java",
