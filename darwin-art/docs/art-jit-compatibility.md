@@ -8329,3 +8329,9 @@ incomplete and still requires managed caller unwind validation.
   suspend-all pauses of 8--15 ms and explicit GC totals around 100--200 ms.
   The remaining cost is Darwin collector/thread synchronization, not launcher
   dispatch or JIT correctness.
+- Checkpoint 681: Rechecked AOSP `149-suspend-all-stress` without GC stress;
+  interpreter, JIT, and interpreter+optimized all pass. The latest 096
+  stress-host log shows `Main main(String[]) PASS` followed by worker GC cycles,
+  confirming the runtime reaches the application workload before the bounded
+  timeout. The remaining issue is stress throughput/cadence, with no observed
+  bytecode or JIT failure.

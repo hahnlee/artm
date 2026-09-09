@@ -12884,3 +12884,7 @@ or admission exception was added.
   after main returns, with 8--15 ms suspend-all pauses and explicit GC totals
   around 100--200 ms. The next implementation target is Darwin collector/thread
   synchronization rather than launcher or JIT admission.
+- Checkpoint 681: 149 ordinary lanes remain green. A fresh 096 stress log again
+  reaches `Main main(String[]) PASS` and then spends its bounded window in worker
+  GC cycles, so the open gap is stress throughput/cadence rather than dispatch,
+  bytecode execution, or JIT admission.
