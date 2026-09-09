@@ -11753,3 +11753,7 @@ or admission exception was added.
   libc++ image still aborts before the Rust drop boundary can report progress.
   The next step is to instrument the loader's fini-array invocation itself and
   verify whether a guest finalizer faults before DSO lifecycle finalization.
+- Checkpoint 487: instrumented the fini-array boundary and rebuilt the linked
+  runtime; no finalizer entry/return was observed before abort. The abort is
+  therefore in the graph drop path before guest fini execution (or in a
+  lower-level mapped-image teardown), not in the Java callback lifecycle.
