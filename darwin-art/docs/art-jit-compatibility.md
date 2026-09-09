@@ -8791,3 +8791,7 @@ incomplete and still requires managed caller unwind validation.
   `416-optimizing-arith-not` segment. Its intermediate ledger currently shows
   1,056 passed and 20 failed entries, which is not final until all workers
   terminate and stale results are reconciled.
+- Checkpoint 773: The same four-worker corpus run remains live and has
+  advanced through `565-checker-doublenegbitwise`. Its intermediate ledger
+  currently reports 1,059 passed and 17 failed; failures are not final until
+  the full run completes and each failing lane is independently reproduced.
