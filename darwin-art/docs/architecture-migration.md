@@ -13206,3 +13206,6 @@ or admission exception was added.
 - Checkpoint 754: `2239-varhandle-perf-vh-gab` passes all three runner lanes,
   validating atomic get-and-bitwise read-modify-write semantics. Remaining
   modes and real-app acceptance remain open.
+- Checkpoint 755: `2239-varhandle-perf-vh-cas` passes all three runner lanes,
+  validating ordinary atomic compare-and-set success/failure semantics.
+  Remaining modes and real-app acceptance remain open.
