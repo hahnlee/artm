@@ -8505,3 +8505,10 @@ incomplete and still requires managed caller unwind validation.
   `ExceptionInInitializerError` from `FileSystems`/`VMClassLoader` before
   `DarwinServiceBridge.createContextBinder()` is entered. The probe therefore
   still exits status 27; no Java-side fallback was added.
+- Checkpoint 711: Ran the real Chrome tab-graphics acceptance after removing
+  the optimizing allowlist. Profile system-server published its sockets, then
+  a generated-code `SIGSEGV/SEGV_ACCERR` occurred at `pc=0x120001bcc`
+  (`addr=0x6060313`) before the app launch completed. This is a concrete
+  lowering/managed-address fault exposed by unrestricted JIT, not a test
+  harness success; the next step is symbolizing this generated PC and fixing
+  its ARM64 reference or W^X transition boundary.

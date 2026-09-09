@@ -13040,3 +13040,9 @@ or admission exception was added.
   → `ServiceManager` → lookup). This validates the need for an early native
   endpoint or pre-started profile system-server; the runtime still has no
   artificial mock fallback.
+- Checkpoint 711: Real Chrome acceptance reached the profile system-server
+  socket bootstrap, but the unrestricted JIT then faulted in generated code
+  (`pc=0x120001bcc`, `SEGV_ACCERR`, `addr=0x6060313`). This validates that the
+  remaining work is an actual ARM64 lowering/address or W^X publication bug,
+  not merely graphics or probe plumbing; symbolization and boundary repair
+  are now the next implementation target.
