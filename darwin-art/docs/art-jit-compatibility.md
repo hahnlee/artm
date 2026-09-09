@@ -7231,3 +7231,9 @@ incomplete and still requires managed caller unwind validation.
   after those phases, during host-side final teardown/static-owner handling;
   temporary instrumentation was removed. This narrows the repair to the
   Rust/AppKit owner lifetime after the native shutdown callback.
+
+- Checkpoint 519: rebuilt the host (rather than relying on the stale fixture
+  executable) and traced the abort boundary through the complete native
+  shutdown sequence. The abort still occurs after process-state completion;
+  temporary host/native logging was removed. The next diagnostic must inspect
+  post-callback Rust owner destruction or process-level static teardown.

@@ -11885,3 +11885,8 @@ or admission exception was added.
   completes, including VM destruction and process-state uninstall. SIGABRT is
   raised only after the callback returns, so the remaining lifecycle defect is
   host-side owner/static teardown after native shutdown, not JNI execution.
+
+- Checkpoint 519: a fresh host rebuild confirmed the same boundary after the
+  native shutdown callback, while stale fixture binaries had previously
+  hidden host-side instrumentation. No shutdown bypass was added; the next
+  implementation target is post-callback Rust owner/static destruction.
