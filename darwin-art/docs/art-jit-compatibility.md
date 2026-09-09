@@ -8803,3 +8803,7 @@ incomplete and still requires managed caller unwind validation.
   `660-clinit`; its intermediate ledger is now 1,060 passed and 16 failed.
   Workers remain active, so the reduced failure count is still provisional
   until the complete sorted corpus and targeted reruns finish.
+- Checkpoint 776: The same corpus run remains live and has advanced through
+  `734-duplicate-fields` (including JIT/JNI, VDEX, thread-priority, and
+  field-resolution coverage). The intermediate ledger is still 1,060 passed
+  and 16 failed; final classification awaits worker termination.
