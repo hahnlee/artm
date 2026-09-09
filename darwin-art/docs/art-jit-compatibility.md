@@ -7543,3 +7543,11 @@ incomplete and still requires managed caller unwind validation.
   still hit the 120-second host timeout, so they remain explicit blockers for
   the AOSP compatibility target rather than being relabeled as functional
   failures.
+
+- Checkpoint 570: instrumented one repro run without changing the committed
+  runtime and narrowed `004-StackWalk`'s timeout to the host's native engine
+  shutdown transaction: the ART stack-walk itself emits all expected frames
+  and `Main main(String[]) PASS`, then the owner reaches `engine close begin`
+  and does not return. This distinguishes a DestroyJavaVM/application-thread
+  teardown hang from a JIT stack-map execution failure. The temporary logging
+  was removed; the worktree remains clean.
