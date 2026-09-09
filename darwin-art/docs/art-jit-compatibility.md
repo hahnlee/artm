@@ -7882,3 +7882,10 @@ incomplete and still requires managed caller unwind validation.
   `149-suspend-all-stress` passed interpreter, JIT, and unmodified-source
   lanes; the prior generated-code fault was therefore an AOT-path artifact in
   the harness rather than a SuspendAll runtime failure.
+
+- Checkpoint 610: Ran the pinned corpus from `160-read-barrier-stress` through
+  `183-rmw-stress-test` (24 tests) in parallel. All interpreter and live-JIT
+  differential lanes passed, covering read barriers, lock ownership, app-image
+  method/string/native cases, interface/default methods, JNI resolution, and
+  read-modify-write stress. Lifecycle `136` and Darwin remote unwind `137`
+  remain the only previously identified blockers.
