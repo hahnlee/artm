@@ -8606,3 +8606,8 @@ incomplete and still requires managed caller unwind validation.
   and unmodified-source lanes after the `Reference.getReferent()` boundary
   hardening. Monitor inflation and contended-lock paths remain green; the
   complete AOSP matrix and real APK acceptance are still open.
+- Checkpoint 729: Added `0184-darwin-arm64-reference-referent-boundary.patch`
+  so the non-Baker `Reference.getReferent()` path explicitly null-checks and
+  decodes the compressed receiver before field access. Full JIT/graphics link
+  audit passed; `855-native` and `1927-exception-event` pass all three lanes.
+  Broader JNI/exception matrix and real APK acceptance remain open.

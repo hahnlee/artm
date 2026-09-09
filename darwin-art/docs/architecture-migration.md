@@ -13122,3 +13122,8 @@ or admission exception was added.
 - Checkpoint 728: `596-monitor-inflation` passes in all three runner lanes,
   extending monitor validation to inflated/contended locks after the referent
   boundary change. Full compatibility and real-app coverage remain open.
+- Checkpoint 729: The non-Baker referent intrinsic now performs an explicit
+  compressed-reference null check and native decode (`0184`) before loading
+  the field. Link audit passed, and `855-native` plus `1927-exception-event`
+  pass interpreter/JIT/unmodified lanes; broader JNI and exception coverage
+  is still required.
