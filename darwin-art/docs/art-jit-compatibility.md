@@ -8726,3 +8726,7 @@ incomplete and still requires managed caller unwind validation.
   regression, and all interpreter, optimized/JIT, and unmodified-source lanes
   pass. The corpus ledger still contains stale failures requiring refresh;
   full matrix and Blue Archive acceptance remain open.
+- Checkpoint 759: Re-ran `2275-pthread-name`, validating pthread-backed thread
+  naming and Java thread metadata; interpreter, optimized/JIT, and
+  unmodified-source lanes all pass. Remaining corpus failures and production
+  APK acceptance remain open.

@@ -13222,3 +13222,6 @@ or admission exception was added.
   regression; all three runner lanes pass. The corpus ledger still contains
   stale failures requiring refresh. Full matrix and Blue Archive acceptance
   remain open.
+- Checkpoint 759: Re-ran `2275-pthread-name`, validating pthread-backed thread
+  naming and Java thread metadata; all three runner lanes pass. Remaining
+  corpus failures and production APK acceptance remain open.
