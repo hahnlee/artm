@@ -12440,3 +12440,12 @@ or admission exception was added.
   than a missing symbol or output normalization. Implementing this requires a
   Darwin `AndroidRemoteUnwinder` memory/regs backend (task/ptrace policy and
   Mach map translation), which remains open.
+
+- Checkpoint 603: Owner-thread redesign boundary is specified. JNI cannot
+  detach the native owner while it is blocked inside `CallStaticObjectMethod`;
+  the generic fix is a two-phase coordinator: prepare a Java worker behind a
+  release gate, detach the native owner, release the worker, then reattach only
+  after a completion signal. This lets tests that call `DestroyJavaVM` run with
+  no stale native ART peer, while ordinary tests regain an owner for result
+  publication. No test-name dispatch is acceptable; implementation remains
+  open.
