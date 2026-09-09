@@ -97,6 +97,7 @@ struct ElfLibrary {
   // library cache is path + ClassLoader scoped; guest libdl must lease that
   // same owner rather than map a second copy with independent static state.
   std::string resolved_path;
+  std::string cached_root_soname;
   void* graph_handle = nullptr;
   std::atomic<uint32_t> guest_open_refs{0};
   darwin_art::android_jni::TrampolineSet* trampolines = nullptr;
@@ -122,6 +123,7 @@ std::vector<std::string> SnapshotCachedElfSonames();
 bool RegisterCachedElfGraph(const char* root_soname,
                             DarwinArtElfGraphHandle* graph,
                             std::string* error);
+void UnregisterCachedElfGraph(const char* root_soname);
 DarwinArtElfResolveStatus ResolveCachedElfProvider(
     const DarwinArtElfSymbolRequest* request,
     uintptr_t* out_address,

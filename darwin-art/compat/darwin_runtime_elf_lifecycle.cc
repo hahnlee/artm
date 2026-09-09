@@ -89,6 +89,18 @@ bool RegisterCachedElfGraph(const char* root_soname,
   return true;
 }
 
+void UnregisterCachedElfGraph(const char* root_soname) {
+  if (root_soname == nullptr || root_soname[0] == '\0') return;
+  std::lock_guard<std::mutex> lock(CachedElfMutex());
+  const auto it = CachedElfGraphs().find(root_soname);
+  if (it == CachedElfGraphs().end()) return;
+  DarwinArtElfGraphHandle* retained = it->second;
+  CachedElfGraphs().erase(it);
+  std::array<char, 1024> storage{};
+  DarwinArtElfErrorBuffer buffer{storage.data(), storage.size(), 0};
+  (void)darwin_art_elf_graph_unload(&retained, &buffer);
+}
+
 DarwinArtElfResolveStatus ResolveCachedElfProvider(
     const DarwinArtElfSymbolRequest* request,
     uintptr_t* out_address,
@@ -206,6 +218,7 @@ int DropRuntimeElfGraph(void* value, void* context) {
   auto* graph = static_cast<DarwinArtElfGraphHandle*>(value);
   auto* library = static_cast<ElfLibrary*>(context);
   if (graph == nullptr) return -1;
+  if (library != nullptr) UnregisterCachedElfGraph(library->cached_root_soname.c_str());
   std::array<char, 1024> storage{};
   DarwinArtElfErrorBuffer error{storage.data(), storage.size(), 0};
   const DarwinArtElfStatus status = darwin_art_elf_graph_unload(&graph, &error);

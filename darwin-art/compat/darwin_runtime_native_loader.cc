@@ -722,6 +722,7 @@ extern "C" void* OpenNativeLibrary(JNIEnv* env,
     std::string error;
     auto library = std::make_unique<ElfLibrary>();
     library->resolved_path = resolved_path == nullptr ? "" : resolved_path;
+    library->cached_root_soname = root_soname;
     library->loader_namespace_id = GetOrCreateLoaderNamespaceId(env, loader);
     library->app_loader = loader == nullptr ? nullptr : env->NewGlobalRef(loader);
     if (std::getenv("DARWIN_ART_DEBUG_GUEST_LIBDL") != nullptr) {

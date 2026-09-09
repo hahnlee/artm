@@ -7097,3 +7097,9 @@ incomplete and still requires managed caller unwind validation.
   start as a stable synthetic cookie. This covers C++ runtimes whose destructor
   thunk is outside the guest image; runtime acceptance still needs relink and
   verification.
+- Checkpoint 491: fixed NativeLoader ELF graph-cache lifetime. The retained
+  graph clone is now removed and unloaded when its owning graph slot drops, so
+  every published image reaches lifecycle finalization before the DSO owner is
+  destroyed. ELF fixture/self-tests and runtime link audit pass; the full
+  acceptance probe still aborts later in its intentional generic JNI failure
+  cleanup path and needs a separate teardown audit.
