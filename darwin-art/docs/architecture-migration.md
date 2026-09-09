@@ -11959,3 +11959,9 @@ or admission exception was added.
   closes. Rust now removes the surface lease first but destroys the surface
   after the graphics close; lifecycle tests pass. Re-run the real Button gate
   with a freshly linked graphics dylib before treating the SIGABRT as resolved.
+
+- Checkpoint 531: Rust lifecycle and engine/session ordering regressions pass
+  (27 runtime tests and 5 engine tests). The non-window Button command no
+  longer reaches the former teardown abort, while it also does not exercise a
+  graphics session in that invocation. Keep the end-to-end window/GPU gate as
+  the authoritative next check before declaring surface shutdown complete.

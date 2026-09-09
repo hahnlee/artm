@@ -7314,3 +7314,10 @@ incomplete and still requires managed caller unwind validation.
   through `GraphicsSession::close` and only then destroys it; runtime ordering
   tests pass. A fresh graphics relink is still required to re-run the end-to-end
   Button gate after this lifetime repair.
+
+- Checkpoint 531: the shutdown transaction and engine/session ordering tests
+  pass after the surface-lifetime repair (`darwin-art-runtime` 27 tests,
+  `darwin-art-engine` 5 tests). The current non-window Button invocation now
+  exits without the prior teardown abort, but its graphics session is not
+  entered in that headless invocation; the next verification is the explicit
+  window/GPU gate with a fresh linked dylib.
