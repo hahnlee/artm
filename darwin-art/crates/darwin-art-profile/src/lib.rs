@@ -486,10 +486,22 @@ fn spawn_daemon(paths: &ProfilePaths) -> Result<(), ProfileError> {
                 .unwrap_or_else(|_| PathBuf::from("darwin-artctl"))
                 .with_file_name("darwin-artd")
         });
+    let log_path = paths.profile_root.join("darwin-artd.log");
+    // A crashed or repeatedly restarted runtime must not turn its diagnostic
+    // log into unbounded profile storage. Keep one bounded previous log; the
+    // Android data image remains reserved for app state rather than logs.
+    const MAX_DAEMON_LOG_BYTES: u64 = 16 * 1024 * 1024;
+    if let Ok(metadata) = std::fs::metadata(&log_path)
+        && metadata.len() > MAX_DAEMON_LOG_BYTES
+    {
+        let rotated = paths.profile_root.join("darwin-artd.log.1");
+        let _ = std::fs::remove_file(&rotated);
+        std::fs::rename(&log_path, rotated)?;
+    }
     let log = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
-        .open(paths.profile_root.join("darwin-artd.log"))?;
+        .open(log_path)?;
     let error_log = log.try_clone()?;
     let mut command = Command::new(daemon);
     command

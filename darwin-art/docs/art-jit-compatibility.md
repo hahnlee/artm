@@ -7492,3 +7492,9 @@ incomplete and still requires managed caller unwind validation.
   This is Android `/data/user/0` app-private state, not ART heap; the launcher
   intentionally persists it, so runtime lifecycle needs an explicit cache/
   snapshot retention policy rather than treating it as build output.
+
+- Checkpoint 562: fixed runtime-side storage growth. Profile image creation
+  now runs `hdiutil compact` after APFS formatting so a logical 64 GiB
+  sparsebundle does not allocate all bands up front; daemon logs rotate at
+  16 MiB with one retained generation. Existing already-expanded images still
+  require an explicit stop/recreate or compact operation.

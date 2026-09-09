@@ -12113,3 +12113,8 @@ or admission exception was added.
   `org.chromium.chrome.backup-*` snapshot dominated by 4 MB `BrowserMetrics`
   files. This is Android app-private `/data/user/0` state, not the ART heap;
   the runtime needs explicit cache/snapshot retention policy for it.
+
+- Checkpoint 562: runtime storage policy now compacts newly formatted profile
+  sparsebundles and bounds `darwin-artd.log` to 16 MiB plus one rotation.
+  Previously expanded images are not rewritten automatically; they require a
+  controlled profile stop and compact/recreate operation.

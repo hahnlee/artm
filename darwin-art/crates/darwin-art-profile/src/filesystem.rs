@@ -107,6 +107,11 @@ impl ProfileFilesystem {
             return Err(error);
         }
         detach?;
+        // `diskutil eraseDisk` initializes APFS and can leave every
+        // sparsebundle band allocated although the new profile is empty.
+        // Compact before publication so physical usage follows Android
+        // /data contents instead of the logical image capacity.
+        run_hdiutil(["compact".as_ref(), staging.as_os_str()])?;
         fs::rename(&staging, &self.paths.image)?;
         Ok(())
     }
