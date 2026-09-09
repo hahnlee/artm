@@ -8231,3 +8231,9 @@ incomplete and still requires managed caller unwind validation.
   terminate quickly enough for a bounded run. This confirms the remaining
   performance work is specifically the interpreter-side backtrace/GC cadence,
   not a relink regression or a JIT correctness failure.
+- Checkpoint 663: After adding the shadow-frame identity bridge, a fresh 096
+  `--gcstress` run stayed at roughly one core of CPU for over three minutes in
+  the interpreter lane, with dex2oat already complete and no managed error.
+  The run was explicitly terminated and descendants reaped. The new key is
+  therefore safe and audit-clean, but does not yet materially shorten this
+  workload; interpreter GC cadence remains the open performance gap.

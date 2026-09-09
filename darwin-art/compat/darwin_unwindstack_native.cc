@@ -43,6 +43,10 @@ __attribute__((weak)) bool CurrentGenericJniFrame(uint64_t* managed_sp) {
   (void)managed_sp;
   return false;
 }
+__attribute__((weak)) bool CurrentInterpreterFrame(uint64_t* shadow_frame) {
+  (void)shadow_frame;
+  return false;
+}
 }  // namespace android
 
 extern "C" __attribute__((visibility("default"))) DarwinArtQuickFrameRegistry
@@ -91,6 +95,7 @@ struct DarwinAotCodeRange {
 struct LocalManagedBacktraceCache {
   uint64_t caller_pc = 0;
   uint64_t managed_sp = 0;
+  uint64_t shadow_frame = 0;
   std::vector<unwindstack::FrameData> frames;
 };
 
@@ -1130,9 +1135,20 @@ bool DarwinNativeUnwind(Maps* maps, JitDebug* jit_debug, DexFiles* dex_files, si
     return false;
   }
   const uint64_t caller_pc = StripReturnAddress(caller_record[1]);
+  uint64_t shadow_frame = 0;
+  const bool has_shadow_frame = android::CurrentInterpreterFrame(&shadow_frame);
   if (walk.has_registered_quick_frame &&
       g_local_managed_backtrace_cache.caller_pc == caller_pc &&
       g_local_managed_backtrace_cache.managed_sp == walk.registered_managed_sp &&
+      !g_local_managed_backtrace_cache.frames.empty()) {
+    data.frames = g_local_managed_backtrace_cache.frames;
+    const size_t limit = data.max_frames.value_or(max_frames);
+    if (data.frames.size() > limit) data.frames.resize(limit);
+    return true;
+  }
+  if (has_shadow_frame && !walk.has_registered_quick_frame &&
+      g_local_managed_backtrace_cache.caller_pc == caller_pc &&
+      g_local_managed_backtrace_cache.shadow_frame == shadow_frame &&
       !g_local_managed_backtrace_cache.frames.empty()) {
     data.frames = g_local_managed_backtrace_cache.frames;
     const size_t limit = data.max_frames.value_or(max_frames);
@@ -1147,6 +1163,7 @@ bool DarwinNativeUnwind(Maps* maps, JitDebug* jit_debug, DexFiles* dex_files, si
     if (walk.has_registered_quick_frame && caller_pc != 0) {
       g_local_managed_backtrace_cache.caller_pc = caller_pc;
       g_local_managed_backtrace_cache.managed_sp = walk.registered_managed_sp;
+      g_local_managed_backtrace_cache.shadow_frame = has_shadow_frame ? shadow_frame : 0;
       g_local_managed_backtrace_cache.frames = data.frames;
     }
   }

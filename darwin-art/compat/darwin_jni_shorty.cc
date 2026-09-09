@@ -28,6 +28,16 @@ bool CurrentGenericJniFrame(uint64_t* managed_sp) {
   return *managed_sp != 0;
 }
 
+bool CurrentInterpreterFrame(uint64_t* shadow_frame) {
+  if (shadow_frame == nullptr) return false;
+  art::Thread* self = art::Thread::Current();
+  if (self == nullptr) return false;
+  const art::ManagedStack* stack = self->GetManagedStack();
+  if (stack == nullptr || !stack->HasTopShadowFrame()) return false;
+  *shadow_frame = reinterpret_cast<uint64_t>(stack->GetTopShadowFrame());
+  return *shadow_frame != 0;
+}
+
 namespace {
 
 bool ParseDescriptorType(const char** cursor, bool allow_void, char* shorty_type) {

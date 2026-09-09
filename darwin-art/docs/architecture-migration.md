@@ -12803,3 +12803,8 @@ or admission exception was added.
   launch reaches managed interpreter execution, but still exceeds the bounded
   observation window. The remaining performance investigation is therefore
   isolated to interpreter backtrace/GC cadence rather than JIT or relinking.
+- Checkpoint 663: With the shadow-frame identity bridge linked, 096 GC stress
+  remained interpreter CPU-bound for more than three minutes after dex2oat,
+  without a managed failure, and was reaped. The bridge preserves safe cache
+  invalidation but has not reduced the stress runtime materially; interpreter
+  GC/backtrace cadence is still the next optimization target.
