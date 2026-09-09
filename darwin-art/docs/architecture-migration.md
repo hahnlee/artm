@@ -12498,6 +12498,14 @@ or admission exception was added.
   lanes; the prior generated-code fault was therefore an AOT-path artifact in
   the harness rather than a SuspendAll runtime failure.
 
+- Checkpoint 612: Revalidated `138-duplicate-classes-check` through
+  `159-app-image-fields` (22 tests). All passed except the known
+  `149-suspend-all-stress` issue, which is now fixed by the live-JIT launcher
+  selection and passes independently. The subsequent JVMTI slice
+  `1900-track-alloc` through `1917-get-stack-frame` also passed; only
+  `1919-vminit-thread-start-timing` remains, due to VMInit event ordering and
+  launcher thread identity.
+
 - Checkpoint 610: Ran the pinned corpus from `160-read-barrier-stress` through
   `183-rmw-stress-test` (24 tests) in parallel. All interpreter and live-JIT
   differential lanes passed, covering read barriers, lock ownership, app-image
