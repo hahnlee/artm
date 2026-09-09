@@ -13131,3 +13131,6 @@ or admission exception was added.
   stack reference-map walking through compiled frames after the intrinsic
   boundary fix. Additional JNI/stack-walk coverage and real APK acceptance
   remain open.
+- Checkpoint 731: `911-get-stack-trace` passes interpreter, optimized/JIT, and
+  unmodified-source lanes, validating JNI stack-trace collection from compiled
+  frames. Broader JNI/exception coverage and real-app acceptance remain open.

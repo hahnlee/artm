@@ -8615,3 +8615,7 @@ incomplete and still requires managed caller unwind validation.
   unmodified-source lanes after the referent intrinsic change, covering stack
   reference-map walking through compiled frames. Wider JNI/stack-walk cases
   and real APK acceptance remain outstanding.
+- Checkpoint 731: `911-get-stack-trace` passes all three lanes, validating JNI
+  stack-trace collection through compiled frames after the reference-boundary
+  changes. The broader JNI/exception matrix and real APK acceptance remain
+  open.
