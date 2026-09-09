@@ -7794,3 +7794,11 @@ incomplete and still requires managed caller unwind validation.
   calls `DestroyJavaVM` while the host shutdown actor starts a second teardown.
   The required follow-up is generic VM-lifecycle state handoff (no test-name
   special case); full corpus and real-app criteria remain open.
+
+- Checkpoint 599: Added an authoritative `Runtime::IsShuttingDownUnsafe()` handoff
+  check so host shutdown returns without starting a duplicate teardown when an
+  app has already entered `DestroyJavaVM`. The check is not sufficient for
+  `136-daemon-jni-shutdown`: that test still aborts inside ART's own shutdown
+  thread because the test's owner-thread contract is not yet preserved by the
+  Java `TestMainThread` bridge. `150-loadlibrary` remains green with the
+  NativeLoader unload ordering; the owner-thread execution model is next.

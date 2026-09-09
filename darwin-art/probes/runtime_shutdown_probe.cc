@@ -259,6 +259,17 @@ bool StopAndroidApplicationThreads(JNIEnv* env) {
 }  // namespace
 
 int32_t run_shutdown(const ShutdownState& state) {
+  // An application such as 136-daemon-jni-shutdown may legitimately invoke
+  // JavaVM::DestroyJavaVM from one of its own native threads.  In that case
+  // the host reaches this entry point after ART has already entered its
+  // shutdown phase; starting a second teardown would race Runtime's shutdown
+  // thread and abort while it tries to attach.  Treat the VM's authoritative
+  // state as the handoff boundary and let the in-flight owner finish.
+  if (art::Runtime* runtime = art::Runtime::Current();
+      runtime != nullptr && runtime->IsShuttingDownUnsafe()) {
+    darwin_art_process::mark_shutdown_complete();
+    return 0;
+  }
   darwin_art_process::ShutdownSnapshot shutdown{};
   switch (darwin_art_process::begin_shutdown(&shutdown)) {
     case darwin_art_process::ShutdownBeginResult::kAlreadyComplete:
