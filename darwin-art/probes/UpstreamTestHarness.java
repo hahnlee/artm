@@ -119,10 +119,18 @@ public final class UpstreamTestHarness {
     }
 
     public static Throwable finishRun(Set<Thread> baseline, Throwable failure) {
-        // AOSP's AndroidRuntime invokes Main on the dalvikvm owner thread and
-        // leaves non-daemon draining to DestroyJavaVM(). Scanning all Java
-        // threads here both changes application-observable allocation events
-        // and duplicates ART's lifecycle responsibility.
+        // AOSP keeps a process alive while application-created non-daemon
+        // threads are running. The Darwin host cannot call DestroyJavaVM for
+        // an Android process (the process lifetime is the shutdown boundary),
+        // so perform the same join before publishing captured output and
+        // returning to the host's _exit path. This is observable Android
+        // process semantics, not a test-specific delay.
+        try {
+            awaitNewNonDaemonThreads(baseline);
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            if (failure == null) failure = interrupted;
+        }
         if (failure != null) {
             // Match dalvikvm's owner-thread uncaught-exception presentation.
             // The native launcher uses the returned Throwable only to select

@@ -12212,3 +12212,14 @@ or admission exception was added.
    lanes pass for each. The ledger is now 1,023 passed / 21 failed. The
    remaining set is dominated by GC-space/app-image stress, native bridge,
    class unloading/redefinition, and JVMTI structural-scope tests.
+
+577. **2026-09-09 — preserve non-daemon thread lifetime before Android-style exit**
+
+   `096-array-copy-concurrent-gc` exposed a real lifecycle mismatch: the
+   Darwin process-scoped `_exit` path returned immediately after `main()`,
+   truncating work performed by application-created non-daemon threads. The
+   upstream harness now joins only newly-created non-daemon threads before
+   flushing output, matching Android process semantics. The test passes twice
+   in interpreter, JIT, and unmodified-source lanes; the ledger is 1,027
+   passed / 17 failed. Baseline/button DEX contracts were rebuilt for the
+   added harness method.
