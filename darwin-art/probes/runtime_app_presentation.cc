@@ -24,11 +24,22 @@
 #include "darwin_binder_wire.h"
 #include "runtime_process_state.h"
 #include "mirror/throwable.h"
+#include "obj_ptr-inl.h"
 #include "thread-current-inl.h"
 
 namespace darwin_art_presentation {
 
 namespace {
+
+void DescribeArtThrowableChain(art::Thread* self) {
+  if (self == nullptr) return;
+  art::ObjPtr<art::mirror::Throwable> current = self->GetException();
+  for (int depth = 0; current != nullptr && depth < 8; ++depth) {
+    std::cerr << "ART Android lifecycle cause[" << depth << "]: "
+              << current->Dump() << "\n";
+    current = current->GetCause();
+  }
+}
 
 jobject find_view_root_for_decor(JNIEnv* env, jobject decor_view) {
   if (env == nullptr || decor_view == nullptr) return nullptr;
@@ -1242,6 +1253,7 @@ int run(JNIEnv* env, art::Thread* self, jobject activity_instance,
     }
   }
   if (env->ExceptionCheck()) {
+    DescribeArtThrowableChain(self);
     env->ExceptionDescribe();
     std::cerr << "ART Android lifecycle: Activity.onCreate() threw\n"
               << self->GetException()->Dump() << "\n";

@@ -12292,3 +12292,12 @@ or admission exception was added.
    unchanged `TextView` inflation boundary; the next investigation must use
    non-reentrant exception inspection or native framework tracing before
    implementing the Typeface/Minikin-to-Skia bridge.
+
+585. **2026-09-09 — ART-side cause-chain tracing is stable**
+
+   Added non-reentrant ART `mirror::Throwable::GetCause()` tracing at the APK
+   lifecycle boundary and rebuilt the graphics link successfully. Calculator
+   now reports the complete stable chain through
+   `InvocationTargetException` without the prior SIGSEGV; that wrapper has no
+   Java cause populated, so the next evidence point must be the TextView
+   constructor's native call trace rather than another exception rethrow.
