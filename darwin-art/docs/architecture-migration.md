@@ -13179,3 +13179,6 @@ or admission exception was added.
 - Checkpoint 745: `2239-varhandle-perf-vh-gas` passes all three runner lanes,
   validating atomic get-and-set read-modify-write semantics. Remaining modes
   and real-app acceptance remain outstanding.
+- Checkpoint 746: `2239-varhandle-perf-vh-cas-weak` passes interpreter,
+  optimized/JIT, and unmodified-source lanes, validating weak-CAS retry and
+  atomic reference handling. Remaining modes and real-app acceptance remain.
