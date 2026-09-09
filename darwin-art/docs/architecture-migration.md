@@ -12688,3 +12688,9 @@ or admission exception was added.
   `9999-input-channel-endpoint-parcel-smoke` passes in interpreter, JIT, and
   unmodified lanes. Remaining runtime work is limited to `497` reflection
   stack framing and `629` VDEX AOT selection.
+
+- Checkpoint 640: VDEX launch handling now preserves the compiler-produced oat
+  entrypoint instead of replacing it with an eager JIT compile. After a
+  graphics-link rebuild, `629-vdex-speed` passes interpreter, JIT, and
+  unmodified lanes. Only `497-inlining-and-class-loader` remains, narrowed to
+  a missing reflective native frame in stack-trace emission.

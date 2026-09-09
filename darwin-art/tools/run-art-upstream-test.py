@@ -3325,6 +3325,10 @@ def main() -> int:
                     else:
                         environment.pop(
                             "DARWIN_ART_UPSTREAM_JVMTI_AGENT", None)
+                    if run_invocation.vdex:
+                        environment["DARWIN_ART_UPSTREAM_VDEX"] = "1"
+                    else:
+                        environment.pop("DARWIN_ART_UPSTREAM_VDEX", None)
                     if (upstream_debuggable or run_invocation.jvmti):
                         environment["DARWIN_ART_RUNTIME_JAVA_DEBUGGABLE"] = "1"
                     else:

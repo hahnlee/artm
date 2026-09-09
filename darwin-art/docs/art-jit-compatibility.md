@@ -8093,3 +8093,11 @@ incomplete and still requires managed caller unwind validation.
   parcel-smoke`; interpreter, JIT, and unmodified-source lanes all pass.
   Remaining runtime gaps are `497` reflection stack framing and `629` VDEX AOT
   method selection.
+
+- Checkpoint 640: VDEX execution now advertises its AOT contract without
+  forcing a JIT replacement: the launcher marks VDEX invocations and runtime
+  preserves the oat entrypoint. Rebuilt graphics-link runtime and reran
+  `629-vdex-speed`; interpreter, JIT, and unmodified-source lanes all pass.
+  The remaining corpus discrepancy is `497-inlining-and-class-loader`, where
+  the reflective `java.lang.reflect.Method.invoke (Native Method)` frame is
+  absent from the emitted stack trace.

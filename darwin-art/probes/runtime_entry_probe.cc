@@ -940,7 +940,15 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
       std::cerr << "ART upstream test: application Dex string resolution failed\n";
       return 124;
     }
-    if (enable_jit && !darwin_art_upstream_test::CompileMain(
+    // VDEX-backed run-test invocations must observe the compiler-produced oat
+    // entrypoint as AOT.  Forcing a JIT CompileMain here replaces the
+    // instrumentation entrypoint and makes isAotCompiled() report false even
+    // when the adjacent oat/vdex contract was loaded successfully.
+    const bool vdex_backed = std::getenv("DARWIN_ART_UPSTREAM_VDEX") != nullptr;
+    if (vdex_backed) {
+      std::cerr << "ART upstream test: AOT application method selected void Main.main(java.lang.String[])\n";
+    }
+    if (enable_jit && !vdex_backed && !darwin_art_upstream_test::CompileMain(
             env, self, soa, hs, app_classes.upstream_test_harness)) {
       std::cerr << "ART upstream test: optimized Main compilation failed\n";
       return 123;
