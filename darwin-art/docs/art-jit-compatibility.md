@@ -8237,3 +8237,8 @@ incomplete and still requires managed caller unwind validation.
   The run was explicitly terminated and descendants reaped. The new key is
   therefore safe and audit-clean, but does not yet materially shorten this
   workload; interpreter GC cadence remains the open performance gap.
+- Checkpoint 664: Instrumented the cache path briefly to verify interpreter
+  identity delivery, then removed the diagnostic logging and rebuilt the clean
+  runtime. Incremental graphics relink passes with the shadow-frame bridge;
+  no debug behavior remains in production artifacts. The short probe yielded
+  no managed completion, so no performance claim is made from this attempt.

@@ -12808,3 +12808,7 @@ or admission exception was added.
   without a managed failure, and was reaped. The bridge preserves safe cache
   invalidation but has not reduced the stress runtime materially; interpreter
   GC/backtrace cadence is still the next optimization target.
+- Checkpoint 664: Temporarily instrumented and then removed cache diagnostics
+  while checking interpreter identity delivery. The clean runtime was
+  relinked successfully with no debug logging retained. The bounded probe did
+  not finish a managed stress lane, so performance remains unclaimed.
