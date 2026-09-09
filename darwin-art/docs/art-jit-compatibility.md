@@ -8374,3 +8374,8 @@ incomplete and still requires managed caller unwind validation.
   from native process launch and confirms that the missing range publication
   is in the managed ART owner, not the ELF child loader. No broad arena or
   interpreter fallback was retained.
+- Checkpoint 688: Tested an idempotent child-loader OAT-range republish patch
+  in the full graphics closure. It rebuilt successfully but Chrome still
+  reproduced the same `0x110` fault, so the one-time `RegisterDexFile` range
+  predicate is not sufficient to explain the failure. The patch was reverted;
+  the next target is the faulting managed entrypoint/call ABI itself.

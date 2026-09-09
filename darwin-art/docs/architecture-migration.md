@@ -12921,3 +12921,8 @@ or admission exception was added.
   fault therefore remains a managed OAT/JIT range-owner/publication issue;
   broad managed-window classification was not kept and no interpreter
   fallback was added.
+- Checkpoint 688: An idempotent child-loader OAT-range republish experiment
+  rebuilt the complete graphics closure but did not change Chrome's repeated
+  `0x110` crash. The one-time registration predicate is therefore not the
+  root cause and the experiment was removed. Investigation now moves to the
+  faulting managed entrypoint and its call ABI.
