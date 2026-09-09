@@ -13283,3 +13283,7 @@ or admission exception was added.
   advanced through `565-checker-doublenegbitwise`. Its intermediate ledger
   currently reports 1,059 passed and 17 failed; failures are not final until
   the full run completes and each failing lane is independently reproduced.
+- Checkpoint 774: Corpus workers remain live and have advanced through
+  `608-checker-unresolved-lse` in the sorted test set. The intermediate
+  ledger remains 1,059 passed and 17 failed; no failure is treated as final
+  until all workers finish and targeted reproduction is complete.
