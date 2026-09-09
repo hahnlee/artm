@@ -8405,3 +8405,8 @@ incomplete and still requires managed caller unwind validation.
   in low-window compiled code. The remaining bug is method-frame/entrypoint
   metadata publication, not signal-PC arithmetic. Temporary tracing was
   removed; next work targets method-frame publication and entrypoint storage.
+- Checkpoint 694: Tried recovering a null quick entrypoint from the immutable
+  OAT method code inside `GetOatQuickMethodHeader()`. The graphics closure
+  built and Chrome still reproduced the same `addr=0x110` fault, so this is not
+  a missing OAT fallback. The experiment was removed; the frame's method
+  identity/publication path remains the next target.

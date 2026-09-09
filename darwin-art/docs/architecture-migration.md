@@ -12950,3 +12950,7 @@ or admission exception was added.
   compiled low-window code. This identifies a frame-method/entrypoint
   publication mismatch. Temporary tracing was discarded; the next change must
   repair method-frame publication instead of broadening signal handling.
+- Checkpoint 694: An AOSP-shaped OAT quick-code recovery for null entrypoints
+  was built and exercised against Chrome, but did not change the crash. It was
+  discarded. Remaining work is to make the method identity stored in the
+  generated frame match the executing compiled method metadata.
