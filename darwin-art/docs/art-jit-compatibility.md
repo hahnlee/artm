@@ -8187,3 +8187,9 @@ incomplete and still requires managed caller unwind validation.
   raw walker: the freshly relinked `497-inlining-and-class-loader --gcstress`
   passed interpreter, JIT, and unmodified-source lanes. The heavy 096 timeout
   remains an open performance target.
+- Checkpoint 656: Re-ran the complete local ARM64 intrinsic/JIT audit after the
+  clean relink; it passed with the Nterp, Surface, MediaCodec, JNI, OSR,
+  deoptimization, field/array, exception, and GC acceptance fixtures. The
+  unmodified `096-array-copy-concurrent-gc` also passes all three lanes without
+  `--gcstress` in 18.7s, isolating the remaining gap to the forced-GC stress
+  workload rather than array-copy or JIT correctness.

@@ -12766,3 +12766,9 @@ or admission exception was added.
   short-test SIGTRAP to a stale dylib from the rejected raw walker; no runtime
   source change is needed for that crash. The 096 long-run timeout is still
   tracked as the next GC-stress performance milestone.
+- Checkpoint 656: The full ARM64/JIT acceptance audit passes again after the
+  relink, including Nterp, graphics/media, JNI, OSR/deopt, fields/arrays,
+  exceptions, and GC fixtures. The unchanged `096-array-copy-concurrent-gc`
+  passes interpreter, JIT, and unmodified-source lanes in 18.7s when GC stress
+  is disabled; only the forced concurrent-GC workload remains a performance
+  investigation target.
