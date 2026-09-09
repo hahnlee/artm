@@ -12638,3 +12638,8 @@ or admission exception was added.
   rows and is continuing through the hash-invalidated 436–438 compiler range.
   The three prior non-pass rows are still pending terminal recheck, and no
   orphaned ART hosts have been observed.
+
+- Checkpoint 631: The four-way replay is still live after roughly twenty-three
+  minutes and has advanced into `595–597` profile/app and deoptimization
+  cases. The parent and active workers remain attached without orphaned ART
+  hosts; terminal summary generation is still pending.

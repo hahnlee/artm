@@ -8036,3 +8036,9 @@ incomplete and still requires managed caller unwind validation.
   436–438 compiler cases). Three rows remain from the prior ledger and are not
   yet terminally rechecked. No orphaned `darwin-art-host` process has appeared;
   the final result remains pending.
+
+- Checkpoint 631: The same four-way replay remains healthy after roughly
+  twenty-three minutes and has progressed into the `595–597` profile/app and
+  deoptimization cases. Its parent and four active test workers are present,
+  with no orphaned ART hosts; only the terminal summary will establish the
+  final pass/fail ledger.
