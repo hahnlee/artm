@@ -23,6 +23,9 @@
 
 namespace darwin_art_app {
 
+extern "C" int darwin_art_install_context_loader(JNIEnv* env,
+                                                   jobject app_loader);
+
 int load_classes(JNIEnv* env,
                  art::Thread* self,
                  art::ClassLinker* class_linker,
@@ -66,6 +69,13 @@ int load_classes(JNIEnv* env,
   art::Handle<art::mirror::ClassLoader> app_loader =
       hs.NewHandle(soa.Decode<art::mirror::ClassLoader>(managed_loader));
   out->app_loader = managed_loader;
+  // Publish the process PathClassLoader immediately. Resource/bootstrap
+  // classes can initialize before load_classes returns and need to resolve
+  // the process-local Darwin Binder service bridge through this loader.
+  if (darwin_art_install_context_loader(env, managed_loader) != 0) {
+    std::cerr << "ART Darwin DEX: early context ClassLoader install failed\n";
+    return 4;
+  }
   std::cerr << "ART Darwin DEX: application ClassLoader="
             << static_cast<void*>(app_loader.Get()) << "\n";
   if (std::getenv("DARWIN_ART_TRACE_DEX_IDENTITY") != nullptr) {

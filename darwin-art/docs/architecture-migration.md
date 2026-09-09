@@ -11707,3 +11707,10 @@ or admission exception was added.
   resolver failures. The ELF-JNI probe now reaches NIO/FileSystems and the
   Android service-manager path; its next boundary is the missing default
   `IServiceManager` implementation, not JNI symbol loading.
+- Checkpoint 478: published the process `PathClassLoader` and installed it as
+  the Binder context loader immediately after ART creates it, before any app
+  or resource bootstrap can initialize framework services. This preserves
+  Android's loader identity; the remaining ELF-JNI failure is that its
+  standalone fixture has no `DarwinServiceBridge` implementation on its class
+  path, so `IServiceManager` is still null. APK runs that include the support
+  DEX now have the correct discovery order.
