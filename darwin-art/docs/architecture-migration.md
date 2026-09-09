@@ -12606,3 +12606,8 @@ or admission exception was added.
   exit that leaves a long-lived descendant. The lifecycle unit suite passes
   2/2 for normal exit and timeout paths, locking in the stale-host fix without
   changing ART semantics.
+
+- Checkpoint 624: Updated the process runner to detect direct-child exit even
+  when descendants retain inherited output pipes. Descendants are terminated
+  before the final read, avoiding false timeout failures and stale ART hosts;
+  the lifecycle suite remains 2/2 passing with piped output.

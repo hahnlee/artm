@@ -38,13 +38,12 @@ class ProcessGroupRunnerTest(unittest.TestCase):
                 subprocess.Popen([sys.executable, "-c", {child_code!r}])
                 time.sleep(0.2)
             """)
-            with tempfile.TemporaryFile() as stdout, tempfile.TemporaryFile() as stderr:
-                result = process_group.run_process_group(
-                    [sys.executable, "-c", parent_code],
-                    stdout=stdout,
-                    stderr=stderr,
-                    timeout=3,
-                )
+            result = process_group.run_process_group(
+                [sys.executable, "-c", parent_code],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=3,
+            )
             self.assertEqual(result.returncode, 0)
             child_pid = int(child_pid_file.read_text(encoding="utf-8"))
             deadline = time.monotonic() + 3.0

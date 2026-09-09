@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import signal
 import subprocess
+import time
 from typing import Any, Sequence
 
 
@@ -92,20 +93,52 @@ def run_process_group(
         cwd=cwd,
         start_new_session=True,
     )
-    try:
-        output, error = process.communicate(timeout=timeout)
-    except subprocess.TimeoutExpired as original_timeout:
-        _signal_group(process, signal.SIGTERM)
+    started = time.monotonic()
+    # Poll communicate in short slices.  A direct child can exit while a
+    # descendant still owns its inherited stdout/stderr descriptors; waiting
+    # once for EOF would hide that exit until the full timeout expires.
+    while True:
+        if timeout is None:
+            slice_timeout = 0.1
+        else:
+            remaining = timeout - (time.monotonic() - started)
+            if remaining <= 0:
+                original_timeout = subprocess.TimeoutExpired(
+                    list(arguments), timeout)
+                _signal_group(process, signal.SIGTERM)
+                try:
+                    output, error = process.communicate(
+                        timeout=TERMINATE_GRACE_SECONDS)
+                except subprocess.TimeoutExpired:
+                    _signal_group(process, signal.SIGKILL)
+                    output, error = process.communicate()
+                _reap_orphaned_group(process)
+                raise subprocess.TimeoutExpired(
+                    list(arguments), timeout, output=output, stderr=error) \
+                    from original_timeout
+            slice_timeout = min(0.1, remaining)
         try:
-            output, error = process.communicate(
-                timeout=TERMINATE_GRACE_SECONDS)
-        except subprocess.TimeoutExpired:
-            _signal_group(process, signal.SIGKILL)
-            output, error = process.communicate()
-        _reap_orphaned_group(process)
-        raise subprocess.TimeoutExpired(
-            list(arguments), timeout, output=output, stderr=error) \
-            from original_timeout
+            output, error = process.communicate(timeout=slice_timeout)
+            break
+        except subprocess.TimeoutExpired as pending:
+            if process.poll() is not None:
+                # The direct child is gone; remove descendants before the
+                # final communicate so inherited pipes cannot keep us stuck.
+                _reap_orphaned_group(process)
+                output, error = process.communicate()
+                break
+            if timeout is not None and time.monotonic() - started >= timeout:
+                _signal_group(process, signal.SIGTERM)
+                try:
+                    output, error = process.communicate(
+                        timeout=TERMINATE_GRACE_SECONDS)
+                except subprocess.TimeoutExpired:
+                    _signal_group(process, signal.SIGKILL)
+                    output, error = process.communicate()
+                _reap_orphaned_group(process)
+                raise subprocess.TimeoutExpired(
+                    list(arguments), timeout, output=output, stderr=error) \
+                    from pending
 
     _reap_orphaned_group(process)
 

@@ -7997,3 +7997,9 @@ incomplete and still requires managed caller unwind validation.
   This closes the runner-level lifecycle regression that had polluted corpus
   evidence; it does not replace the required complete-corpus and real-app
   validation.
+
+- Checkpoint 624: Hardened `run_process_group` against inherited-pipe hangs.
+  It polls direct-child completion, reaps surviving descendants before the
+  final output read, and preserves bounded timeout cleanup. The two lifecycle
+  tests pass with stdout/stderr pipes enabled, covering the exact stale-host
+  failure mode observed in corpus runs.
