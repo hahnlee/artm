@@ -13138,3 +13138,6 @@ or admission exception was added.
   referent receiver hardening, including verifier coverage for invalid native
   declarations. The complete JNI/exception matrix and real-app acceptance
   remain outstanding.
+- Checkpoint 733: `2036-jni-filechannel` passes interpreter, optimized/JIT, and
+  unmodified-source lanes, validating Java NIO file-channel/native interaction.
+  Broader JNI/exception coverage and real-app acceptance remain open.

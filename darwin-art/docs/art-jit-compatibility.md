@@ -8623,3 +8623,7 @@ incomplete and still requires managed caller unwind validation.
   optimized/JIT, and unmodified-source lanes all pass, including the AOSP
   verifier's invalid fast/critical-native cases. JNI ABI and exception checks
   remain broader than this focused test, and real APK acceptance is still open.
+- Checkpoint 733: `2036-jni-filechannel` passes all three lanes, extending JNI
+  coverage to Java NIO file-channel native interactions after the referent
+  boundary hardening. Full JNI/exception matrix and real APK acceptance remain
+  outstanding.
