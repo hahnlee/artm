@@ -12694,3 +12694,8 @@ or admission exception was added.
   graphics-link rebuild, `629-vdex-speed` passes interpreter, JIT, and
   unmodified lanes. Only `497-inlining-and-class-loader` remains, narrowed to
   a missing reflective native frame in stack-trace emission.
+
+- Checkpoint 641: Fresh serial runs confirm VDEX AOT preservation and Parcel
+  compiler API coverage in all three lanes. The sole remaining corpus gap is
+  `497-inlining-and-class-loader`, where `Method.invoke (Native Method)` is
+  absent from the emitted stack trace.

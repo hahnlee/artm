@@ -8101,3 +8101,8 @@ incomplete and still requires managed caller unwind validation.
   The remaining corpus discrepancy is `497-inlining-and-class-loader`, where
   the reflective `java.lang.reflect.Method.invoke (Native Method)` frame is
   absent from the emitted stack trace.
+
+- Checkpoint 641: Fresh serial verification confirms the VDEX AOT preservation
+  and Parcel compiler-surface changes across interpreter/JIT/unmodified lanes.
+  Only `497-inlining-and-class-loader` remains, differing solely by the
+  missing reflective `Method.invoke (Native Method)` stack frame.
