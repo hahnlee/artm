@@ -12118,3 +12118,8 @@ or admission exception was added.
   sparsebundles and bounds `darwin-artd.log` to 16 MiB plus one rotation.
   Previously expanded images are not rewritten automatically; they require a
   controlled profile stop and compact/recreate operation.
+
+- Checkpoint 563: recreated the default profile with the compacted image path;
+  its 64 GiB logical capacity now occupies 38 MiB physically, including after
+  daemon shutdown. Profile unit tests pass 8/8, confirming the former 61 GiB
+  footprint was caused by image formatting/allocation behavior.

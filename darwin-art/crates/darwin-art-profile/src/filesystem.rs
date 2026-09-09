@@ -45,9 +45,20 @@ impl ProfileFilesystem {
 
     pub(crate) fn detach(&self) -> Result<(), ProfileError> {
         if !self.is_mounted()? {
+            if self.paths.image.exists() {
+                self.compact_image()?;
+            }
             return Ok(());
         }
         run_hdiutil(["detach".as_ref(), self.paths.mount.as_os_str()])?;
+        self.compact_image()?;
+        Ok(())
+    }
+
+    fn compact_image(&self) -> Result<(), ProfileError> {
+        // Compaction is safe only while detached. It releases APFS sparsebundle
+        // bands that no longer contain Android profile data.
+        run_hdiutil(["compact".as_ref(), self.paths.image.as_os_str()])?;
         Ok(())
     }
 

@@ -7498,3 +7498,9 @@ incomplete and still requires managed caller unwind validation.
   sparsebundle does not allocate all bands up front; daemon logs rotate at
   16 MiB with one retained generation. Existing already-expanded images still
   require an explicit stop/recreate or compact operation.
+
+- Checkpoint 563: after deleting the already-expanded default image, recreated
+  it through the patched runtime path and verified the 64 GiB logical profile
+  occupies only 38 MiB physically. `darwin-art-profile` tests pass 8/8 and the
+  image remains compact after daemon shutdown; the prior 61 GiB allocation was
+  confirmed as an image-creation artifact, not Android app data.
