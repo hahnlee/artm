@@ -7859,3 +7859,10 @@ incomplete and still requires managed caller unwind validation.
   shutdown-thread fault under the standard `DestroyJavaVM` path; its fix must
   replace the retained owner pointer through the complete run coordinator,
   rather than changing process exit policy.
+
+- Checkpoint 607: Rebuilt the current DEX bundles and ran the pinned AOSP
+  corpus in parallel across `050-sync-test` through `079-phantom` (31 tests)
+  and `080-oom-fragmentation` through `099-vmdebug` (20 tests). Every selected
+  test passed in the interpreter and optimized JIT lanes through the existing
+  differential runner. The lifecycle failures remain isolated to
+  `136-daemon-jni-shutdown` and Darwin remote `137-cfi`.
