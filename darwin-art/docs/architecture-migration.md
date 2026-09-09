@@ -12318,3 +12318,12 @@ or admission exception was added.
    failure is therefore narrowed to framework initialization/native Typeface
    instance state rather than a missing TextView symbol. No APK or framework
    bytecode was modified; the next step is targeted native-instance tracing.
+
+588. **2026-09-09 — native Typeface creation is the confirmed failure**
+
+   ART-side bootstrap diagnostics now show the exact failure inside
+   `Typeface.setSystemFontMap`: `Typeface.create(null, style)` receives a null
+   family because `SystemFonts.buildSystemTypefaces()` produced no valid
+   native Typeface handles. This moves the implementation target below
+   TextView, into the Minikin/Skia font-file loading and native-instance
+   creation boundary; no APK changes or fallback-only completion are allowed.
