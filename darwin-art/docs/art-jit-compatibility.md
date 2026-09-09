@@ -8247,3 +8247,8 @@ incomplete and still requires managed caller unwind validation.
   lanes without GC stress. This confirms the new interpreter ABI symbol and
   cache path introduce no ordinary reflection/inlining regression; the forced
   GC timeout remains isolated and uncredited.
+- Checkpoint 666: A live managed-host run was reached and remained CPU-bound;
+  macOS `sample` attached to the process but produced no report before its
+  attach operation stalled, so the sampler was terminated and all test
+  descendants were reaped. This rules out the current sampling command as a
+  low-overhead profiler; no runtime change or stress PASS is claimed.

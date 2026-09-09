@@ -12816,3 +12816,7 @@ or admission exception was added.
   clean shadow-frame runtime; interpreter, JIT, and unmodified-source lanes all
   pass. The bridge therefore has no normal reflection/inlining regression, and
   only forced-GC completion remains open.
+- Checkpoint 666: Reached a live managed host during 096 GC stress, but macOS
+  `sample` stalled while attaching and emitted no usable stack report. The
+  sampler and stress descendants were reaped; this is a tooling limitation,
+  not evidence of a runtime failure or a completed stress run.
