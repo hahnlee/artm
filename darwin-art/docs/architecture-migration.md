@@ -11842,3 +11842,6 @@ or admission exception was added.
   remote register capture blocks in `FindThread → task_threads` on the forked
   child. The remote Mach thread-port acquisition path is the active defect;
   diagnostics were removed.
+- Checkpoint 508: Darwin `task_threads` blocks on the forked child before
+  register state or frame walking. The remote API implementation remains
+  unchanged; a separately spawned helper will isolate fork inheritance next.

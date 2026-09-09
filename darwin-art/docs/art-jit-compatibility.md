@@ -7180,3 +7180,7 @@ incomplete and still requires managed caller unwind validation.
   then `Regs::RemoteGet` blocks in `FindThread → task_threads` for a forked
   child. The issue is Darwin remote thread-port acquisition; all temporary
   logging was removed. This is now the direct implementation target.
+- Checkpoint 508: the blocking call is Darwin `task_threads` on the forked
+  child, before register state or frame walking. No frame-walker workaround
+  was added; next diagnostic uses a separately spawned helper process to
+  distinguish fork inheritance from the general remote task/thread contract.
