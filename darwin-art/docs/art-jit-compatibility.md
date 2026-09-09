@@ -7244,3 +7244,9 @@ incomplete and still requires managed caller unwind validation.
   engine dylib, and applies the same order to boxed provider owners.
   `cargo test -p darwin-art-runtime` passes all 27 tests and the full
   `probe-runtime-elf-jni` command passes without SIGABRT.
+
+- Checkpoint 521: after the lease-order fix, the mixed ELF/JNI probe remains
+  clean and the runtime unit suite is 27/27. A separate baseline
+  `probe-runtime-dex` run now reaches the Android resource bootstrap and
+  returns status 27 (no abort); this is an independent framework service/
+  resource fixture gap, not a JIT or JNI teardown failure.

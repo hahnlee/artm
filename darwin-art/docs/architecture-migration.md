@@ -11896,3 +11896,8 @@ or admission exception was added.
   clears its callback table while the engine image remains mapped, then drops
   provider and engine owners. Runtime unit tests (27/27) and the real ELF/JNI
   probe pass; the previous post-`DestroyJavaVM` abort is gone.
+
+- Checkpoint 521: teardown regression remains fixed in the real ELF/JNI path.
+  The non-graphics baseline DEX probe still fails at resource bootstrap with
+  status 27 and no process abort, isolating the next work to framework
+  resource/service initialization rather than ART JIT or native loading.
