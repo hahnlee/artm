@@ -7145,3 +7145,8 @@ incomplete and still requires managed caller unwind validation.
   audit and formatting checks remain clean. A full `audit-runtime-link` retry
   stalled in its existing long-running build process and was terminated; no
   new end-to-end probe result is claimed. The mixed JNI abort remains open.
+- Checkpoint 500: relink retry reached the existing
+  `unwindstack-mach-provider-smoke` child and stalled there for over two
+  minutes with no CPU activity; the child and parent were terminated. This is
+  now a separate build-pipeline hang to isolate before the updated runtime
+  dylib can be probed.

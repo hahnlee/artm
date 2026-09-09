@@ -11815,3 +11815,7 @@ or admission exception was added.
   pass. The full runtime-link retry stalled in the existing build pipeline and
   was stopped without changing source state; mixed JNI end-to-end validation
   remains pending.
+- Checkpoint 500: runtime relink retries consistently stop at the existing
+  unwindstack smoke child, which remains sleeping with no CPU activity. The
+  stalled child was terminated; JNI source state is unchanged and the updated
+  dylib still needs a successful relink before end-to-end validation.
