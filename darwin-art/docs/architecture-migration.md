@@ -11745,3 +11745,7 @@ or admission exception was added.
   constraint when graph teardown follows dependent-first AOSP semantics; the
   runtime still needs a focused rerun to determine whether the remaining abort
   is the DSO lifecycle or guest finalizer path.
+- Checkpoint 485: reran the linked runtime after the exact-range finalization
+  change; the abort is unchanged and still occurs before the lifecycle callback
+  diagnostics. This rules out image-registry ordering as the immediate cause
+  and leaves the guest finalizer/ELF drop path as the active boundary.
