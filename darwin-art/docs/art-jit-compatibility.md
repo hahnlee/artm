@@ -8199,3 +8199,10 @@ incomplete and still requires managed caller unwind validation.
   No source or runtime behavior was changed, and the ordinary 096 three-lane
   PASS plus the full JIT audit remain the authoritative evidence while the
   stress-performance profile is revisited with a lower-overhead capture path.
+- Checkpoint 658: Optimized `DarwinPublishAotCodeMaps` so per-allocation
+  backtrace publication only sorts a thread's map when a new AOT range is
+  added; steady-state GC-stress calls retain identical lookup semantics without
+  repeated sorting. Incremental graphics relink and the full ARM64/JIT audit
+  pass after this change. A bounded 497 GC-stress run still exceeded the
+  observation window, so the optimization is not yet credited with clearing
+  the long-run stress timeout.

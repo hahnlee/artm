@@ -12777,3 +12777,9 @@ or admission exception was added.
   was terminated and all descendants were reaped. This produced no new
   runtime failure or code change; the next profiling pass must use a lower
   overhead capture mechanism rather than extending an uninstrumented timeout.
+- Checkpoint 658: `DarwinPublishAotCodeMaps` now avoids sorting unchanged
+  per-thread maps on every GC-stress backtrace; sorting remains performed when
+  a newly registered AOT range is published. Incremental relink and the full
+  JIT audit pass. The bounded forced-GC 497 run remained active beyond the
+  observation window, so stress performance is still open and no false PASS is
+  recorded.

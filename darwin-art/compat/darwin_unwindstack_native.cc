@@ -317,13 +317,20 @@ void DarwinRegisterAotCodeRange(const void* start, size_t size, uint64_t file_of
 void DarwinPublishAotCodeMaps(Maps* maps) {
   if (maps == nullptr) return;
   std::lock_guard<std::mutex> lock(g_aot_ranges_mutex);
+  bool changed = false;
   for (const auto& range : g_aot_ranges) {
     if (maps->Find(range.start) == nullptr) {
       maps->Add(range.start, range.end, range.file_offset, PROT_READ | PROT_EXEC,
                 range.oat_location);
+      changed = true;
     }
   }
-  maps->Sort();
+  // CheckGcStressMode can request a backtrace for every allocation.  The
+  // AOT registry is normally stable between those calls, so repeatedly
+  // sorting the per-thread map is pure overhead.  Keep the map sorted when
+  // its contents change and make the steady-state publication O(ranges)
+  // without changing lookup semantics.
+  if (changed) maps->Sort();
 }
 
 }  // namespace unwindstack
