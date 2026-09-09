@@ -8786,3 +8786,8 @@ incomplete and still requires managed caller unwind validation.
   corpus (latest completed artifact observed around `203-multi-checkpoint`).
   The run is intentionally still in progress, so its final pass/fail matrix
   and production APK acceptance remain unverified.
+- Checkpoint 772: The refreshed corpus run remains live and has progressed
+  through later structural/debug tests and back into the deterministic
+  `416-optimizing-arith-not` segment. Its intermediate ledger currently shows
+  1,056 passed and 20 failed entries, which is not final until all workers
+  terminate and stale results are reconciled.

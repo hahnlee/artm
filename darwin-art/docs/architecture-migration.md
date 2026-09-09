@@ -13274,3 +13274,8 @@ or admission exception was added.
   AOT registry fix; workers are alive and have advanced through the early
   corpus (latest completed artifact observed around `203-multi-checkpoint`).
   The final pass/fail matrix and production APK acceptance remain unverified.
+- Checkpoint 772: The refreshed corpus run remains live and has progressed
+  through later structural/debug tests and back into the deterministic
+  `416-optimizing-arith-not` segment. Its intermediate ledger currently shows
+  1,056 passed and 20 failed entries, not a final result until all workers
+  terminate and stale results are reconciled.
