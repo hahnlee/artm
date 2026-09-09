@@ -8646,3 +8646,7 @@ incomplete and still requires managed caller unwind validation.
   patch; interpreter, optimized/JIT, and unmodified-source lanes all pass.
   The suite still reports only the expected compiler instruction-size limit for
   its intentionally huge method; full matrix and real APK coverage remain.
+- Checkpoint 739: `2239-varhandle-perf-vh-get` passes interpreter, optimized/JIT,
+  and unmodified-source lanes, exercising VarHandle metadata/reference loads
+  through the native decode helper. Broader VarHandle modes and real APK
+  acceptance remain open.

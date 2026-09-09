@@ -13157,3 +13157,6 @@ or admission exception was added.
 - Checkpoint 738: `003-omnibus-opcodes` remains green in all three lanes after
   the referent intrinsic patch. Its expected oversized-method compiler limit
   warning is unchanged; broader matrix and real-app acceptance remain open.
+- Checkpoint 739: `2239-varhandle-perf-vh-get` passes all three runner lanes,
+  validating VarHandle metadata/reference loads through the native decode
+  helper. Additional VarHandle modes and real-app acceptance remain open.
