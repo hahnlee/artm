@@ -12019,3 +12019,8 @@ or admission exception was added.
   Mach task access. Strict graphics linking still passes, while remote CFI
   remains `ESRCH`, confirming the host/child authorization boundary is still
   the active blocker.
+
+- Checkpoint 542: full `tools/audit-art-jit.sh` regression passes after the
+  remote-task changes, including GC/read barriers, JNI, exceptions, monitors,
+  inlining, and graphics bootstrap. Remote-child CFI remains the known
+  Darwin-specific negative transport gate.
