@@ -11740,3 +11740,8 @@ or admission exception was added.
   aborts in the first libc++ `LoadedElf` drop, so the next fix must preserve
   the graph's DSO lifecycle state through owner destruction rather than rely
   on a stale object or a Java-side unload callback.
+- Checkpoint 484: made image-registry finalization match by address instead of
+  assuming publication-stack order. This removes an invalid ordering
+  constraint when graph teardown follows dependent-first AOSP semantics; the
+  runtime still needs a focused rerun to determine whether the remaining abort
+  is the DSO lifecycle or guest finalizer path.

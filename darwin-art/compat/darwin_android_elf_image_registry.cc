@@ -455,12 +455,21 @@ int RollbackPublish(Owner* owner, uintptr_t start, uintptr_t end) {
 
 int Finalize(Owner* owner, uintptr_t start, uintptr_t end) {
   if (owner == nullptr || owner->published.empty()) return -1;
-  const Owner::PublishedImage& published = owner->published.back();
-  if (published.start != start || published.end != end ||
-      !ProcessRegistry().Unpublish(published.image_id)) {
+  // Graph teardown follows the loader's dependency order, which is not
+  // guaranteed to match publication order when PT_LOAD images overlap or a
+  // dependency has its own finalizer.  Finalization must remove the exact
+  // image being dropped rather than imposing a stack discipline that turns a
+  // valid AOSP unload order into an abort.
+  auto match = std::find_if(
+      owner->published.begin(), owner->published.end(),
+      [start, end](const Owner::PublishedImage& image) {
+        return image.start == start && image.end == end;
+      });
+  if (match == owner->published.end() ||
+      !ProcessRegistry().Unpublish(match->image_id)) {
     return -1;
   }
-  owner->published.pop_back();
+  owner->published.erase(match);
   return 0;
 }
 
