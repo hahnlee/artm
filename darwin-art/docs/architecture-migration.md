@@ -12283,3 +12283,12 @@ or admission exception was added.
    contract; it is not an APK or resource rewrite. The next task is to expose
    the underlying constructor cause and implement the AOSP-compatible
    Typeface/Minikin-to-Skia bridge, then rerun the same APK unchanged.
+
+584. **2026-09-09 — preserve stable APK failure while refining diagnostics**
+
+   A JNI-side attempt to rethrow each `InvocationTargetException` cause for
+   deeper printing caused an ART SIGSEGV during exception re-entry, so that
+   diagnostic hook was reverted. The stable runtime still reaches Calculator's
+   unchanged `TextView` inflation boundary; the next investigation must use
+   non-reentrant exception inspection or native framework tracing before
+   implementing the Typeface/Minikin-to-Skia bridge.
