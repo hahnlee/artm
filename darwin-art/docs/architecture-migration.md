@@ -12861,3 +12861,8 @@ or admission exception was added.
   interpreter/JIT/optimized lanes green. Forced-GC 096 remains incomplete after
   a fresh 60-second bounded run, leaving collector/suspend cadence as the next
   investigation target rather than a correctness regression.
+- Checkpoint 676: A bounded `sample` attach again stalled on macOS before
+  yielding a usable stack. The pinned AOSP `knownfailures.json` independently
+  marks 149-suspend-all-stress as flaky output, while 096 normal lanes remain
+  green. The runtime still needs a real forced-GC cadence result; no fallback or
+  allowlist relaxation was used.

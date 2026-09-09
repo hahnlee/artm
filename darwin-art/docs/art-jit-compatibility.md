@@ -8304,3 +8304,8 @@ incomplete and still requires managed caller unwind validation.
   A fresh bounded 60-second GC-stress run still times out without a managed
   failure, so the optimization is correctness-safe but its end-to-end impact
   remains unmeasured.
+- Checkpoint 676: Tried a bounded macOS `sample` attach to a live 096
+  GC-stress host; the attach stalled and produced no stack report, matching the
+  earlier profiler limitation. Rechecked AOSP metadata: 149-suspend-all-stress
+  is explicitly a known flaky-output failure upstream. No unsupported lifecycle
+  shortcut or test gate was added; forced-GC completion remains open.
