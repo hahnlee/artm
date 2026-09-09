@@ -12014,3 +12014,8 @@ or admission exception was added.
   retrying Mach task cache instead of a direct `task_for_pid` call. The strict
   graphics closure rebuild passes, but `137-cfi` still fails during remote
   register capture, so the task-port limitation remains unresolved.
+
+- Checkpoint 541: added a `debug_control_port_for_pid` fallback for restricted
+  Mach task access. Strict graphics linking still passes, while remote CFI
+  remains `ESRCH`, confirming the host/child authorization boundary is still
+  the active blocker.

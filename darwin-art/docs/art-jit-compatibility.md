@@ -7363,6 +7363,11 @@ incomplete and still requires managed caller unwind validation.
   but `137-cfi` remains failing at remote register capture; this removes a
   concrete bypass while leaving the entitlement/task-port limitation visible.
 
+- Checkpoint 541: added `debug_control_port_for_pid` as a restricted Mach
+  fallback after legacy `task_for_pid`. The graphics closure rebuild remains
+  green, but the AOSP remote CFI gate still reports `ESRCH`; macOS is denying
+  both acquisition paths for this host/child pair.
+
 - Checkpoint 536: hardened the Darwin remote task cache to retry
   `task_for_pid` during the fork/exec-to-SIGSTOP transition (8 attempts,
   1-second bounded wait) while checking child liveness. Host crate checks pass;

@@ -40,6 +40,19 @@ inline mach_port_t Acquire(pid_t pid) {
       // turning that transient lookup race into a permanent ESRCH result.
       for (int attempt = 0; attempt != 8; ++attempt) {
         status = task_for_pid(mach_task_self(), pid, &task);
+        if (status != KERN_SUCCESS || task == MACH_PORT_NULL) {
+          // Newer macOS releases may reject the legacy task_for_pid trap even
+          // for a debug-entitled target. The debugger control port is the
+          // supported restricted-task equivalent and is sufficient for the
+          // stopped-child thread/memory snapshot used by unwindstack.
+          mach_port_t debug_task = MACH_PORT_NULL;
+          const kern_return_t debug_status =
+              debug_control_port_for_pid(mach_task_self(), pid, &debug_task);
+          if (debug_status == KERN_SUCCESS && debug_task != MACH_PORT_NULL) {
+            status = debug_status;
+            task = debug_task;
+          }
+        }
         if (status == KERN_SUCCESS && task != MACH_PORT_NULL) break;
         if (kill(pid, 0) != 0) break;
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
