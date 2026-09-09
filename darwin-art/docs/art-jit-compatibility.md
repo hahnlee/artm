@@ -8688,3 +8688,7 @@ incomplete and still requires managed caller unwind validation.
   optimized/JIT, and unmodified-source lanes, validating byte-array-view
   acquire/opaque reads and their ordering semantics. Remaining modes and real
   APK acceptance remain open.
+- Checkpoint 750: `2239-varhandle-perf-vh-unsafe-get` passes interpreter,
+  optimized/JIT, and unmodified-source lanes, validating Unsafe-backed
+  VarHandle reads across the native memory access path. Remaining modes and
+  real APK acceptance remain open.

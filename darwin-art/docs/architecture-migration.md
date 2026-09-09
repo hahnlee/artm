@@ -13191,3 +13191,6 @@ or admission exception was added.
 - Checkpoint 749: `2239-varhandle-perf-vh-get-bav` passes all three runner
   lanes, validating byte-array-view acquire/opaque reads and ordering
   semantics. Remaining modes and real-app acceptance remain open.
+- Checkpoint 750: `2239-varhandle-perf-vh-unsafe-get` passes all three runner
+  lanes, validating Unsafe-backed VarHandle reads across the native memory
+  access path. Remaining modes and real-app acceptance remain open.
