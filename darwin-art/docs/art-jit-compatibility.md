@@ -7192,3 +7192,7 @@ incomplete and still requires managed caller unwind validation.
   `TaskForPid(child)` during remote register acquisition, before thread
   enumeration. Diagnostics were removed; the next host-layer change must
   avoid repeated task-port acquisition and reuse one validated handle.
+- Checkpoint 511: introduced a shared Darwin remote task-port cache so map
+  parsing and Ptrace reuse one validated send right. Fresh smoke still stalls
+  after cache reuse, so the remaining issue is downstream remote thread/task
+  interrogation rather than repeated task_for_pid alone.

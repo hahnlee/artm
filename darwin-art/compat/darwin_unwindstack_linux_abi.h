@@ -13,6 +13,8 @@
 #include <ucontext.h>
 #include <unistd.h>
 
+#include "darwin_remote_task_cache.h"
+
 #include <algorithm>
 #include <cstdint>
 #include <cstring>
@@ -50,9 +52,7 @@ inline int PageSize() {
 }
 
 inline mach_port_t TaskForPid(pid_t pid) {
-  if (pid == getpid()) return mach_task_self();
-  mach_port_t task = MACH_PORT_NULL;
-  return task_for_pid(mach_task_self(), pid, &task) == KERN_SUCCESS ? task : MACH_PORT_NULL;
+  return darwin_art::remote_task::Acquire(pid);
 }
 
 inline thread_act_t FindThread(mach_port_t task, uint64_t requested_id) {

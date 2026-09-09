@@ -11851,3 +11851,6 @@ or admission exception was added.
 - Checkpoint 510: boundary logs place the stall in `TaskForPid(child)` before
   thread enumeration. Diagnostics were removed; remote task-port reuse is the
   next implementation target.
+- Checkpoint 511: added shared remote task-port caching across map parsing and
+  Ptrace. The smoke hang persists after cache reuse, narrowing the defect to
+  subsequent remote thread/task interrogation.

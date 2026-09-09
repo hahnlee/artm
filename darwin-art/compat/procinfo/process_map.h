@@ -8,6 +8,8 @@
 #include <mach/mach.h>
 #include <mach/mach_vm.h>
 
+#include "darwin_remote_task_cache.h"
+
 #include <cstdint>
 #include <cstring>
 #include <cstdio>
@@ -161,8 +163,10 @@ bool ReadMapFile(const std::string& path, Callback callback) {
     process_id = static_cast<pid_t>(parsed_id);
   }
   mach_port_t task = mach_task_self();
-  if (process_id != getpid() &&
-      task_for_pid(mach_task_self(), process_id, &task) != KERN_SUCCESS) {
+  if (process_id != getpid()) {
+    task = darwin_art::remote_task::Acquire(process_id);
+  }
+  if (task == MACH_PORT_NULL) {
     return false;
   }
   const auto images =
