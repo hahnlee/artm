@@ -8666,3 +8666,7 @@ incomplete and still requires managed caller unwind validation.
   and unmodified-source lanes, covering VarHandle compare-and-exchange return
   values and failure paths. Broader mode coverage and real APK acceptance stay
   open.
+- Checkpoint 744: `2239-varhandle-perf-vh-set` passes all three lanes,
+  validating ordinary VarHandle primitive/reference stores and their barrier
+  paths. Remaining modes, JNI/exception breadth, and real APK acceptance remain
+  outstanding.

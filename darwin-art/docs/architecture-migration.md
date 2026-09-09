@@ -13173,3 +13173,6 @@ or admission exception was added.
 - Checkpoint 743: `2239-varhandle-perf-vh-cae` passes all three runner lanes,
   validating VarHandle compare-and-exchange return and failure paths. More
   modes and real-app acceptance remain outstanding.
+- Checkpoint 744: `2239-varhandle-perf-vh-set` passes interpreter, optimized/JIT,
+  and unmodified-source lanes, validating ordinary VarHandle primitive/reference
+  stores and barriers. Remaining modes and real-app acceptance remain open.
