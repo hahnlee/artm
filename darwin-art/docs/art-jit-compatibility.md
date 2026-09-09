@@ -7410,3 +7410,7 @@ incomplete and still requires managed caller unwind validation.
 - Checkpoint 547: unmodified AOSP `984-obsolete-invoke` passes in interpreter
   and JIT modes, including the combined source differential run. Obsolete
   method dispatch remains compatible on the Darwin ARM64 runtime.
+
+- Checkpoint 548: unmodified AOSP `980-redefine-object` passes in interpreter
+  and JIT modes plus the combined differential run, extending validated
+  coverage to JVMTI class redefinition/deoptimization behavior.

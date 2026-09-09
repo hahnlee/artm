@@ -12045,3 +12045,7 @@ or admission exception was added.
 - Checkpoint 547: unmodified AOSP `984-obsolete-invoke` passes in interpreter
   and JIT modes, including the combined source differential run. Obsolete
   method dispatch remains compatible on the Darwin ARM64 runtime.
+
+- Checkpoint 548: unmodified AOSP `980-redefine-object` passes in interpreter
+  and JIT modes and in the combined differential run, validating the class
+  redefinition/deoptimization boundary.
