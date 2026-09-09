@@ -11979,3 +11979,10 @@ or admission exception was added.
   isolates the next runtime work to a Mach task-port register/memory adapter
   for libunwindstack; the failure remains authoritative rather than being
   normalized to success.
+
+- Checkpoint 534: artifact comparison confirms all `137-cfi` mismatches are
+  remote-child cases; in-process unwind remains correct. Each Darwin remote
+  attempt reaches the existing Mach-backed adapter after the child has already
+  disappeared (`PTRACE_GETREGSET ... ESRCH`). Next work is to preserve the
+  AOSP SIGSTOP child lifetime and task-port permission boundary until register
+  capture completes, without changing the upstream test source.

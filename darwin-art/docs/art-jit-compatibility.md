@@ -7337,3 +7337,11 @@ incomplete and still requires managed caller unwind validation.
   concrete Darwin compatibility gap in the Linux ptrace-to-Mach remote unwind
   adapter, not a JIT arithmetic or frame-layout result. Preserve the failure
   as a gate and implement the task-port register snapshot path next.
+
+- Checkpoint 534: retained `137-cfi --keep` artifacts and compared AOSP's
+  expected/actual stdout. The local `Java_Main_unwindInProcess` checks pass;
+  only the three remote-child cases differ, each with
+  `PTRACE_GETREGSET ... ESRCH`. Darwin already has Mach memory/register
+  plumbing in the unwindstack provider, so the remaining implementation seam
+  is child-stop/task-port lifetime synchronization rather than a JIT frame
+  layout shortcut.
