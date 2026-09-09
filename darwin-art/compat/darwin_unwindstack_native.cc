@@ -83,6 +83,18 @@ struct DarwinAotCodeRange {
   uint64_t file_offset;
   std::string oat_location;
 };
+
+// GC stress asks for a backtrace at every allocation.  Managed allocation
+// loops repeatedly enter the same quick frame, so retain the last completed
+// managed walk per host thread.  The managed SP is part of the key to avoid
+// reusing a loop's trace across recursive or concurrently changing frames.
+struct LocalManagedBacktraceCache {
+  uint64_t caller_pc = 0;
+  uint64_t managed_sp = 0;
+  std::vector<unwindstack::FrameData> frames;
+};
+
+thread_local LocalManagedBacktraceCache g_local_managed_backtrace_cache;
 std::mutex g_aot_ranges_mutex;
 std::vector<DarwinAotCodeRange> g_aot_ranges;
 struct DarwinCodeAddressPair {
@@ -1118,10 +1130,26 @@ bool DarwinNativeUnwind(Maps* maps, JitDebug* jit_debug, DexFiles* dex_files, si
     return false;
   }
   const uint64_t caller_pc = StripReturnAddress(caller_record[1]);
+  if (walk.has_registered_quick_frame &&
+      g_local_managed_backtrace_cache.caller_pc == caller_pc &&
+      g_local_managed_backtrace_cache.managed_sp == walk.registered_managed_sp &&
+      !g_local_managed_backtrace_cache.frames.empty()) {
+    data.frames = g_local_managed_backtrace_cache.frames;
+    const size_t limit = data.max_frames.value_or(max_frames);
+    if (data.frames.size() > limit) data.frames.resize(limit);
+    return true;
+  }
   const bool collected = caller_pc != 0 && CollectFrameRecords(
       mach_task_self(), caller_pc - 1, frame_pointer + sizeof(caller_record),
       caller_record[0], &walk);
-  if (collected) AppendManagedFrames(&walk);
+  if (collected) {
+    AppendManagedFrames(&walk);
+    if (walk.has_registered_quick_frame && caller_pc != 0) {
+      g_local_managed_backtrace_cache.caller_pc = caller_pc;
+      g_local_managed_backtrace_cache.managed_sp = walk.registered_managed_sp;
+      g_local_managed_backtrace_cache.frames = data.frames;
+    }
+  }
   return collected;
 }
 
