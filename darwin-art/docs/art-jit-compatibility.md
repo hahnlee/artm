@@ -8169,3 +8169,8 @@ incomplete and still requires managed caller unwind validation.
   `build-button-dex` now complete their contract verification instead of
   failing on stale method-count expectations, restoring reproducible runtime
   rebuilds for subsequent JIT work.
+- Checkpoint 653: After more than fifteen minutes, the isolated
+  `096-array-copy-concurrent-gc --gcstress` host remains CPU-active with
+  continuous concurrent-copying collections and no abort or leaked sibling.
+  This is a verified in-flight stress run; its result is intentionally not
+  promoted to PASS until the process terminates.

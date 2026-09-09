@@ -12752,3 +12752,6 @@ or admission exception was added.
   2682 methods`) and button (`112 classes, 3092 methods`) builders now pass
   their own checks, reducing a build-system blocker without changing runtime
   semantics.
+- Checkpoint 653: The heavy `096` GC-stress process is still live after more
+  than fifteen minutes, consuming CPU while concurrent-copying collections
+  continue. No crash or orphan has appeared; terminal output remains pending.
