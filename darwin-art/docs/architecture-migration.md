@@ -12665,3 +12665,8 @@ or admission exception was added.
   thirty-two minutes. Parent/worker lifecycle remains clean with no orphaned
   ART hosts. Terminal summary and serial failure reproduction are still
   outstanding.
+
+- Checkpoint 636: Replay has entered the `922–930` tail, covering properties,
+  monitors, threads, timers, JNI table/search, and retransformation. Four-way
+  worker turnover remains healthy without orphaned hosts. Terminal summary is
+  still pending; the seven interim failures await serial reruns.

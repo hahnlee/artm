@@ -8067,3 +8067,9 @@ incomplete and still requires managed caller unwind validation.
   parent remains live with active workers and no orphaned ART hosts. Final
   ledger generation is still pending; provisional failures remain queued for
   serial reproduction.
+
+- Checkpoint 636: The same replay has entered the `922–930` tail, covering
+  properties, monitors, threads, timers, JNI table/search, and retransformation
+  cases. Four-way worker turnover remains healthy with no orphaned hosts. The
+  terminal summary is still pending, so the seven interim failure rows remain
+  unclassified until serial reruns.
