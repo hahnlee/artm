@@ -588,6 +588,12 @@ export DARWIN_ART_APK_APP_SPLIT_SOURCE_DIRS="$split_source_dirs"
 export DARWIN_ART_FRAMEWORK_RES_APK="$framework_res"
 export DARWIN_ART_TEST_FONTS_XML="/system/etc/fonts.xml"
 export DARWIN_ART_TEST_FONT="/system/fonts/Roboto-Regular.ttf"
+# Minikin opens font files below the native graphics boundary rather than
+# through the Java guest-filesystem facade. Keep the guest paths above for the
+# Android contract, and grant the runtime's bootstrap seam these two explicit
+# host capabilities so native font loading resolves the same immutable files.
+export DARWIN_ART_HOST_FONTS_XML="$fonts_xml"
+export DARWIN_ART_HOST_FONT="$roboto"
 export DARWIN_ART_ANDROID_FILESYSTEM_ROOT="$system_root"
 export DARWIN_ART_ANDROID_SYSTEM_ROOT="$system_root/system"
 export DARWIN_ART_ANDROID_SYSTEM_NATIVE_DIR="$system_root/system/lib64"

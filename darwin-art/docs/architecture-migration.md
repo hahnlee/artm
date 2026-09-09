@@ -12327,3 +12327,15 @@ or admission exception was added.
    native Typeface handles. This moves the implementation target below
    TextView, into the Minikin/Skia font-file loading and native-instance
    creation boundary; no APK changes or fallback-only completion are allowed.
+
+589. **2026-09-09 — native font bootstrap receives an explicit host capability**
+
+   The unchanged Calculator APK now launches through graphics presentation
+   (`result=1`, `size=720x1280`, process exit 0) when the runtime supplies the
+   immutable font XML/Roboto files through two explicit host-capability
+   variables. The guest Android paths remain the contract-visible values;
+   only the native Minikin loader is authorized to resolve these capability
+   paths. The libcore syscall and filesystem bridge allowlists were rebuilt,
+   preserving guest-root isolation for ordinary app files. This is a narrow
+   host adaptation, not an APK change or a completion of general native
+   library compatibility.

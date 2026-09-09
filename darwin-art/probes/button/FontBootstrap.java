@@ -11,8 +11,10 @@ final class FontBootstrap {
     private FontBootstrap() {}
 
     static void install() {
-        String fontsXml = requireEnvironment("DARWIN_ART_TEST_FONTS_XML");
-        String roboto = requireEnvironment("DARWIN_ART_TEST_FONT");
+        String fontsXml = optionalEnvironment("DARWIN_ART_HOST_FONTS_XML",
+                "DARWIN_ART_TEST_FONTS_XML");
+        String roboto = optionalEnvironment("DARWIN_ART_HOST_FONT",
+                "DARWIN_ART_TEST_FONT");
         try {
             Class<?> systemFonts = Class.forName("android.graphics.fonts.SystemFonts");
             Class<?> fontConfig = Class.forName("android.text.FontConfig");
@@ -43,7 +45,6 @@ final class FontBootstrap {
             String fontDirectory = new File(roboto).getParent() + File.separator;
             Object config = readConfig.invoke(
                     null, fontsXml, fontDirectory, null, null, updatedFonts, 0L, 0);
-
             Method buildFallback = systemFonts.getMethod("buildSystemFallback", fontConfig);
             Object fallback = buildFallback.invoke(null, config);
             Method buildTypefaces = systemFonts.getMethod(
@@ -142,5 +143,10 @@ final class FontBootstrap {
             throw new IllegalStateException(name + " is required");
         }
         return value;
+    }
+
+    private static String optionalEnvironment(String preferred, String fallback) {
+        String value = System.getenv(preferred);
+        return value == null || value.isEmpty() ? requireEnvironment(fallback) : value;
     }
 }

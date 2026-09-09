@@ -121,7 +121,9 @@ static int authorized_host_runtime_path(const char* path) {
          explicit_host_file(path, "DARWIN_ART_APK_APP_SUPPORT_DEX") ||
          explicit_host_file(path, "DARWIN_ART_FRAMEWORK_RES_APK") ||
          explicit_host_file(path, "DARWIN_ART_TEST_FONTS_XML") ||
-         explicit_host_file(path, "DARWIN_ART_TEST_FONT");
+         explicit_host_file(path, "DARWIN_ART_TEST_FONT") ||
+         explicit_host_file(path, "DARWIN_ART_HOST_FONTS_XML") ||
+         explicit_host_file(path, "DARWIN_ART_HOST_FONT");
 }
 
 static int remember_directory(DIR* directory, int host_directory) {
