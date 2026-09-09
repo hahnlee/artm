@@ -7154,3 +7154,7 @@ incomplete and still requires managed caller unwind validation.
   immediately after other-thread unwind. The provider now drains nested Mach
   suspend levels before releasing a sampled thread; temporary debug prints
   were removed. Fresh smoke confirmation is still pending.
+- Checkpoint 502: a diagnostic resume from the smoke harness did not release
+  the worker either, ruling out a single missed `thread_resume` call. The
+  temporary harness workaround was removed; direct decomposition of the Mach
+  thread-state path remains next.

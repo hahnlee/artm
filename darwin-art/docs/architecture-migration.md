@@ -11822,3 +11822,6 @@ or admission exception was added.
 - Checkpoint 501: stage logging localized the smoke hang to worker join after
   other-thread sampling. Darwin resume now drains nested Mach suspend levels;
   temporary logging was removed. Fresh smoke and relink confirmation remain.
+- Checkpoint 502: an external resume attempt also left the worker blocked, so
+  the issue is not just one missed resume call. The diagnostic workaround was
+  removed; direct decomposition of the Mach thread-state path remains.
