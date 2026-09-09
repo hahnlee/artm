@@ -12915,3 +12915,9 @@ or admission exception was added.
   bridge did not change the crash and was discarded as too broad. The next
   implementation target is exact OAT/JIT range publication for child-loader
   code; no signal fallback or diagnostic instrumentation remains.
+- Checkpoint 687: After rebuilding the graphics closure, Chrome's bounded
+  fault trace still reproduces the low-window PC outside ART's registered
+  generated ranges, while its isolated native children exit normally. The
+  fault therefore remains a managed OAT/JIT range-owner/publication issue;
+  broad managed-window classification was not kept and no interpreter
+  fallback was added.

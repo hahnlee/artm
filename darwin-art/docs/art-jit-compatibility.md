@@ -8367,3 +8367,10 @@ incomplete and still requires managed caller unwind validation.
   Chrome start, so it was reverted; the remaining fix is precise publication
   and ownership of the missing OAT/JIT range, not a broad signal fallback.
   Diagnostic source was removed.
+- Checkpoint 687: Rebuilt the graphics closure and reran Chrome with the
+  bounded fault trace. The failing PC again lies outside ART's visible range
+  list, and the process still exits 139; the trace also shows child native
+  processes reaching normal `_exit(0)`. This separates the remaining failure
+  from native process launch and confirms that the missing range publication
+  is in the managed ART owner, not the ELF child loader. No broad arena or
+  interpreter fallback was retained.
