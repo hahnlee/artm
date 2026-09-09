@@ -8547,3 +8547,8 @@ incomplete and still requires managed caller unwind validation.
   `0x700007db`. This rules out a missing execute transition and points to a
   managed compressed-reference value crossing the JNI/thread-stress native
   boundary without host-pointer decoding. No fallback was added.
+- Checkpoint 718: Rebuilt the patched graphics runtime and ran AOSP
+  `004-JniTest`; interpreter, optimized/JIT, and unmodified-source modes all
+  pass. The failure is therefore specific to the concurrent/thread-stress
+  reference path rather than the basic JNI bridge, and remains open for a
+  targeted transition fix.

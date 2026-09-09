@@ -13075,3 +13075,7 @@ or admission exception was added.
   `max=0x7`), not a W^X/JIT publication fault. The bad receiver remains in
   the logical `0x70000000` compressed-reference window, narrowing the next
   implementation task to JNI/thread transition decoding under concurrency.
+- Checkpoint 718: The rebuilt runtime passes AOSP `004-JniTest` in interpreter,
+  optimized/JIT, and unmodified-source modes. Basic JNI ABI conversion is
+  intact; the outstanding defect is isolated to the concurrent thread-stress
+  reference/transition path.
