@@ -12954,3 +12954,7 @@ or admission exception was added.
   was built and exercised against Chrome, but did not change the crash. It was
   discarded. Remaining work is to make the method identity stored in the
   generated frame match the executing compiled method metadata.
+- Checkpoint 695: Publishing the current method into every optimizing frame
+  on Darwin did not change Chrome's `addr=0x110` crash and was discarded. The
+  remaining issue is a producer/identity mismatch between low-window code and
+  method metadata, not an empty `sp[0]` slot alone.

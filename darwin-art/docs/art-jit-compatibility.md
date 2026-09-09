@@ -8410,3 +8410,8 @@ incomplete and still requires managed caller unwind validation.
   built and Chrome still reproduced the same `addr=0x110` fault, so this is not
   a missing OAT fallback. The experiment was removed; the frame's method
   identity/publication path remains the next target.
+- Checkpoint 695: Forced publication of `sp[0]` in optimizing ARM64 frame
+  entries was rebuilt and exercised against Chrome, but the same implicit-null
+  fault remained. The experiment was removed; the mismatch is not merely an
+  uninitialized frame slot. Next, trace the producer of the low-window code
+  and its method identity.
