@@ -13094,3 +13094,8 @@ or admission exception was added.
   `0181`). This removes another direct compressed-reference `HeapOperand` from
   an executable compiler path; rebuild/audit passed and the focused regression
   lanes stayed green.
+- Checkpoint 722: Fast-compiler instance field get/put now decodes compressed
+  object holders before memory operands (`0182`), covering another executable
+  reference boundary outside optimizing codegen. Rebuild/audit and the
+  omnibus opcode differential lanes passed; broader matrix and real APK work
+  remain open.

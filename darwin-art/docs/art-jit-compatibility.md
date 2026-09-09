@@ -8572,3 +8572,9 @@ incomplete and still requires managed caller unwind validation.
   include the shared reference-codegen helper. The complete graphics/JIT
   closure rebuilt and audited successfully; the subsequent ThreadStress and
   JniTest runs remain green across the available runner lanes.
+- Checkpoint 722: Audited fast-compiler instance field get/put lowering and
+  found two additional direct compressed-reference `HeapOperand` uses. Added
+  `0182-darwin-arm64-fast-field-reference-boundaries.patch` to decode holders
+  into scratch native registers before field memory access. Full graphics/JIT
+  and interpreter closure audit passed; `003-omnibus-opcodes` passed in
+  interpreter, optimized/JIT, and unmodified-source lanes.

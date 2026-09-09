@@ -601,6 +601,12 @@ pub(crate) fn build_jit_compiler(root: &Path) -> Result<()> {
             .arg(root.join("patches/art/0181-darwin-fast-reference-codegen-include.patch"))
             .current_dir(build.join("patched-source")),
     )?;
+    run_command(
+        Command::new("patch")
+            .args(["--batch", "--forward", "-p1", "-i"])
+            .arg(root.join("patches/art/0182-darwin-arm64-fast-field-reference-boundaries.patch"))
+            .current_dir(build.join("patched-source")),
+    )?;
     audit_implicit_null_checks(
         &fs::read_to_string(staged_jit.join("jit_compiler.cc"))?,
         &fs::read_to_string(staged_codegen.join("code_generator_arm64.cc"))?,
