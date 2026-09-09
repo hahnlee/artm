@@ -8225,3 +8225,9 @@ incomplete and still requires managed caller unwind validation.
   cover interpreter-only frames. No crash or managed failure was observed; the
   forced-GC timeout remains open and the next optimization must address the
   interpreter backtrace path without weakening AOSP stress semantics.
+- Checkpoint 662: Revalidated the cache-linked runtime with the complete JIT
+  audit and a fresh bounded 096 stress launch. The audit remains green; the
+  stress process reaches the managed interpreter workload but still does not
+  terminate quickly enough for a bounded run. This confirms the remaining
+  performance work is specifically the interpreter-side backtrace/GC cadence,
+  not a relink regression or a JIT correctness failure.

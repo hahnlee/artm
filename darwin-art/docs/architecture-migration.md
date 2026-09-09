@@ -12798,3 +12798,8 @@ or admission exception was added.
   explicitly terminated. This indicates the quick-frame cache does not help
   interpreter-only allocation backtraces. There was no crash or managed error;
   interpreter backtrace overhead is now the focused performance target.
+- Checkpoint 662: The cache-linked runtime was rechecked with the complete JIT
+  audit and another bounded 096 stress launch. The audit passes and the stress
+  launch reaches managed interpreter execution, but still exceeds the bounded
+  observation window. The remaining performance investigation is therefore
+  isolated to interpreter backtrace/GC cadence rather than JIT or relinking.
