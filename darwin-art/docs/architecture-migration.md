@@ -13367,3 +13367,6 @@ or admission exception was added.
 - Checkpoint 794 (2026-09-10): Fresh corpus advanced through
   `180-native-default-method`, reaching 199 completed tests with zero
   failures. Four workers remain active.
+- Checkpoint 795 (2026-09-10): Fresh corpus advanced through
+  `182-method-linking`, reaching 204 completed tests with zero failures.
+  Four workers remain active.
