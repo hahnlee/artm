@@ -9004,3 +9004,5 @@ incomplete and still requires managed caller unwind validation.
   end/method payload initialization. Graphics-link audit and eight concurrent
   `978-virtual-interface` JIT reruns passed; a full 1,076-test final corpus
   rerun is now active.
+- Checkpoint 836 (2026-09-10): The post-fix final corpus rerun reached 92
+  completed tests with zero failures; four workers remain active.
