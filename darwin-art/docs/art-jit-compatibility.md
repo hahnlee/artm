@@ -9719,6 +9719,11 @@ incomplete and still requires managed caller unwind validation.
   되돌렸다. 기존 `MAP_JIT` anywhere 구현과 범위 guard를 보존하며, 다음 시도는
   공통 `MemMap` API에 exact allocator를 추가하는 방식이어야 한다.
 
+- Checkpoint 967 (2026-09-10): foundation/runtime 분리 패치를 실제 build-foundation
+  경로에 적용하는 과정에서 patch-chain hunk 경계 문제가 재현되어 변경을 제거했다.
+  baseline은 clean이며, 다음 구현은 생성된 foundation shadow를 기준으로 diff를
+  재생성하고 전체 chain dry-run을 먼저 통과시킨 뒤 반영해야 한다.
+
 - Checkpoint 966 (2026-09-10): Astra 재리뷰 후 runtime 우회(`MapPlaceholder`)도
   실제 JIT 초기화에서 유효 mapping을 만들지 못함을 재현했다. 문제는 runtime patch
   계층이 아니라 foundation `libartbase MemMap` API에 exact allocator가 없는 구조적
