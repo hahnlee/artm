@@ -14182,3 +14182,7 @@ or admission exception was added.
 - Checkpoint 968 (2026-09-10): exact allocator와 runtime 소비 패치를 staged
   source→object→link로 재생성했다. PAGEZERO 밖까지 도달하지만 고정 주소가 기존
   mapping과 충돌하므로 다음 단계는 Mach VM free-region 기반 비파괴 배치다.
+
+- Checkpoint 969 (2026-09-10): runtime JIT source에 `mach_vm_region` 후보 탐색을
+  연결했다. 현재 후보 오류가 blind fallback으로 덮일 수 있어, 다음 작업은 AOSP
+  data-before-code 계약을 유지하면서 query/allocate 결과를 분리 검증하는 것이다.

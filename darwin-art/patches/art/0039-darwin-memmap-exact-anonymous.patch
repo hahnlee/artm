@@ -27,7 +27,7 @@ diff --git a/libartbase/base/mem_map.cc b/libartbase/base/mem_map.cc
  #endif
  
  #include <map>
-@@ -495,1 +499,35 @@
+@@ -495,1 +499,37 @@
 +MemMap MemMap::MapAnonymousExact(const char* name,
 +                                 uint8_t* addr,
 +                                 size_t byte_count,
@@ -40,8 +40,10 @@ diff --git a/libartbase/base/mem_map.cc b/libartbase/base/mem_map.cc
 +  }
 +  size_t size = RoundUp(byte_count, GetPageSize());
 +  mach_vm_address_t fixed = reinterpret_cast<mach_vm_address_t>(addr);
-+  if (mach_vm_allocate(mach_task_self(), &fixed, size, VM_FLAGS_FIXED) != KERN_SUCCESS) {
-+    *error_msg = StringPrintf("Darwin exact allocation at %p failed", addr);
++  const kern_return_t status = mach_vm_allocate(mach_task_self(), &fixed, size, VM_FLAGS_FIXED);
++  if (status != KERN_SUCCESS) {
++    *error_msg = StringPrintf("Darwin exact allocation at %p failed: %d (%s)",
++                              addr, status, mach_error_string(status));
 +    return Invalid();
 +  }
 +  if (mprotect(reinterpret_cast<void*>(fixed), size, prot) != 0) {

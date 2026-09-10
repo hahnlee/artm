@@ -9734,3 +9734,7 @@ incomplete and still requires managed caller unwind validation.
   `MapAnonymousExact` 직접 소유 MemMap을 교정했다. runtime v34 staging/link 재생성 후
   PAGEZERO guard 반영을 확인했으며 graphics/link는 PASS다. JIT exact 후보는 기존
   Mach mapping과 충돌해 아직 실패하며, 다음은 `mach_vm_region` free-gap 탐색이다.
+
+- Checkpoint 969 (2026-09-10): free-gap 후보 탐색과 Mach region headers를 runtime
+  patch에 연결했다. staged compile은 통과했지만 blind fallback/query 오류 처리가
+  진단을 가리므로, 다음은 정상 gap만 시도하고 allocate 결과를 보존하도록 정리한다.

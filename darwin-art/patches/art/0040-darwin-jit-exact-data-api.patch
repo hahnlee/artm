@@ -1,7 +1,17 @@
 diff --git a/runtime/jit/jit_memory_region.cc b/runtime/jit/jit_memory_region.cc
 --- a/runtime/jit/jit_memory_region.cc
 +++ b/runtime/jit/jit_memory_region.cc
-@@ -122,10 +123,31 @@
+@@ -20,6 +20,9 @@
+ #if defined(__APPLE__)
+ #include <pthread.h>
+ #include <sys/mman.h>
++#include <mach/mach_init.h>
++#include <mach/mach_vm.h>
++#include <mach/mach_port.h>
+ #endif
+ #include <android-base/unique_fd.h>
+ #include <log/log.h>
+@@ -122,10 +123,58 @@
      if (!exec_pages.IsValid()) {
        *error_msg = "Failed to create Darwin MAP_JIT code cache: " + error_str;
        return false;
@@ -14,10 +24,37 @@ diff --git a/runtime/jit/jit_memory_region.cc b/runtime/jit/jit_memory_region.cc
 +    // Mach-O binaries reserve the complete low 4GiB (__PAGEZERO). Keep the
 +    // AOSP ordering (data below executable) while never probing that region.
 +    constexpr uintptr_t kDarwinPageZeroEnd = UINT64_C(0x100000000);
-+    if (exec_base >= kDarwinPageZeroEnd &&
-+        rounded_data <= exec_base - kDarwinPageZeroEnd) {
++    uintptr_t free_candidate = 0;
++    const uintptr_t lower = std::max(kDarwinPageZeroEnd,
++                                     exec_base > UINT32_MAX ? exec_base - UINT32_MAX : 0u);
++    mach_vm_address_t cursor = RoundUp(lower, MemMap::GetPageSize());
++    const mach_vm_address_t limit = exec_base;
++    for (size_t regions = 0; regions != 4096 && cursor < limit; ++regions) {
++      mach_vm_address_t region = cursor;
++      mach_vm_size_t region_size = 0;
++      vm_region_basic_info_data_64_t info{};
++      mach_msg_type_number_t count = VM_REGION_BASIC_INFO_COUNT_64;
++      mach_port_t object = MACH_PORT_NULL;
++      const kern_return_t status = mach_vm_region(
++          mach_task_self(), &region, &region_size, VM_REGION_BASIC_INFO_64,
++          reinterpret_cast<vm_region_info_t>(&info), &count, &object);
++      if (object != MACH_PORT_NULL) {
++        (void)mach_port_deallocate(mach_task_self(), object);
++      }
++      if (status != KERN_SUCCESS || region > limit) {
++        if (limit - cursor >= rounded_data) free_candidate = cursor;
++        break;
++      }
++      if (region > cursor && region - cursor >= rounded_data) {
++        free_candidate = RoundDown(region - rounded_data, MemMap::GetPageSize());
++        break;
++      }
++      if (region_size == 0 || region > UINTPTR_MAX - region_size) break;
++      cursor = RoundUp(region + region_size, MemMap::GetPageSize());
++    }
++    if (free_candidate != 0) {
 +      data_pages = MemMap::MapAnonymousExact(data_cache_name.c_str(),
-+                                             reinterpret_cast<uint8_t*>(kDarwinPageZeroEnd),
++                                             reinterpret_cast<uint8_t*>(free_candidate),
 +                                             data_capacity, kProtRW, &error_str);
 +    }
 +    for (size_t attempt = 0; attempt != 128 && !data_pages.IsValid(); ++attempt) {
