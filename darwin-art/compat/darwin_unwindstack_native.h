@@ -47,6 +47,11 @@ extern "C" bool darwin_art_lookup_native_method(uintptr_t entrypoint,
                                                    void (*callback)(const char*, void*),
                                                    void* context);
 extern "C" void darwin_art_unwindstack_set_art_main_thread();
+// Refreshes a fixed, lock-free image-range table used by the ART signal path.
+// The signal handler can query it without dyld/allocator calls.
+extern "C" void darwin_art_unwindstack_refresh_image_snapshot();
+extern "C" bool darwin_art_unwindstack_lookup_image(uintptr_t pc, uintptr_t* start,
+                                                       uintptr_t* end);
 extern "C" void darwin_art_unwindstack_push_quick_frame(void* managed_sp);
 extern "C" void darwin_art_unwindstack_push_compiled_quick_frame(void* managed_sp,
                                                                     uint64_t frame_size,

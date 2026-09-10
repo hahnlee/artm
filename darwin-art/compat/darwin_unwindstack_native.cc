@@ -13,6 +13,7 @@
 #include <unwind.h>
 
 #include <array>
+#include <atomic>
 #include <cstdlib>
 #include <cxxabi.h>
 #include <cstdint>
@@ -62,6 +63,59 @@ DarwinArtQuickFrameRegistry* SharedQuickFrameRegistry() {
     return selected;
   }();
   return registry;
+}
+
+namespace {
+
+constexpr size_t kDarwinImageSnapshotCapacity = 512;
+struct DarwinImageSnapshotEntry {
+  uintptr_t start;
+  uintptr_t end;
+};
+std::array<DarwinImageSnapshotEntry, kDarwinImageSnapshotCapacity> g_image_snapshot{};
+std::atomic<size_t> g_image_snapshot_count{0};
+
+void RefreshImageSnapshot() {
+  size_t count = 0;
+  for (uint32_t image = 0; image < _dyld_image_count() && count < kDarwinImageSnapshotCapacity;
+       ++image) {
+    const auto* header = reinterpret_cast<const mach_header_64*>(_dyld_get_image_header(image));
+    if (header == nullptr || header->magic != MH_MAGIC_64) continue;
+    const intptr_t slide = _dyld_get_image_vmaddr_slide(image);
+    const auto* bytes = reinterpret_cast<const uint8_t*>(header + 1);
+    for (uint32_t i = 0; i < header->ncmds && count < kDarwinImageSnapshotCapacity; ++i) {
+      const auto* command = reinterpret_cast<const load_command*>(bytes);
+      if (command->cmd == LC_SEGMENT_64) {
+        const auto* segment = reinterpret_cast<const segment_command_64*>(command);
+        if (segment->vmsize != 0) {
+          g_image_snapshot[count++] = {
+              static_cast<uintptr_t>(segment->vmaddr + slide),
+              static_cast<uintptr_t>(segment->vmaddr + slide + segment->vmsize)};
+        }
+      }
+      bytes += command->cmdsize;
+    }
+  }
+  g_image_snapshot_count.store(count, std::memory_order_release);
+}
+
+}  // namespace
+
+extern "C" void darwin_art_unwindstack_refresh_image_snapshot() { RefreshImageSnapshot(); }
+
+extern "C" bool darwin_art_unwindstack_lookup_image(uintptr_t pc, uintptr_t* start,
+                                                       uintptr_t* end) {
+  if (start == nullptr || end == nullptr) return false;
+  const size_t count = g_image_snapshot_count.load(std::memory_order_acquire);
+  for (size_t i = 0; i < count; ++i) {
+    const auto entry = g_image_snapshot[i];
+    if (pc >= entry.start && pc < entry.end) {
+      *start = entry.start;
+      *end = entry.end;
+      return true;
+    }
+  }
+  return false;
 }
 
 namespace {
@@ -356,6 +410,7 @@ void DarwinPublishAotCodeMaps(Maps* maps) {
 
 extern "C" __attribute__((visibility("default"))) void
 darwin_art_unwindstack_set_art_main_thread() {
+  RefreshImageSnapshot();
   uint64_t thread_id = 0;
   if (pthread_threadid_np(nullptr, &thread_id) == 0 && thread_id != 0) {
     __atomic_store_n(&SharedQuickFrameRegistry()->art_main_thread_id, thread_id,

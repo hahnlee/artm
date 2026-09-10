@@ -13696,3 +13696,8 @@ or admission exception was added.
   also reported a `SuspendAll` timeout; no improvement is attributable to the
   RenderProxy hypothesis. The next diagnostic boundary is a pre-signal image
   and symbol snapshot, not another speculative ownership change.
+- Checkpoint 878 (2026-09-10): Added a fixed-size, lock-free dyld image-range
+  snapshot refreshed at ART startup and queried from the Darwin fault logger.
+  The runtime bootstrap compiled with the new ABI. A follow-up stress run
+  timed out without a fault record, so the image attribution is not yet
+  validated on a crash; no signal-unsafe symbolization was introduced.
