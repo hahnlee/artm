@@ -9112,3 +9112,13 @@ incomplete and still requires managed caller unwind validation.
   failures still occurred after valid entrypoint loads. The defect is therefore
   narrowed to post-getter generated-code register/frame restoration or the
   indirect-call ABI, not entrypoint field publication itself.
+- Checkpoint 865 (2026-09-10): Rebuilt the linked runtime with opt-in
+  instruction-context diagnostics and captured the failing `149-suspend-all-
+  stress` path. The four words immediately before the fault decode as
+  `ldr x8,[x23]`, `ldr x8,[x8,#8]`, `mov x0,x23`, `blr x8`; LR-4 is therefore
+  the indirect call itself, while x8 already contains the corrupt instruction
+  pair `0xd65f03c09100c3ff`. The method getter still reports no corrupt target.
+  This is stronger evidence for a generated virtual/interface call load or
+  managed-reference/class layout race under concurrent suspend, rather than a
+  fault-handler PC rewrite. The run remains failing and the compatibility goal
+  is open.
