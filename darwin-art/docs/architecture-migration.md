@@ -13811,3 +13811,6 @@ or admission exception was added.
   (1,010 PASS), with no hard failures. `2041-bad-cleaner` and
   `2048-bad-native-registry` remain confirmed PASS in all three isolated lanes;
   five other timeout rows await the same treatment after the worker exits.
+- Checkpoint 907 (2026-09-10): The worker reached 1,056 completed tests
+  (1,049 PASS), with no hard failures. Twenty tests remain in the corpus;
+  timeout classification is still deferred until the worker terminates.
