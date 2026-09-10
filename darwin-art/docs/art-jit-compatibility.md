@@ -9146,3 +9146,10 @@ incomplete and still requires managed caller unwind validation.
   enabled), not a corrupt JIT allocation slot. A global CFI-registration trace
   was too noisy and timed out, so no source change was made; the next probe
   must map AOT ranges without logging every registration.
+- Checkpoint 869 (2026-09-10): Tested a narrow LR-to-Mach-region lookup at the
+  fatal handler to distinguish runtime text from OAT text. The syscall path
+  itself can stall under the signal/stop-the-world interaction and yielded a
+  timeout, so it was reverted; no production behavior or diagnostic ABI was
+  retained from the experiment. The previously validated LR instruction dump
+  remains the only signal-side probe. AOT range ownership must instead be
+  captured before entering the fault path.
