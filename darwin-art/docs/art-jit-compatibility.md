@@ -9955,3 +9955,9 @@ incomplete and still requires managed caller unwind validation.
   재검증했다. ART JIT 전체 ledger도 `audit-art-jit.sh` rc=0으로 통과했고,
   shutdown 단계 순서가 유지됐다. 최종 graphics dylib SHA-256은
   `fe431b7031747d97bb9a205fd375e05b4b8f391b14fa0b9bc9911cac3566f7da`다.
+
+- Checkpoint 1007 (2026-09-11): 동일 입력으로 ART graphics closure를 다시
+  생성해 SHA-256 `1458dd4bf96e2d9e95c2eca0c7577a224934e845ff4c3d924cc3eeb255499715`
+  를 재현했다. closure audit는 다시 `archive-members=1970`으로 PASS했고,
+  동일 Ninja 그래프는 `no work to do`를 반환했다. 단일 artifact identity가
+  캐시 재사용과 독립적으로 안정적임을 확인했다.

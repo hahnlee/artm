@@ -14386,3 +14386,8 @@ or admission exception was added.
   재검증했다. 실제 Calculator embedded shutdown은 HWUI task detach 성공과
   `async-workers-joined` 선행을 유지했고, JIT ledger도 rc=0으로 통과했다.
   full Chromium HTTPS gate만 macOS CA trust prerequisite로 남아 있다.
+
+- Checkpoint 1007 (2026-09-11): graphics closure 재생성 결과 SHA-256이
+  `1458dd4bf96e2d9e95c2eca0c7577a224934e845ff4c3d924cc3eeb255499715`로
+  이전 산출물과 일치했다. `archive-members=1970` audit와 Ninja no-op을 통해
+  closure 및 최종 graphics artifact의 재현 가능한 입력 identity를 확인했다.
