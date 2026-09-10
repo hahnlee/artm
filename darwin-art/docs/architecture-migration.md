@@ -14239,3 +14239,9 @@ or admission exception was added.
   `rc=0`으로 Unity 초기화까지 통과했다. platform unwind provider export와
   TelephonyFrameworkInitializer manager 설치가 실사용 경로에서 검증됐으며,
   art-bootstrap 14개 테스트와 APK runtime 감사가 PASS했다.
+
+- Checkpoint 981 (2026-09-10): 최신 artifact identity에서 ART JIT 전체 audit과
+  native graph audit을 재검증했다. JIT 기능별 acceptance 및 shutdown은 PASS,
+  graph는 runtime=258/graphics-jni=63/ICU=458/cached-tu=809, warm no-op,
+  depfile, direct-source invalidation까지 PASS했다. APK fixture 감사와
+  Blue Archive 원본 split 실행도 PASS 상태를 유지한다.

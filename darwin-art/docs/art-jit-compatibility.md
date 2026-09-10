@@ -9801,3 +9801,9 @@ incomplete and still requires managed caller unwind validation.
   provider 회귀와 Telephony framework manager 초기화가 함께 검증됐다.
   `cargo test -p art-bootstrap` 14개와 android-apk-app-runtime 감사
   (fixture native/multidex/JNI 계약 포함)도 PASS했다.
+
+- Checkpoint 981 (2026-09-10): 최신 소스에서 ART JIT 전체 acceptance를 재실행해
+  intrinsic inventory/source contract, Nterp·JNI·GC·예외·field/string/class
+  root·shutdown 항목을 모두 PASS했다. native graph audit도 runtime=258,
+  graphics-jni=63, ICU=458, cached-tu=809와 warm no-op/depfile/direct-source
+  invalidation을 PASS했다. 변경 없는 Blue Archive split 실행은 `rc=0`이었다.
