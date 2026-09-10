@@ -13923,3 +13923,9 @@ or admission exception was added.
   evidence 부족으로 종료됐다. 다음은 물리 입력 좌표·전환 타이밍을
   고정하고, CommonPool worker drain/join 순서를 AOSP shutdown 계약에
   맞춰 검증하는 단계다.
+
+- Checkpoint 925 (2026-09-10): 스케일 변환을 포함한 실제 MotionEvent를
+  점검했다. 논리 `(325,25)`가 물리 `(650,50)`으로 변환되고 avatar
+  `ChromeImageButton`에 도달했으며, 기존 `(225,610)` 계열은 실제 화면
+  하단/콘텐츠로 변환되어 tab switcher를 miss했다. 따라서 남은 Chromium
+  acceptance 실패는 JNI fatal보다 좌표·레이아웃 계약 문제로 분리한다.

@@ -9448,3 +9448,9 @@ incomplete and still requires managed caller unwind validation.
   acceptance는 실제 `TabSwitcherButtonView`/`TabGridView` evidence가
   부족해 실패했다. 이는 native attachment 문제와 분리해 입력 좌표·탭
   전환 시점 및 CommonPool shutdown race를 다음 검증 대상으로 둔다.
+
+- Checkpoint 925 (2026-09-10): 물리 입력 좌표를 2배 스케일로 재현해
+  상단 영역 hit를 확인했다. `(325,25)` 논리 입력은 실제 `(650,50)`으로
+  전달되어 `ChromeImageButton` avatar를 명확히 hit했으며, 이전 acceptance
+  좌표는 `(450,1220)`에서 miss였다. 현재 탭 전환 버튼 좌표/레이아웃은
+  별도 고정이 필요하고, 이 실행에서도 native-thread fatal은 없었다.
