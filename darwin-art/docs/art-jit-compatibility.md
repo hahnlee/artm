@@ -9909,3 +9909,8 @@ incomplete and still requires managed caller unwind validation.
   강한 정의를 반영해 전체/ART runtime identity를 각각 48,833/48,829로
   고정했다. 전체 graphics closure audit와 darwin-art-host 8개 테스트가
   PASS했다. worker 개별 JNI detach 로그 증거는 다음 acceptance 과제로 남긴다.
+
+- Checkpoint 1000 (2026-09-10): `audit-art-jit.sh`가 AOSP ARM64 intrinsic,
+  Nterp/JIT arithmetic·GC·JNI·field/string/root load·exit-hook acceptance를
+  통과했다. 같은 로그에서 `graphics-finalize → async-workers-joined →
+  libcore-unload → elf-unload → detach → destroy-vm` 순서가 확인됐다.

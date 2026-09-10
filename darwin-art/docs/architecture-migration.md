@@ -14343,3 +14343,8 @@ or admission exception was added.
   전체 및 ART runtime closure identity에 반영했다(48,833/48,829).
   executable graphics closure audit와 host 단위 테스트 8개가 PASS했다.
   실제 worker별 JNI detach 관찰 로그는 아직 별도 acceptance가 필요하다.
+
+- Checkpoint 1000 (2026-09-10): 전체 JIT acceptance와 native shutdown probe를
+  재실행했다. JIT 기능별 증거가 PASS했고, graphics finalize 뒤 CommonPool
+  join이 libcore/ELF unload 및 VM detach/destroy보다 먼저 완료되는 순서를
+  로그로 확인했다.
