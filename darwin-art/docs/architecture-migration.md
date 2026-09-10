@@ -15,18 +15,20 @@ GPU 경로는 CPU fallback이 아니라 IOSurface/Metal zero-copy를 우선하�
 Binder/SurfaceControl/입력/파일/미디어/보안 CA 같은 공통 시스템 서비스는
 앱별 probe가 아닌 런타임 계층이 제공한다.
 
-## Current goal: Chrome performance
+## Current goal: native-thread/JNI contract first
 
-Android 스레드 순서를 바꾸지 않고 Chromium의 콜드 시작 tail과 steady-state
-입력·합성 비용을 줄인다.
+상위 목표는 변경하지 않은 APK를 Android 계약으로 실행하는 Darwin 호환성
+계층이다. 현재 활성 단계는 Chrome 성능 튜닝이 아니라, AOSP와 같은
+native-thread/JNI attachment ownership 및 VM shutdown 순서를 확립하고
+빌드 산출물의 source/patch/image identity를 단일하게 재현하는 것이다.
 
-- 콜드 시작의 owner-affine `MessagePumpAndroid` 지연을 줄인다.
-- AppKit→ART wake를 event-driven으로 만들고, 입력 backpressure를 bounded
-  latest-wins로 유지한다.
-- scanout producer에서 dirty-generation을 확인해 중복 제출을 줄이고,
-  IOSurface/MTLSharedEvent fence readiness를 보존한다.
-- 무진단 릴리스 벤치마크에서 물리 입력 100회 이상과 기존 Chrome
-  acceptance를 모두 통과시킨다.
+- detached native thread의 명시적 attach→작업→detach 소유권을 공통화한다.
+- `JavaVM.GetEnv` 조회 semantics와 callback ingress/drain 순서를 보존한다.
+- 정상 종료, `pthread_exit`, TLS destructor, explicit detach, VM shutdown
+  race를 검증하고 누수·잔류 worker·fatal을 허용하지 않는다.
+- HWUI/graphics JNI가 동일한 원본·patch manifest에서 materialize되었음을
+  acceptance 로그에 기록하고 stale artifact는 실패시킨다.
+- 이 경계가 닫힌 뒤에만 Chromium 성능 및 앱별 통합 acceptance를 재개한다.
 
 ## Baseline (2026-09-02)
 
@@ -13878,3 +13880,9 @@ or admission exception was added.
   the first rebuild caught a malformed patch; dry-run now applies cleanly to
   pinned `runtime/thread.cc`. The corrected patch is pushed and is ready for
   the next runtime rebuild/Chromium acceptance run.
+- Checkpoint 918 (2026-09-10): Astra 전체 리뷰 후 목표를
+  native-thread/JNI ownership과 단일 build identity를 선행하는 단계형
+  계획으로 수정했다. 최신 Chromium run은 ART 0188이 `attempting to detach
+  thread that is not attached` fatal을 새로 재현함을 확인했다. 0188을
+  해법으로 간주하지 않고 정확한 thread owner의 attach/detach와 VM shutdown
+  순서를 먼저 닫는다.

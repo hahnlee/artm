@@ -69,6 +69,23 @@ unwind metadata remains incomplete.
 Read this index and the latest architecture-migration entry when resuming.
 Append dated evidence as work advances; keep this status table current.
 
+## Active execution boundary — 2026-09-10
+
+Astra 전체 리뷰에서 현재 Chromium blocker는 JIT opcode가 아니라 native
+thread lifecycle이다. ART `0188`의 전역 `ThreadExitCallback` auto-detach는
+TLS destructor 경계에서 `attempting to detach thread that is not attached`
+fatal을 재현하므로 정상 해법으로 인정하지 않는다. 다음 단계는 정확한
+thread owner에서 attach 성공 여부를 기록하고 새로 attach한 경우에만 detach하는
+공통 계약, callback drain→worker join→attachment 해제→ART shutdown 순서,
+그리고 모든 HWUI/graphics JNI build가 같은 source/patch manifest를 쓰는지에
+대한 identity 검증이다.
+
+Corpus의 1,069 PASS/7 timeout 기록은 유효한 회귀 증거지만 interpreter와
+jit 두 lane의 요약일 뿐 독립적인 optimized lane이나 개별 메서드의 compiled
+실행을 증명하지 않는다. 이후 기능별 compiled execution/OSR/deopt/GC 증거
+ledger를 별도로 채우고, 동일 runtime identity에서 변경 없는 Chromium,
+calculator/clock/calendar, Blue Archive acceptance를 수행한다.
+
 ### Managed return ABI implementation in progress — 2026-09-04
 
 Sol reviewed the complete boundary set. Compiler-only native decode/encode is
@@ -9390,3 +9407,9 @@ incomplete and still requires managed caller unwind validation.
   the first rebuild caught a malformed patch; dry-run now applies cleanly to
   pinned `runtime/thread.cc`. The corrected patch is pushed and is ready for
   the next runtime rebuild/Chromium acceptance run.
+- Checkpoint 918 (2026-09-10): Astra 리뷰 결과를 반영해 활성 경계를
+  native-thread/JNI ownership, callback drain/shutdown ordering, 단일
+  HWUI/graphics source-patch identity로 재설정했다. ART 0188 전역
+  auto-detach는 TLS destructor contract를 위반하는 fatal을 재현하므로
+  보류한다. 기존 corpus PASS 수치는 유지하되 기능별 compiled execution
+  증거와 앱 acceptance를 별도 ledger로 관리한다.
