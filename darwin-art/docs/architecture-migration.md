@@ -13641,3 +13641,11 @@ or admission exception was added.
   retained from the experiment. The previously validated LR instruction dump
   remains the only signal-side probe. AOT range ownership must instead be
   captured before entering the fault path.
+- Checkpoint 870 (2026-09-10): Verified that the AOT-range registration hook
+  is present in the staged `ClassLinker`, but enabling its per-range trace did
+  not emit registrations before the failing run timed out. This rules out
+  using that noisy hook as a direct fault correlator and leaves two concrete
+  ownership candidates for the `0x109…` LR: boot-image/runtime text or an OAT
+  mapping initialized before the hook. The source tree is clean; the next
+  probe will snapshot loaded executable maps and registered ranges at normal
+  runtime startup, outside the signal path.
