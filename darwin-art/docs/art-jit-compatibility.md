@@ -8873,6 +8873,9 @@ incomplete and still requires managed caller unwind validation.
 - Checkpoint 799 (2026-09-10): Fresh corpus advanced through
   `1917-get-stack-frame`, reaching 222 completed tests with zero failures.
   Four workers remain active.
+- Checkpoint 809 (2026-09-10): Fresh corpus advanced through
+  `1960-checker-bounds-codegen`, reaching 260 completed tests with zero
+  failures. Four workers remain active.
 - Checkpoint 808 (2026-09-10): Fresh corpus advanced through
   `1954-pop-frame-jit`, reaching 254 completed tests with zero failures. Four
   workers remain active.
