@@ -13585,3 +13585,11 @@ or admission exception was added.
   failure; this points beyond registry slot publication to an AOT/JIT
   indirect-call target or managed-pointer/frame ABI defect under concurrent
   suspend, still unresolved.
+- Checkpoint 863 (2026-09-10): Added the Darwin host-boundary patch
+  `0184-darwin-atomic-ptr-sized-fields.patch`, using acquire loads and release
+  stores for naturally aligned 64-bit ART pointer-sized fields. The staged
+  runtime, JIT compiler, and graphics-link closure all build/audit cleanly.
+  An eight-way `149-suspend-all-stress` rerun produced 5/8 passes and 3/8
+  failures, so the change removes a real publication race candidate but does
+  not yet establish concurrent suspend correctness; the ABI corruption remains
+  open.
