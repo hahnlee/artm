@@ -9237,3 +9237,7 @@ incomplete and still requires managed caller unwind validation.
   `--parallel 4 --timeout 60` after calibrating the false 30-second timeout.
   The live ledger has completed 101 tests so far, all PASS; the process remains
   active and is intentionally left running for the complete result.
+- Checkpoint 884 (2026-09-10): The live full-corpus run has reached 166 tests:
+  165 PASS and one timeout (`099-vmdebug` at the 60-second per-test limit).
+  The worker remains active; the timeout is isolated for a later 120-second
+  rerun and is not being treated as an ART regression yet.
