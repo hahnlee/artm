@@ -13734,3 +13734,8 @@ or admission exception was added.
   group, covering helpers that call `setsid()` and otherwise become PPID 1.
   Both process-group unit tests pass. The live full-corpus run continues under
   the corrected cleanup contract.
+- Checkpoint 886 (2026-09-10): Re-ran the only 60-second timeout,
+  `099-vmdebug`, through the corpus wrapper with `--timeout 120`; it passed.
+  The direct runner also passed all three lanes. The live full-corpus ledger
+  has reached 240 tests (239 PASS, one historical 60-second timeout), so that
+  timeout is now classified as calibration rather than a runtime failure.
