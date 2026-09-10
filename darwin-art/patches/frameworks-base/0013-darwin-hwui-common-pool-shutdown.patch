@@ -39,12 +39,15 @@
      }
      {
          std::unique_lock lock(mLock);
-@@ -52,6 +52,14 @@
+@@ -52,6 +52,17 @@
      }
  }
  
 +CommonPool::~CommonPool() {
-+    mIsStopping = true;
++    {
++        std::lock_guard lock(mLock);
++        mIsStopping = true;
++    }
 +    mCondition.notify_all();
 +    for (auto& worker : mWorkers) {
 +        if (worker.joinable()) worker.join();
@@ -54,7 +57,7 @@
  CommonPool& CommonPool::instance() {
      static CommonPool pool;
      return pool;
-@@ -68,6 +80,12 @@
+@@ -68,8 +80,18 @@
  void CommonPool::enqueue(Task&& task) {
      std::unique_lock lock(mLock);
 +    if (mIsStopping) {
@@ -62,11 +65,18 @@
 +        task();
 +        return;
 +    }
-     while (!mWorkQueue.hasSpace()) {
-+        if (mIsStopping) return;
+-    while (!mWorkQueue.hasSpace()) {
++    while (!mIsStopping && !mWorkQueue.hasSpace()) {
          lock.unlock();
          usleep(100);
          lock.lock();
+     }
++    if (mIsStopping) {
++        lock.unlock();
++        task();
++        return;
++    }
+     mWorkQueue.push(std::move(task));
 @@ -80,12 +89,13 @@
  
  void CommonPool::workerLoop() {

@@ -14303,3 +14303,9 @@ or admission exception was added.
   기다리지 않도록 stop 상태의 작업을 호출자에서 즉시 실행하도록 보강했다.
   tracked patch 적용과 HWUI static foundation 재빌드, graphics closure audit를
   최신 artifact에서 재검증했다.
+
+- Checkpoint 993 (2026-09-10): queue-full 상태에서 stop이 발생한 뒤 worker가
+  종료해도 작업이 고립되지 않도록 enqueue의 stop predicate를 push 직전까지
+  단일화했다. patch 적용과 static foundation/link audit는 PASS했지만, 실제
+  VM shutdown API에서 pool을 명시적으로 drain/join하는 호출 경계와 JNI
+  detach 순서 증거는 아직 남은 작업으로 기록한다.

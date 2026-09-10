@@ -9867,3 +9867,10 @@ incomplete and still requires managed caller unwind validation.
   `runSync` 작업을 inline 실행해 future 영구 대기를 막는 계약을 추가했다.
   patch 적용 검증, 88-object HWUI foundation 재빌드, graphics link closure
   (`undefined=0`)를 모두 PASS했다.
+
+- Checkpoint 993 (2026-09-10): Astra 재검토에서 queue-full 경합 시 stop 후
+  push 직전 재검사와 mutex 보호가 필요하다는 지적을 반영했다. 단일 stop
+  predicate와 inline fallback을 staged shadow에서 재적용하고, 88-object
+  foundation 재빌드 및 graphics closure audit를 PASS했다. 명시적 VM-shutdown
+  호출 경계와 worker JNI-detach-before-VM 증거는 아직 별도 acceptance로 남아
+  있으며 이를 완료로 주장하지 않는다.
