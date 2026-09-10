@@ -14190,3 +14190,7 @@ or admission exception was added.
 - Checkpoint 970 (2026-09-10): JIT 후보 탐색에서 blind fallback을 제거하고 VM region
   query 오류·영역 overflow·collision retry를 명시적으로 처리했다. runtime staged
   compile은 통과했으며, 다음은 최종 link와 acceptance로 free-gap 계약을 확인한다.
+
+- Checkpoint 971 (2026-09-10): runtime/link 재생성 후 JIT audit이 새 free-gap 경로를
+  사용함을 확인했다. 후보 부재를 명시적 오류로 보존하며, 다음은 Mach submap 재귀
+  조회로 fragmented VM 공간을 완전히 열거하는 것이다.

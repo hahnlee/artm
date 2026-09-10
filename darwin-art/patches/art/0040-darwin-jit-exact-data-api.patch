@@ -11,7 +11,7 @@ diff --git a/runtime/jit/jit_memory_region.cc b/runtime/jit/jit_memory_region.cc
  #endif
  #include <android-base/unique_fd.h>
  #include <log/log.h>
-@@ -122,10 +123,63 @@
+@@ -122,10 +123,65 @@
      if (!exec_pages.IsValid()) {
        *error_msg = "Failed to create Darwin MAP_JIT code cache: " + error_str;
        return false;
@@ -31,7 +31,9 @@ diff --git a/runtime/jit/jit_memory_region.cc b/runtime/jit/jit_memory_region.cc
 +    mach_vm_address_t cursor = RoundUp(lower, MemMap::GetPageSize());
 +    const mach_vm_address_t limit = exec_base;
 +    size_t collisions = 0;
-+    error_str = "no fitting Darwin JIT metadata gap";
++    error_str = "no fitting Darwin JIT metadata gap exec_base=" +
++                std::to_string(exec_base) + " exec_end=" + std::to_string(exec_limit_end) +
++                " data=" + std::to_string(rounded_data);
 +    for (size_t regions = 0; regions != 4096 && cursor < limit; ++regions) {
 +      mach_vm_address_t region = cursor;
 +      mach_vm_size_t region_size = 0;

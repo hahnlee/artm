@@ -9743,3 +9743,8 @@ incomplete and still requires managed caller unwind validation.
   exact allocate하도록 정리했다. query/extent 오류와 collision retry를 분리했으며,
   staged runtime compile은 PASS다. 다음은 새 dylib relink 후 JIT acceptance에서
   실제 gap 후보와 Mach 오류를 검증하는 단계다.
+
+- Checkpoint 971 (2026-09-10): 새 staged runtime/link로 JIT audit을 재실행했다.
+  blind fallback 없이 `no fitting Darwin JIT metadata gap`으로 명확히 실패하며,
+  data-before-code/uint32 제약 하 적합 gap 부재를 확인했다. 다음은
+  `mach_vm_region_recurse`로 submap까지 탐색하는 단계다.
