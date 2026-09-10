@@ -13610,3 +13610,10 @@ or admission exception was added.
   managed-reference/class layout race under concurrent suspend, rather than a
   fault-handler PC rewrite. The run remains failing and the compatibility goal
   is open.
+- Checkpoint 866 (2026-09-10): A single post-relink run reproduced the same
+  failing indirect-call sequence. An experimental fault-handler read of the
+  managed object at x23 was intentionally reverted: Mach VM reads from the
+  fatal signal path can stall the process and produced a timeout without a
+  usable fault record. The LR instruction dump remains enabled and is limited
+  to the already-proven code-address read; x23 must be inspected from a
+  non-signal execution path. The concurrent JIT/GC ABI defect remains open.
