@@ -13867,3 +13867,10 @@ or admission exception was added.
   from another HWUI helper path, so the remaining work is to route all AOSP
   HWUI JNI helper accessors through the same attach contract before tab
   acceptance can pass.
+- Checkpoint 916 (2026-09-10): With all graphics JNI archive patches applied,
+  Chromium survives into the full 70-second interaction window but exits with
+  ART `ThreadExitCallback` fatals for native `Thread-7/8`. The first detach
+  patch was present but only returned when `Runtime::Current()` was non-null;
+  Darwin shutdown can race runtime teardown. It now unconditionally exits the
+  callback after attempting ART detach, preventing the second-callback fatal;
+  runtime rebuild and acceptance rerun remain required.
