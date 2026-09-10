@@ -9904,3 +9904,8 @@ incomplete and still requires managed caller unwind validation.
   C ABI shutdown wrapper를 두고 runtime adapter는 단일 함수만 호출한다.
   native suspension에서 libcore/ELF unload 전에 pool drain/join을 수행하며
   graphics closure와 Calculator/DeskClock acceptance가 PASS했다.
+
+- Checkpoint 999 (2026-09-10): wrapper ABI가 graphics closure에 추가한 단일
+  강한 정의를 반영해 전체/ART runtime identity를 각각 48,833/48,829로
+  고정했다. 전체 graphics closure audit와 darwin-art-host 8개 테스트가
+  PASS했다. worker 개별 JNI detach 로그 증거는 다음 acceptance 과제로 남긴다.

@@ -14338,3 +14338,8 @@ or admission exception was added.
   graphics finalize 뒤 `ScopedThreadSuspension(kNative)`에서 drain/join하고
   이후 libcore/ELF/resource teardown 및 VM detach/destroy를 수행한다.
   graphics closure와 AOSP Calculator/DeskClock acceptance가 PASS했다.
+
+- Checkpoint 999 (2026-09-10): CommonPool shutdown wrapper의 강한 정의 1개를
+  전체 및 ART runtime closure identity에 반영했다(48,833/48,829).
+  executable graphics closure audit와 host 단위 테스트 8개가 PASS했다.
+  실제 worker별 JNI detach 관찰 로그는 아직 별도 acceptance가 필요하다.
