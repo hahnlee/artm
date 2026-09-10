@@ -13915,3 +13915,11 @@ or admission exception was added.
   audit는 PASS했으나 최신 Chromium acceptance는 TabSwitcher/TabGrid
   evidence 부족으로 종료됐다. 남은 과제는 CommonPool 종료 순서 및
   acceptance 입력 타이밍을 실제 AOSP lifecycle에 맞춰 닫는 것이다.
+
+- Checkpoint 924 (2026-09-10): 새 graphics closure로 Chromium을 다시
+  실행해 HWUI CommonPool object가 `getOnStartHook()`를 참조하고
+  ANGLE/MoltenVK/ChromeChildSurface 경로가 살아 있음을 확인했다. 기존
+  native-thread fatal은 사라졌지만 TabSwitcher/TabGrid acceptance는
+  evidence 부족으로 종료됐다. 다음은 물리 입력 좌표·전환 타이밍을
+  고정하고, CommonPool worker drain/join 순서를 AOSP shutdown 계약에
+  맞춰 검증하는 단계다.

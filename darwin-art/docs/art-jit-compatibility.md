@@ -9441,3 +9441,10 @@ incomplete and still requires managed caller unwind validation.
   기존 fatal은 사라졌지만 acceptance가 실제 TabSwitcher/TabGrid 로그를
   만들지 못해 실패했으며, CommonPool 종료 warning과 별도 abort 경로를
   다음 단계에서 분리 조사한다.
+
+- Checkpoint 924 (2026-09-10): patch-identity cache 수정 후 재생성한
+  Chromium 이미지에서 `hwuiTask0/1`의 기존 fatal은 재현되지 않았고,
+  ANGLE Metal·MoltenVK·ChromeChildSurface 생성까지 확인했다. 다만
+  acceptance는 실제 `TabSwitcherButtonView`/`TabGridView` evidence가
+  부족해 실패했다. 이는 native attachment 문제와 분리해 입력 좌표·탭
+  전환 시점 및 CommonPool shutdown race를 다음 검증 대상으로 둔다.
