@@ -14102,6 +14102,12 @@ or admission exception was added.
   input/audio 증거는 유지된다. GMS provider 및 로그인/전투 진입은 호환성
   계층의 후속 작업으로 명시적으로 남긴다.
 
+- Checkpoint 955 (2026-09-10): 병렬 검증에서 Chromium GPU channel timeout을
+  관찰했으나, stale runtime을 제거한 뒤 단독 재실행에서는 전체 window-menu
+  acceptance가 PASS했다. 따라서 현재 증거는 공유 자원 경쟁을 포함한 재현
+  조건을 별도 추적해야 함을 보여준다. APK process-boundary 종료는
+  `mem::forget` 후 `_exit` 순서를 보장하도록 수정했다.
+
 - Checkpoint 949 (2026-09-10): expected-address hint 실험이 일부 child의
   JIT fallback을 유발해 되돌렸다. graphics bootstrap/link audit는 PASS이며,
   AOSP stack-map 범위를 유지하려면 Darwin reservation 기반 bounded retry가

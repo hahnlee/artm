@@ -36,7 +36,10 @@ impl<'a> RuntimeShutdownGuard<'a> {
             // APK processes must never enter DestroyJavaVM/ELF teardown,
             // including explicit error cleanup paths. The caller has already
             // recorded the failure; preserve it at the OS process boundary.
-            self.inner.take();
+            // Do not let the temporary guard returned by `take()` run its
+            // destructor before `_exit`; APK process boundaries must bypass
+            // DestroyJavaVM/ELF teardown entirely.
+            std::mem::forget(self.inner.take());
             unsafe {
                 libc::fflush(std::ptr::null_mut());
                 libc::_exit(1);

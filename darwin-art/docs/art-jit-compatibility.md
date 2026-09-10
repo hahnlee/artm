@@ -9644,6 +9644,13 @@ incomplete and still requires managed caller unwind validation.
   GMS `Stub!` 경고와 로그인/전투 콘텐츠는 아직 미검증이며 다음 acceptance
   범위로 남긴다.
 
+- Checkpoint 955 (2026-09-10): 병렬 실행 중 Chromium GPU channel timeout이
+  발생해 실패 원인을 Astra 리뷰로 분리했다. stale host를 정리하고 단독으로
+  재실행한 `android-window-menu-acceptance.sh`는 Calculator popup/outside/
+  resize, Calendar Day/Week/Month, Chromium New-tab 및 SurfaceFlinger 경로를
+  모두 PASS했다. APK error shutdown guard는 `_exit` 전에 임시 guard가
+  drop되지 않도록 `mem::forget`으로 보강했다.
+
 - Checkpoint 949 (2026-09-10): expected-address hint 실험이 일부 child의
   JIT fallback을 유발해 되돌렸다. graphics bootstrap/link audit는 PASS이며,
   reservation 기반 bounded retry 없이는 JIT 주소 배치를 완료로 간주하지 않는다.
