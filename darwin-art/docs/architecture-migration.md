@@ -14025,3 +14025,9 @@ or admission exception was added.
   DOWN/UP 두 이벤트가 consumed=1로 처리되고 dispatch_us=83–139로
   측정됐다. 테스트 좌표는 window scale 2에 의해 콘텐츠 밖으로 변환되어
   hit=0이므로, 좌표 보정 후 실제 Unity UI hit을 추가 검증한다.
+
+- Checkpoint 941 (2026-09-10): window scale 2를 반영해 `(90,160)`을
+  테스트한 결과 런타임 target 좌표 `(180,320)`과 InputChannel 전달이
+  일치했다. DOWN/UP consumed=1, 111–271us로 측정됐으며 fatal 없이
+  종료했다. Blue Archive 초기 로딩 화면에는 clickable target이 없어
+  실제 게임 버튼 상호작용 증거는 콘텐츠 진입 후로 남겼다.

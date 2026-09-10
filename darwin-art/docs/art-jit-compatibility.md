@@ -9560,3 +9560,10 @@ incomplete and still requires managed caller unwind validation.
   `consumed=1`, dispatch latency 83–139us로 기록됐고 fatal은 없었다.
   창 scale 좌표 보정 전이라 두 번째 tap의 hit=0이어서 게임 UI 상태변화
   증거는 다음 단계로 남겼다.
+
+- Checkpoint 941 (2026-09-10): window scale을 보정한 `(90,160)` 입력을
+  주입해 Android target 좌표가 `(180,320)`으로 전달됨을 확인했다.
+  DOWN/UP 모두 InputChannel에서 `consumed=1`로 처리되고 dispatch latency
+  111–271us, Unity Product Name/Metal 초기화 및 rc=0 종료를 유지했다.
+  로딩 화면에서 clickable hit=0이므로 게임 내부 버튼 상태변화는 아직
+  별도 콘텐츠 로딩 후 검증이 필요하다.
