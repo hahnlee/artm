@@ -13364,3 +13364,6 @@ or admission exception was added.
 - Checkpoint 793 (2026-09-10): Fresh corpus advanced through
   `168-vmstack-annotated`, reaching 188 completed tests with zero failures.
   Four workers remain active.
+- Checkpoint 794 (2026-09-10): Fresh corpus advanced through
+  `180-native-default-method`, reaching 199 completed tests with zero
+  failures. Four workers remain active.
