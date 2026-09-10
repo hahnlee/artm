@@ -14061,3 +14061,9 @@ or admission exception was added.
   early-error cleanup과 teardown abort를 분리하기로 했고, 호스트에
   `run_request` 실패 status 및 실행 binary/app DEX identity 로그를 추가했다.
   메뉴 PASS 문구만으로 이 lifecycle 문제를 닫지 않는다.
+
+- Checkpoint 947 (2026-09-10): 인접 MAP_JIT 배치로 최초 6.4GiB
+  stack-map abort는 사라졌으나, 다중 Chromium child에서 expected-address
+  mmap이 거부되어 JIT fallback이 발생했다. 이는 완료가 아니며, 매핑을
+  제한된 횟수로 재시도하고 범위 불만족 시 초기화 오류를 반환하는 구조로
+  보강해야 한다. teardown SIGABRT 검출도 acceptance gate에 반영했다.

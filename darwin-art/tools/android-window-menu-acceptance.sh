@@ -112,7 +112,7 @@ grep -a -F 'input window index=1 type=1002' "$chrome_log" | \
 grep -a -F 'app:id/new_tab_menu_id' "$chrome_log" >/dev/null
 grep -a -F 'window remove argc=1 session=true' "$chrome_log" >/dev/null
 
-if grep -a -E 'FATAL EXCEPTION|Fatal signal|SIG(SEGV|BUS|ABRT|TRAP)|runtime abort' \
+if grep -a -E 'FATAL EXCEPTION|Fatal signal|SIG(SEGV|BUS|ABRT|TRAP)|runtime abort|HandleUnexpectedSignal|ART signal context unavailable .* signal=[0-9]+' \
     "$calculator_log" "$calculator_outside_log" "$calculator_resize_log" \
     "$calendar_log" "$chrome_log" >/dev/null; then
   echo 'Android window menu acceptance observed a runtime crash' >&2

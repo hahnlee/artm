@@ -9598,3 +9598,10 @@ incomplete and still requires managed caller unwind validation.
   일부 0x0 popup relayout을 별도 lifecycle 문제로 판정했다. 호스트는
   `run_request` 실패 status 및 실제 executable/app DEX identity를 cleanup
   전에 기록하도록 보강했으며 teardown abort를 성공으로 무시하지 않는다.
+
+- Checkpoint 947 (2026-09-10): Chrome 다중 child 재현에서 최초
+  `jit_memory_region.cc:442` 6.4GiB offset abort는 제거됐지만, Darwin
+  MAP_JIT 인접 주소 hint가 일부 child에서 거부되어 JIT code cache가
+  비활성화되는 회귀가 확인됐다. acceptance 스크립트는 SIGABRT를 이제
+  실패로 판정하며, 다음 단계는 AOSP uint32 stack-map 계약을 유지하는
+  bounded placement 재시도/실패 처리를 구현하는 것이다.
