@@ -8861,3 +8861,6 @@ incomplete and still requires managed caller unwind validation.
 - Checkpoint 788 (2026-09-10): Fresh corpus advanced through
   `103-string-append`, reaching 118 completed tests with zero failures. The
   four-worker process remains live and the isolated ledger is authoritative.
+- Checkpoint 789 (2026-09-10): Fresh corpus advanced through
+  `120-hashcode`, reaching 133 completed tests with zero failures. Four workers
+  remain active; aggregate completion is still pending.
