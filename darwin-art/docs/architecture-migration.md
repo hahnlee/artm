@@ -14380,3 +14380,9 @@ or admission exception was added.
   APK의 실제 ViewRoot 경로에서 RenderThread 및 hwuiTask0/1 소유 attach,
   task detach `result=0`, `async-workers-joined` 이전 detach, 이후 VM teardown을
   확인했다. Chrome production `_exit` 경로 acceptance도 별도로 PASS했다.
+
+- Checkpoint 1006 (2026-09-11): 새 단일 owner artifact에서 Calculator/DeskClock,
+  Calendar/Chrome 메뉴, Chrome tab/grid 및 Blue Archive 원본 split acceptance를
+  재검증했다. 실제 Calculator embedded shutdown은 HWUI task detach 성공과
+  `async-workers-joined` 선행을 유지했고, JIT ledger도 rc=0으로 통과했다.
+  full Chromium HTTPS gate만 macOS CA trust prerequisite로 남아 있다.

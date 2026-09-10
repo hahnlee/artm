@@ -9949,3 +9949,9 @@ incomplete and still requires managed caller unwind validation.
   `fake-symbols=0`으로 PASS했다. 실제 Calculator APK embedded shutdown에서
   hwuiTask0/1 attach(tls=0) 후 `detach result=0`이 `async-workers-joined`보다
   먼저 발생했고, 이후 libcore/ELF/VM teardown 순서도 PASS했다.
+
+- Checkpoint 1006 (2026-09-11): 단일 HWUI owner 구조에서 AOSP core-apps,
+  window-menu, Chrome lifecycle/tab-grid, Blue Archive 원본 split 실행을
+  재검증했다. ART JIT 전체 ledger도 `audit-art-jit.sh` rc=0으로 통과했고,
+  shutdown 단계 순서가 유지됐다. 최종 graphics dylib SHA-256은
+  `fe431b7031747d97bb9a205fd375e05b4b8f391b14fa0b9bc9911cac3566f7da`다.
