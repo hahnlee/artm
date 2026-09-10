@@ -9024,3 +9024,6 @@ incomplete and still requires managed caller unwind validation.
 - Checkpoint 842 (2026-09-10): The post-fix four-worker aggregate reached 258
   completed tests. No additional failures have appeared; the two existing
   SIGILL rows remain under investigation.
+- Checkpoint 843 (2026-09-10): The post-fix four-worker aggregate reached 271
+  completed tests. No additional failures have appeared; the two existing
+  SIGILL rows remain under investigation.
