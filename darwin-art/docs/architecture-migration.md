@@ -13780,3 +13780,8 @@ or admission exception was added.
 - Checkpoint 898 (2026-09-10): The full worker advanced to 337 completed tests
   (336 PASS). No new failure or timeout appeared; the known `099-vmdebug`
   calibration timeout remains the only non-pass ledger entry.
+- Checkpoint 899 (2026-09-10): The live full-corpus worker advanced to 424
+  completed tests (421 PASS). Three timeout records are present: the known
+  `099-vmdebug` calibration case plus `2041-bad-cleaner` and
+  `2048-bad-native-registry`, both pending isolated reruns with a longer
+  timeout; no hard failures have been recorded.
