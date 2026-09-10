@@ -13576,3 +13576,12 @@ or admission exception was added.
   address; this rules out a simple PAC accessor mismatch and narrows the
   defect to JIT indirect-branch or compiled-frame/entrypoint ABI corruption.
   The full corpus remains 1,074/1,076 and the concurrency defect is open.
+- Checkpoint 862 (2026-09-10): Repeated the eight-way stress with
+  `DARWIN_ART_DEBUG_JIT=1`; three of eight processes failed. Failure traces
+  consistently show x8/fault-address corruption to instruction bytes
+  (`0xd65f03c09100c3ff`, the little-endian encoding of an AArch64 epilogue),
+  while the interrupted LR is a valid mapped code address. JIT publication
+  itself remains ordered and completes tens of thousands of entries before
+  failure; this points beyond registry slot publication to an AOT/JIT
+  indirect-call target or managed-pointer/frame ABI defect under concurrent
+  suspend, still unresolved.
