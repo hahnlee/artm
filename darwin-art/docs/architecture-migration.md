@@ -13825,3 +13825,10 @@ or admission exception was added.
   optimized lanes when run independently with sufficient time. No corpus
   hard failures remain; real-app/Blue Archive acceptance and the complete
   feature audit are still open requirements.
+- Checkpoint 910 (2026-09-10): Re-ran the unchanged installed Chromium APK
+  through `chromium-tab-graphics-acceptance.sh` with unrestricted/default JIT.
+  The run still aborts after the GPU/tab interaction path with an unresolved
+  native `SIGSEGV` at `addr=0x110`; fault-map capture identifies the host
+  translated image range but not a published ART JIT range. This is a real-app
+  compatibility failure, not a corpus timeout, and remains the next blocking
+  runtime diagnosis before claiming app acceptance.
