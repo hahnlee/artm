@@ -14133,6 +14133,13 @@ or admission exception was added.
   물리 MotionEvent와 11개 composed states로 PASS했으며, 이번 수정은 앱별
   probe가 아닌 공통 Android framework 경로에만 적용됐다.
 
+- Checkpoint 960 (2026-09-10): graphics closure audit에서 발견한 stale host
+  identity를 Astra 검토 후 현재 archive graph로 갱신했다. HWUI/Skia provider
+  정의와 relocatable import identity를 고정하고, host-layoutlib도 ART-runtime과
+  같은 명시적 native-window/HWBuffer seam provider로 최종 링크를 검증한다.
+  `audit-android16-graphics-closure.sh` 양 모드가 archive-members=1970으로
+  PASS해 빌드 산출물 identity와 provider 경계를 다시 일치시켰다.
+
 - Checkpoint 949 (2026-09-10): expected-address hint 실험이 일부 child의
   JIT fallback을 유발해 되돌렸다. graphics bootstrap/link audit는 PASS이며,
   AOSP stack-map 범위를 유지하려면 Darwin reservation 기반 bounded retry가

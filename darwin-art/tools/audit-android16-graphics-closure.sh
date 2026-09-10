@@ -287,7 +287,11 @@ printf '%s\n' 'int main() { return 0; }' > "$main_source"
 # every named executable seam explicitly so any other new import remains an
 # audit failure; never use a broad undefined-symbol allowance here.
 executable_provider_objects=()
-if [[ "$audit_mode" == art-runtime ]]; then
+# Both closure modes consume the same Android native-window/HWBuffer seams.
+# Keep the audit's executable link self-contained so host-layoutlib and the
+# ART runtime validate the identical provider graph rather than relying on
+# whichever external process happened to supply these symbols.
+if [[ "$audit_mode" == art-runtime || "$audit_mode" == host-layoutlib ]]; then
   runtime_surface_provider_source="$stage_dir/runtime-surface-provider.cpp"
   runtime_surface_provider_object="$stage_dir/runtime-surface-provider.o"
   printf '%s\n' \

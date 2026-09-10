@@ -9679,6 +9679,14 @@ incomplete and still requires managed caller unwind validation.
   `target-states=11`, GLES/ANGLE/Graphite/Dawn/MoltenVK/AHB/SurfaceFlinger/Metal,
   exit=0으로 PASS했다.
 
+- Checkpoint 960 (2026-09-10): Astra 리뷰로 graphics closure lock의 stale
+  host baseline을 판별했다. 현재 tracked HWUI/Skia archive graph의 provider
+  identity를 `48829 / 326c9629...a92a2968`, relocatable undefined를
+  `770 / 13f8ee62...e8390`으로 재생성하고, host와 ART-runtime 모두 동일한
+  Android native-window/HWBuffer seam provider를 executable audit에 공급했다.
+  두 모드의 relocatable 및 final executable closure audit가 archive-members
+  `1970`으로 PASS했다.
+
 - Checkpoint 949 (2026-09-10): expected-address hint 실험이 일부 child의
   JIT fallback을 유발해 되돌렸다. graphics bootstrap/link audit는 PASS이며,
   reservation 기반 bounded retry 없이는 JIT 주소 배치를 완료로 간주하지 않는다.
