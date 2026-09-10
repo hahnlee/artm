@@ -27,6 +27,8 @@
 #include <new>
 #include <unordered_map>
 #include <vector>
+#include <signal.h>
+#include <unistd.h>
 
 #include <android/surface_control.h>
 #include <android/hardware_buffer.h>
@@ -2395,6 +2397,16 @@ extern "C" JNIEXPORT void Java_android_os_Process_setThreadPriority__II(
 extern "C" JNIEXPORT jint Java_android_os_Process_getThreadPriority(
     JNIEnv*, jclass, jint) {
   return 0;
+}
+extern "C" JNIEXPORT void Java_android_os_Process_sendSignal(
+    JNIEnv*, jclass, jint pid, jint signal) {
+  if (pid > 0) {
+    (void)::kill(static_cast<pid_t>(pid), signal);
+  }
+}
+extern "C" JNIEXPORT void Java_android_os_Process_sendSignal__II(
+    JNIEnv* env, jclass clazz, jint pid, jint signal) {
+  Java_android_os_Process_sendSignal(env, clazz, pid, signal);
 }
 extern "C" JNIEXPORT jlong Java_android_os_Process_getElapsedCpuTime(
     JNIEnv* env, jclass clazz) {

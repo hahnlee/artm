@@ -1,0 +1,13 @@
+diff --git a/platform/host/thread/CommonPoolBase.h b/platform/host/thread/CommonPoolBase.h
+--- a/platform/host/thread/CommonPoolBase.h
++++ b/platform/host/thread/CommonPoolBase.h
+@@ -39,9 +39,11 @@ protected:
+             tidConditionVars[i].notify_one();
+         }
++#if !defined(__APPLE__)
+         auto startHook = renderthread::RenderThread::getOnStartHook();
+         if (startHook) {
+             startHook(name.data());
+         }
++#endif
+     }

@@ -9,7 +9,7 @@ diff --git a/runtime/runtime_common.cc b/runtime/runtime_common.cc
  
  #if defined(__APPLE__) && defined(__aarch64__)
  #include <mach/arm/thread_status.h>
-@@ -485,6 +486,39 @@ void HandleUnexpectedSignalCommon(int signal_number,
+@@ -485,6 +486,42 @@ void HandleUnexpectedSignalCommon(int signal_number,
                                    void* raw_context,
                                    bool handle_timeout_signal,
                                    bool dump_on_stderr) {
@@ -17,6 +17,8 @@ diff --git a/runtime/runtime_common.cc b/runtime/runtime_common.cc
 +  // Several mutators can fault together under ThreadStress. Emit the first
 +  // useful coordinate with async-signal-safe write() before taking ART locks
 +  // or constructing C++ streams, so a second fault cannot hide the first one.
++  ucontext_t* darwin_ucontext = reinterpret_cast<ucontext_t*>(raw_context);
++  if (darwin_ucontext != nullptr && darwin_ucontext->uc_mcontext != nullptr && info != nullptr) {
 +  char line[256];
 +  size_t used = 0u;
 +  constexpr char prefix[] = "ART unexpected signal ";
@@ -45,6 +47,7 @@ diff --git a/runtime/runtime_common.cc b/runtime/runtime_common.cc
 +  line[used++] = '\n';
 +  ssize_t ignored = write(STDERR_FILENO, line, used);
 +  (void)ignored;
++  }
 +#endif
    bool runtime_abort = gIsRuntimeAbort.exchange(false);
    if (runtime_abort) {

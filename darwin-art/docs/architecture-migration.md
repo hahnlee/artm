@@ -13840,3 +13840,11 @@ or admission exception was added.
   /second-fault handling bug masking the original native producer. The
   Chromium acceptance remains failing and requires preserving/validating the
   original Darwin ucontext before ART's fatal path.
+- Checkpoint 912 (2026-09-10): Chromium rerun after guarding invalid Darwin
+  signal contexts exposed and removed the previous `hwuiTask0/1` ART abort
+  path. HWUI CommonPool no longer attaches host-only worker threads on Darwin,
+  matching the host thread contract and avoiding missing detach at exit. The
+  next real-app failure is now a concrete missing framework JNI symbol,
+  `android.os.Process.sendSignal(int,int)`, while starting Chromium's
+  sandboxed child service; a kill-based Darwin implementation was added for
+  the next rebuild. Graphics closure audit remains passing.
