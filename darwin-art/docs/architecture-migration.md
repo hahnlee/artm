@@ -13895,3 +13895,8 @@ or admission exception was added.
   패치를 lock manifest에 SHA-256으로 고정하고 object-audit에서 patch 적용,
   registrar=51, archive-members=62를 재검증했다. graphics script가 이제
   패치 identity를 검증한 뒤에만 산출물을 materialize한다.
+- Checkpoint 921 (2026-09-10): `CurrentArtEnv`가 `Thread::Current()==nullptr`에서
+  즉시 실패하던 순서를 수정했다. 이제 VM/GetEnv를 먼저 조회하고
+  `JNI_EDETACHED`인 callback 경계에서만 daemon attach하며 TLS lease가
+  소유한 경우에만 종료 시 detach한다. 비-detached GetEnv 오류는 그대로
+  거부한다.

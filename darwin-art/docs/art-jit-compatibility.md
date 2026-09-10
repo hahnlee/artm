@@ -9421,3 +9421,7 @@ incomplete and still requires managed caller unwind validation.
   bootstrap을 성공적으로 재생성했다. `ThreadExitCallback` 전역 우회는
   제거된 상태이며, Chromium worker별 attach 성공·소유권·detach 순서를
   다음 검증 대상으로 고정한다.
+- Checkpoint 921 (2026-09-10): `CurrentArtEnv`의 detached-thread 경로를
+  실제로 도달 가능하게 고쳤다. `JNI_EDETACHED`만 명시적으로 attach하고
+  TLS ownership lease가 새 attachment만 detach하도록 하여 JNI 조회 계약과
+  소유권을 분리했다.

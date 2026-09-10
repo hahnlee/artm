@@ -23,20 +23,26 @@ thread_local LazyAttachment g_lazy_attachment;
 }  // namespace
 
 JNIEnv* CurrentArtEnv() {
-  art::Thread* self = art::Thread::Current();
-  if (self == nullptr) return nullptr;
-  JNIEnv* env = static_cast<JNIEnv*>(self->GetJniEnv());
-  if (env != nullptr) return env;
-  // Native Chromium worker entry points can reach the JNI proxy before their
-  // Android pthread wrapper runs. Attach them lazily to the same ART VM, then
-  // let ART's thread lifecycle own the resulting JNIEnv.
   art::Runtime* runtime = art::Runtime::Current();
   if (runtime == nullptr || runtime->GetJavaVM() == nullptr) return nullptr;
+  art::JavaVMExt* vm = runtime->GetJavaVM();
+  art::Thread* self = art::Thread::Current();
+  if (self != nullptr) {
+    JNIEnv* env = static_cast<JNIEnv*>(self->GetJniEnv());
+    if (env != nullptr) return env;
+  }
+  // Native Chromium worker entry points can reach the JNI proxy before their
+  // Android pthread wrapper runs. Preserve GetEnv's JNI_EDETACHED contract,
+  // then attach only at this callback boundary and record that ownership in
+  // the TLS lease above.
+  JNIEnv* existing = nullptr;
+  const jint state = vm->GetEnv(reinterpret_cast<void**>(&existing), JNI_VERSION_1_6);
+  if (state != JNI_EDETACHED) return state == JNI_OK ? existing : nullptr;
   JNIEnv* attached = nullptr;
-  if (runtime->GetJavaVM()->AttachCurrentThreadAsDaemon(&attached, nullptr) != JNI_OK) {
+  if (vm->AttachCurrentThreadAsDaemon(&attached, nullptr) != JNI_OK) {
     return nullptr;
   }
-  g_lazy_attachment.vm = runtime->GetJavaVM();
+  g_lazy_attachment.vm = vm;
   return attached;
 }
 
