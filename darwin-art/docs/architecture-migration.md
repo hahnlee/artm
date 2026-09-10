@@ -14074,6 +14074,11 @@ or admission exception was added.
   확인했고 SIGABRT는 사라졌다. 일부 child의 MAP_JIT expected-address
   거부와 JIT fallback은 후속 bounded retry 과제로 남아 있다.
 
+- Checkpoint 950 (2026-09-10): Darwin MAP_JIT와 metadata를 연속 reservation
+  으로 분할 매핑해 code-relative uint32 범위를 보장했다. 전체 JIT audit와
+  Chromium 다중 child window-menu acceptance가 PASS했으며, expected-address
+  거부/fallback 및 teardown SIGABRT가 재현되지 않았다.
+
 - Checkpoint 949 (2026-09-10): expected-address hint 실험이 일부 child의
   JIT fallback을 유발해 되돌렸다. graphics bootstrap/link audit는 PASS이며,
   AOSP stack-map 범위를 유지하려면 Darwin reservation 기반 bounded retry가

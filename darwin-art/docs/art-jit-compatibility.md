@@ -9612,6 +9612,12 @@ incomplete and still requires managed caller unwind validation.
   입력을 PASS했고 SIGABRT는 재현되지 않았다. 다만 일부 child는 expected
   MAP_JIT 주소 거부로 JIT fallback이 남아 있어 JIT 활성화는 미완료다.
 
+- Checkpoint 950 (2026-09-10): Darwin JIT data/code를 하나의 PROT_NONE
+  reservation에서 분할해 AOSP의 uint32 stack-map 상대주소 계약을 유지했다.
+  전체 JIT audit가 PASS했고, Chromium 다중 child window-menu acceptance에서
+  JIT code-cache fallback·stack-map abort 없이 popup/`new_tab_menu_id` 경로와
+  SIGABRT gate를 통과했다.
+
 - Checkpoint 949 (2026-09-10): expected-address hint 실험이 일부 child의
   JIT fallback을 유발해 되돌렸다. graphics bootstrap/link audit는 PASS이며,
   reservation 기반 bounded retry 없이는 JIT 주소 배치를 완료로 간주하지 않는다.

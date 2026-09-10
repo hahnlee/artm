@@ -94,10 +94,11 @@ diff --git a/runtime/jit/jit_memory_region.cc b/runtime/jit/jit_memory_region.cc
  using android::base::unique_fd;
  
  namespace art HIDDEN {
-@@ -72,6 +77,55 @@
+@@ -72,6 +77,65 @@
    MemMap non_exec_pages;
    MemMap writable_data_pages;
  
++  MemMap darwin_reservation;
 +  // Map name specific for android_os_Debug.cpp accounting.
 +  std::string data_cache_name = is_zygote ? "zygote-data-code-cache" : "data-code-cache";
 +  std::string exec_cache_name = is_zygote ? "zygote-jit-code-cache" : "jit-code-cache";
@@ -119,24 +120,33 @@ diff --git a/runtime/jit/jit_memory_region.cc b/runtime/jit/jit_memory_region.cc
 +    if (is_zygote) {
 +      current_capacity_ = max_capacity;
 +    }
-+    // Allocate data first. Darwin may ignore hints below an existing code
-+    // map; validate the actual ordering instead of replacing any mapping.
-+    data_pages = MemMap::MapAnonymous(data_cache_name.c_str(), nullptr,
++    const size_t reservation_capacity = data_capacity + exec_capacity;
++    darwin_reservation = MemMap::MapAnonymous("darwin-jit-reservation", nullptr,
++                                              reservation_capacity, PROT_NONE,
++                                              false, false, nullptr, &error_str);
++    if (!darwin_reservation.IsValid()) {
++      *error_msg = "Failed to reserve Darwin JIT data/code range: " + error_str;
++      return false;
++    }
++    data_pages = MemMap::MapAnonymous(data_cache_name.c_str(), darwin_reservation.Begin(),
 +                                      data_capacity, kProtRW, false, false,
-+                                      nullptr, &error_str);
++                                      &darwin_reservation, &error_str);
 +    if (!data_pages.IsValid()) {
-+      *error_msg = "Failed to create Darwin JIT data cache: " + error_str;
++      *error_msg = "Failed to map Darwin JIT data cache: " + error_str;
 +      return false;
 +    }
 +    std::string name = exec_cache_name + "-rwx";
-+    exec_pages = MemMap::MapFile(exec_capacity,
++    exec_pages = MemMap::MapFileAtAddress(data_pages.End(),
++                                          exec_capacity,
 +                                 kProtRWX,
 +                                 MAP_PRIVATE | MAP_ANON | MAP_JIT,
 +                                 -1,
 +                                 /* start= */ 0,
 +                                 /* low_4gb= */ false,
-+                                 name.c_str(),
-+                                 &error_str);
++                                          name.c_str(),
++                                          /* reuse= */ false,
++                                          &darwin_reservation,
++                                          &error_str);
 +    if (!exec_pages.IsValid()) {
 +      *error_msg = "Failed to create Darwin MAP_JIT code cache: " + error_str;
 +      return false;
