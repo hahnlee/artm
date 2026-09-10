@@ -14274,3 +14274,8 @@ or admission exception was added.
   재검증해 fixture APK의 real-binary manifest, multidex, native-so, JNI launcher
   계약을 모두 PASS했다. support DEX identity는 `classes=48 methods=482`로
   유지된다.
+
+- Checkpoint 988 (2026-09-10): runtime link identity를 재검증해 C ABI dylib
+  closure `undefined=0 exports=15`를 PASS했다. Rust lifecycle/JNI ownership 및
+  shutdown 테스트, JIT 기능별 ledger, native graph, 변경 없는 핵심 APK와
+  window-menu acceptance가 같은 artifact 계열에서 모두 통과했다.

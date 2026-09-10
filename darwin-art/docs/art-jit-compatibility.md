@@ -9838,3 +9838,8 @@ incomplete and still requires managed caller unwind validation.
 - Checkpoint 987 (2026-09-10): 최신 graphics/surface 변경 후 APK runtime fixture
   audit를 재실행했다. native/multidex/JNI manifest 계약과 변경 없는 APK 검사 모두
   PASS했으며, DEX contract는 `version=35 classes=48 methods=482`로 고정됐다.
+
+- Checkpoint 988 (2026-09-10): runtime link audit를 최신 graphics/surface
+  artifact에서 재실행해 C ABI dylib closure `undefined=0 exports=15`를
+  확인했다. lifecycle/JNI ownership 28개 테스트, JIT 전체 audit, native graph,
+  core/window APK acceptance 결과도 모두 PASS 상태로 유지된다.
