@@ -13499,3 +13499,7 @@ or admission exception was added.
 - Checkpoint 838 (2026-09-10): Post-fix final corpus reached 203 completed
   tests; two SIGILL failures are recorded (`127-checker-secondarydex` and
   `149-suspend-all-stress`), so concurrency safety remains unresolved.
+- Checkpoint 839 (2026-09-10): Isolated post-fix reruns of both recorded
+  failures passed (`127-checker-secondarydex`, `149-suspend-all-stress`). The
+  full four-worker rerun remains active at 221 completed tests; historical
+  failures remain unresolved until the aggregate run finishes cleanly.
