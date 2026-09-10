@@ -13788,3 +13788,6 @@ or admission exception was added.
 - Checkpoint 900 (2026-09-10): The worker reached 606 completed tests
   (603 PASS), with no hard failures. The same three timeout records remain
   pending isolated longer-timeout reruns while the corpus continues.
+- Checkpoint 901 (2026-09-10): Corpus discovery confirms 1,076 pinned AOSP
+  tests. The live worker reached 662 completed (659 PASS), with no hard
+  failures; the three timeout records remain under investigation.
