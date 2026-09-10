@@ -9748,3 +9748,8 @@ incomplete and still requires managed caller unwind validation.
   blind fallback 없이 `no fitting Darwin JIT metadata gap`으로 명확히 실패하며,
   data-before-code/uint32 제약 하 적합 gap 부재를 확인했다. 다음은
   `mach_vm_region_recurse`로 submap까지 탐색하는 단계다.
+
+- Checkpoint 972 (2026-09-10): submap을 free hole로 오인하지 않고 top-level
+  `mach_vm_region`만 사용하도록 유지했다. 최신 audit은 `no fitting Darwin JIT
+  metadata gap`을 재현했으며, 다음은 metadata-first allocation smoke를 별도로
+  검증해 실행 영역 배치 정책을 바꾸는 단계다.

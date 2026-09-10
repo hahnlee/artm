@@ -14194,3 +14194,7 @@ or admission exception was added.
 - Checkpoint 971 (2026-09-10): runtime/link 재생성 후 JIT audit이 새 free-gap 경로를
   사용함을 확인했다. 후보 부재를 명시적 오류로 보존하며, 다음은 Mach submap 재귀
   조회로 fragmented VM 공간을 완전히 열거하는 것이다.
+
+- Checkpoint 972 (2026-09-10): Astra 검토에 따라 submap 내부 hole을 allocator gap으로
+  사용하지 않는다. 현재 실패는 선택된 exec 위치에 연속 metadata gap이 없는 정상
+  결과이며, 다음은 metadata-first 후 MAP_JIT hint 전략을 독립 smoke로 검증한다.
