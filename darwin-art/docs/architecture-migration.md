@@ -13503,3 +13503,6 @@ or admission exception was added.
   failures passed (`127-checker-secondarydex`, `149-suspend-all-stress`). The
   full four-worker rerun remains active at 221 completed tests; historical
   failures remain unresolved until the aggregate run finishes cleanly.
+- Checkpoint 840 (2026-09-10): The post-fix four-worker aggregate reached 235
+  completed tests. The two historical SIGILL rows remain the only failures;
+  no new failures have appeared.
