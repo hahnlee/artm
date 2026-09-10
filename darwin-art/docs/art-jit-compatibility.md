@@ -9774,3 +9774,10 @@ incomplete and still requires managed caller unwind validation.
   앵커링했다. canonical ICU builder cache-hit 및 ICU smoke 후 전체 audit이
   ICU=458, runtime=258, GraphicsJNI=63, cached-tu=809로 PASS했으며 warm
   no-op·depfile·직접 source invalidation도 통과했다.
+
+- Checkpoint 977 (2026-09-10): `RuntimeLifecycle`의 네 native callback이
+  상태 참조 전에 immutable owner-thread 식별자를 확인하도록 강화했다.
+  foreign begin/finish/shutdown/mark-failed 호출은 상태를 변경하지 않고
+  거부하며 owner 호출만 phase/failure를 변경한다. runtime 28, engine-sys 7,
+  host 10개 테스트와 변경 없는 AOSP Calculator `2+3=5` 및 DeskClock Timer
+  실제 입력·HWUI SurfaceTransaction acceptance가 모두 PASS했다.

@@ -214,7 +214,27 @@ impl RuntimeLifecycle {
     }
 }
 
+/// Check callback affinity without first materializing a mutable Rust
+/// reference from an untrusted C context.  This is deliberately the first
+/// operation in every native callback: a foreign thread must be rejected
+/// before it can alias the owner-thread state through `&mut RuntimeLifecycle`.
+unsafe fn native_owner_matches(context: *mut c_void) -> bool {
+    if context.is_null() {
+        return false;
+    }
+    // SAFETY: the native ABI keeps the lifecycle context alive until all
+    // callbacks have returned. `owner` is initialized once and never mutated;
+    // read its Copy value directly without creating an aliasing reference to
+    // the mutable lifecycle state.
+    let owner = unsafe { core::ptr::addr_of!((*context.cast::<RuntimeLifecycle>()).owner).read() };
+    owner == thread::current().id()
+}
+
 unsafe extern "C" fn native_begin_run(context: *mut c_void) -> i32 {
+    // SAFETY: affinity is checked before creating any Rust reference.
+    if !unsafe { native_owner_matches(context) } {
+        return RuntimeError::WrongOwnerThread.status() as i32;
+    }
     let lifecycle = unsafe { &mut *context.cast::<RuntimeLifecycle>() };
     if let Err(error) = lifecycle.assert_owner() {
         return error.status() as i32;
@@ -230,6 +250,10 @@ unsafe extern "C" fn native_begin_run(context: *mut c_void) -> i32 {
 }
 
 unsafe extern "C" fn native_finish_run(context: *mut c_void, runtime_created: i32) -> i32 {
+    // SAFETY: affinity is checked before creating any Rust reference.
+    if !unsafe { native_owner_matches(context) } {
+        return RuntimeError::WrongOwnerThread.status() as i32;
+    }
     let lifecycle = unsafe { &mut *context.cast::<RuntimeLifecycle>() };
     if runtime_created == 0 {
         lifecycle.fail(RuntimeError::EngineFailure { status: 1 });
@@ -242,6 +266,10 @@ unsafe extern "C" fn native_finish_run(context: *mut c_void, runtime_created: i3
 }
 
 unsafe extern "C" fn native_begin_shutdown(context: *mut c_void) -> i32 {
+    // SAFETY: affinity is checked before creating any Rust reference.
+    if !unsafe { native_owner_matches(context) } {
+        return RuntimeError::WrongOwnerThread.status() as i32;
+    }
     let lifecycle = unsafe { &mut *context.cast::<RuntimeLifecycle>() };
     if lifecycle.phase() == RuntimePhase::ShuttingDown {
         return 0;
@@ -253,6 +281,13 @@ unsafe extern "C" fn native_begin_shutdown(context: *mut c_void) -> i32 {
 }
 
 unsafe extern "C" fn native_mark_failed(context: *mut c_void, status: i32) {
+    // The ABI callback has no status return. A failure reported from a
+    // foreign thread is therefore ignored rather than racing the owner state;
+    // the native side must marshal it to the owner before retrying.
+    // SAFETY: affinity is checked before creating any Rust reference.
+    if !unsafe { native_owner_matches(context) } {
+        return;
+    }
     let lifecycle = unsafe { &mut *context.cast::<RuntimeLifecycle>() };
     lifecycle.fail(RuntimeError::EngineFailure { status });
 }
@@ -326,6 +361,67 @@ mod tests {
             (hooks.mark_failed.unwrap())(hooks.context, 70);
         }
         assert_eq!(lifecycle.phase(), RuntimePhase::Failed);
+    }
+
+    #[test]
+    fn native_hooks_reject_every_foreign_thread_before_mutation() {
+        let mut lifecycle = RuntimeLifecycle::new();
+        lifecycle.start().unwrap();
+        let hooks = lifecycle.native_hooks();
+        let context = hooks.context as usize;
+        let begin_run = hooks.begin_run.unwrap();
+        let finish_run = hooks.finish_run.unwrap();
+        let begin_shutdown = hooks.begin_shutdown.unwrap();
+        let mark_failed = hooks.mark_failed.unwrap();
+        let foreign = std::thread::spawn(move || {
+            // Raw callback contexts are intentionally passed as an integer so
+            // the test does not make the non-Send lifecycle cross the Rust
+            // thread boundary; the C ABI is the boundary under test.
+            let context = context as *mut c_void;
+            unsafe {
+                (
+                    begin_run(context),
+                    finish_run(context, 1),
+                    begin_shutdown(context),
+                    mark_failed(context, 70),
+                )
+            }
+        });
+        assert_eq!(
+            foreign.join().unwrap(),
+            (
+                RuntimeError::WrongOwnerThread.status() as i32,
+                RuntimeError::WrongOwnerThread.status() as i32,
+                RuntimeError::WrongOwnerThread.status() as i32,
+                (),
+            )
+        );
+        assert_eq!(lifecycle.phase(), RuntimePhase::Bootstrapping);
+        assert_eq!(lifecycle.failure(), None);
+
+        // The owner still has the sole right to advance and fail the phase.
+        unsafe {
+            assert_eq!(finish_run(hooks.context, 1), 0);
+            mark_failed(hooks.context, 70);
+        }
+        assert_eq!(lifecycle.phase(), RuntimePhase::Failed);
+        assert_eq!(
+            lifecycle.failure(),
+            Some(RuntimeError::EngineFailure { status: 70 })
+        );
+
+        let mut shutting_down = RuntimeLifecycle::new();
+        shutting_down.start().unwrap();
+        shutting_down.begin_shutdown().unwrap();
+        let shutdown_hooks = shutting_down.native_hooks();
+        let context = shutdown_hooks.context as usize;
+        let begin_shutdown = shutdown_hooks.begin_shutdown.unwrap();
+        let foreign = std::thread::spawn(move || unsafe { begin_shutdown(context as *mut c_void) });
+        assert_eq!(
+            foreign.join().unwrap(),
+            RuntimeError::WrongOwnerThread.status() as i32
+        );
+        assert_eq!(shutting_down.phase(), RuntimePhase::ShuttingDown);
     }
 
     #[test]

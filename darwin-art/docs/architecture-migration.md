@@ -14215,3 +14215,9 @@ or admission exception was added.
   정규식 false negative를 수정했다. `native_cached_cpp(_(legacy|promoted))?`
   와 `build`/`.o:` 앵커를 사용해 실제 edge만 집계하며, 전체 graph audit에서
   ICU 458, runtime 258, GraphicsJNI 63, 총 809 TU와 warm/no-op 검증이 PASS했다.
+
+- Checkpoint 977 (2026-09-10): native lifecycle callback 전부에 owner-thread
+  admission gate를 통일했다. `finish_run(0)`, 이미 ShuttingDown인
+  `begin_shutdown`, `mark_failed`의 foreign 호출도 Rust 상태를 건드리지
+  않으며 owner만 변경할 수 있다. 관련 Rust/FFI 테스트와 AOSP Calculator/
+  DeskClock 실제 APK acceptance가 PASS했다.
