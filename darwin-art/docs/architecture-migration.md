@@ -13323,3 +13323,9 @@ or admission exception was added.
   Their PCs fall inside quick-code pages but outside the compact ranges
   published from `OatQuickMethodHeader`, so the next implementation step is
   per-method code-page/range publication rather than an interpreter fallback.
+- Checkpoint 783 (2026-09-10): A page-tail registry change was committed as
+  `06fd1d6` and forced through the incremental graph, but runtime diagnostics
+  still report the old compact `end` values. This proves the active graphics
+  artifact is not consuming `compat/darwin_jit_memory.cc` directly; range
+  publication must therefore be fixed at the ART patch call sites/archive
+  input boundary before trusting any registry-only change.
