@@ -14001,3 +14001,10 @@ or admission exception was added.
   및 PT_LOAD bounds로 검증해 허용했다. 변경 없는 Blue Archive의
   `libil2cpp.so`가 namespace에 게시·로드되었으며, 다음 blocker는 로드
   직후 발생한 Unity native null dereference다.
+
+- Checkpoint 937 (2026-09-10): JNI reference table을 추가하지 않고
+  AOSP ABI 경계인 regular JNI thunk를 수정했다. unwind push/pop은
+  caller-saved GP/FP 인자를 보존하고 native 반환값을 복구하며, 이로써
+  Unity receiver 오염을 제거했다. 변경 없는 Blue Archive 최신 실행은
+  libmain/libil2cpp 로드 및 전체 Unity RegisterNatives 후 3초 동안
+  SIGSEGV/SIGABRT 없이 종료했다.

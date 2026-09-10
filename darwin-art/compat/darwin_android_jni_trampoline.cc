@@ -55,6 +55,10 @@ struct ShortyPlan {
   size_t android_stack_size = 0;
 };
 
+// Private area after the Android stack tail. The unwind callback is ordinary
+// C code and may clobber caller-saved argument registers.
+constexpr size_t kJniThunkScratchBytes = 224;
+
 // Android libraries commonly register one native table per Java class. Keep
 // the executable-range registry proportional to the loaded app instead of
 // imposing an artificial per-process class limit.
@@ -150,7 +154,8 @@ bool PlanShorty(const char* shorty, ShortyPlan* plan, std::string* error) {
   // Preserve the historical 16-byte frame for register-only calls.  ART's
   // unwind bridge observes that frame even though no guest stack arguments
   // exist; only calls with a real Android stack tail need extra scratch.
-  plan->android_stack_size = guest_stack_size + (android_offset == 0 ? 0 : 16);
+  plan->android_stack_size =
+      guest_stack_size + (android_offset == 0 ? 0 : 16) + kJniThunkScratchBytes;
   return true;
 }
 
@@ -201,6 +206,20 @@ uint32_t EncodeStore(uint32_t target_register,
       return EncodeUnsignedLoadStore(0xf9000000u, target_register, base_register,
                                      byte_offset, 8);
   }
+}
+
+uint32_t EncodeVectorStore(uint32_t vector_register, uint32_t base_register,
+                           size_t byte_offset) {
+  return 0x3d800000u |
+         (static_cast<uint32_t>(byte_offset / 16u) << 10) |
+         (base_register << 5) | vector_register;
+}
+
+uint32_t EncodeVectorLoad(uint32_t vector_register, uint32_t base_register,
+                          size_t byte_offset) {
+  return 0x3dc00000u |
+         (static_cast<uint32_t>(byte_offset / 16u) << 10) |
+         (base_register << 5) | vector_register;
 }
 
 uint32_t EncodeSubSp(size_t byte_count) {
@@ -328,7 +347,7 @@ TrampolineSet* CreateRegularTrampolines(void* proxy_jni_env,
       generated[position->second].mask |= requests[index].entry_mask;
       continue;
     }
-    const size_t instruction_count = 19u + plans[index].moves.size() * 2u;
+    const size_t instruction_count = 51u + plans[index].moves.size() * 2u;
     const size_t thunk_size = instruction_count * kInstructionSize +
                               4u * kLiteralSize;
     generated_size = RoundUp(generated_size, 16);
@@ -370,8 +389,7 @@ TrampolineSet* CreateRegularTrampolines(void* proxy_jni_env,
     const GeneratedThunk& thunk = generated[index];
     const size_t source_request = thunk.source_request;
     const ShortyPlan& plan = plans[source_request];
-    const size_t scratch_offset =
-        plan.android_stack_size == 16 ? 0 : plan.android_stack_size - 16;
+    const size_t scratch_offset = plan.android_stack_size - kJniThunkScratchBytes;
     size_t cursor = thunk.offset;
     Write32(bytes, cursor, 0xa9bf7bfdu);  // stp x29, x30, [sp, #-16]!
     cursor += 4;
@@ -397,18 +415,32 @@ TrampolineSet* CreateRegularTrampolines(void* proxy_jni_env,
     // pass through ART's quick JNI entrypoints. Publish the same managed frame
     // contract around the guest call so a concurrent remote unwind can cross
     // this host-only ABI boundary.
-    Write32(bytes, cursor,
-            EncodeStore(0, kSp, scratch_offset, 8));  // str x0, scratch
-    cursor += 4;
+    for (uint32_t reg = 0; reg < 8; ++reg) {
+      Write32(bytes, cursor,
+              EncodeVectorStore(reg, kSp, scratch_offset + reg * 16u));
+      cursor += 4;
+    }
+    for (uint32_t reg = 0; reg < 8; ++reg) {
+      Write32(bytes, cursor,
+              EncodeStore(reg, kSp, scratch_offset + 128u + reg * 8u, 8));
+      cursor += 4;
+    }
     Write32(bytes, cursor, 0xaa1c03e0u);  // mov x0, x28
     cursor += 4;
     Write32(bytes, cursor, EncodeLdrLiteralX(16, cursor, push_literal));
     cursor += 4;
     Write32(bytes, cursor, 0xd63f0200u);  // blr x16
     cursor += 4;
-    Write32(bytes, cursor,
-            EncodeLoad(0, kSp, scratch_offset, 8));  // ldr x0, scratch
-    cursor += 4;
+    for (uint32_t reg = 0; reg < 8; ++reg) {
+      Write32(bytes, cursor,
+              EncodeVectorLoad(reg, kSp, scratch_offset + reg * 16u));
+      cursor += 4;
+    }
+    for (uint32_t reg = 0; reg < 8; ++reg) {
+      Write32(bytes, cursor,
+              EncodeLoad(reg, kSp, scratch_offset + 128u + reg * 8u, 8));
+      cursor += 4;
+    }
     Write32(bytes, cursor, EncodeLdrLiteralX(0, cursor, proxy_literal));
     cursor += 4;
     Write32(bytes, cursor, EncodeLdrLiteralX(16, cursor, target_literal));
@@ -418,12 +450,18 @@ TrampolineSet* CreateRegularTrampolines(void* proxy_jni_env,
     Write32(bytes, cursor,
             EncodeStore(0, kSp, scratch_offset + 8u, 8));  // str x0, scratch+8
     cursor += 4;
+    Write32(bytes, cursor,
+            EncodeVectorStore(0, kSp, scratch_offset + 208u));  // str q0, result
+    cursor += 4;
     Write32(bytes, cursor, EncodeLdrLiteralX(16, cursor, pop_literal));
     cursor += 4;
     Write32(bytes, cursor, 0xd63f0200u);  // blr x16
     cursor += 4;
     Write32(bytes, cursor,
             EncodeLoad(0, kSp, scratch_offset + 8u, 8));  // ldr x0, scratch+8
+    cursor += 4;
+    Write32(bytes, cursor,
+            EncodeVectorLoad(0, kSp, scratch_offset + 208u));  // ldr q0, result
     cursor += 4;
     Write32(bytes, cursor, 0x910003bfu);  // mov sp, x29
     cursor += 4;

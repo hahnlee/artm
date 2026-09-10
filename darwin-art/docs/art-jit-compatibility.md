@@ -9532,3 +9532,11 @@ incomplete and still requires managed caller unwind validation.
   ELF loader를 일반화했다. 새 링크 후 Blue Archive Unity graph가 실제
   로드되었고 `libil2cpp` capability rejection은 사라졌다. 이후 비제로
   PC의 null 참조(SIGSEGV)가 드러나 Astra native mapping을 진행 중이다.
+
+- Checkpoint 937 (2026-09-10): Astra가 후속 Blue Archive SIGSEGV를
+  JNI regular thunk의 unwind push callback이 x1(receiver)를 보존하지
+  않아 `jobject=0x1`로 오염한 ABI 버그로 확정했다. thunk가 x0~x7 및
+  q0~q7을 callback 전후 보존하고 native GP/FP 반환값을 pop callback
+  전후 보존하도록 수정했다. 최신 dylib로 변경 없는 Blue Archive를
+  3초 실행해 309개 Unity JNI 등록과 추가 12개 등록까지 fatal 없이
+  통과했다.
