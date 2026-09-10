@@ -13335,3 +13335,7 @@ or admission exception was added.
   `2045-uffd-kernelfault`; the corpus `--resume` command only replayed its
   prior ledger and did not invalidate those rows. A full fresh corpus run is
   required before updating aggregate counts.
+- Checkpoint 785 (2026-09-10): Fresh corpus run started with isolated ledger
+  `_build/art-upstream-corpus-fresh` after forced graphics relink. It is live
+  with four workers and has completed the first 27 tests without reusing any
+  prior result; aggregate classification remains pending termination.
