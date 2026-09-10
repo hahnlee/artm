@@ -9636,6 +9636,14 @@ incomplete and still requires managed caller unwind validation.
   exit=0이었다. 로그인 이후 전투 화면은 네트워크/GMS 계층 때문에 아직
   미검증이다.
 
+- Checkpoint 954 (2026-09-10): 최종 reservation 기반 JIT 변경과 APK 종료
+  guard 상태를 재확인했다. JIT audit, graphics bootstrap/link audit,
+  Chromium window-menu, Calculator/DeskClock, Calendar acceptance는 PASS
+  증거를 유지한다. Blue Archive 변경 없는 base+arm64 split 실행도 Unity/
+  IL2CPP·24 native libraries·InputChannel·CoreAudio·exit=0을 유지한다.
+  GMS `Stub!` 경고와 로그인/전투 콘텐츠는 아직 미검증이며 다음 acceptance
+  범위로 남긴다.
+
 - Checkpoint 949 (2026-09-10): expected-address hint 실험이 일부 child의
   JIT fallback을 유발해 되돌렸다. graphics bootstrap/link audit는 PASS이며,
   reservation 기반 bounded retry 없이는 JIT 주소 배치를 완료로 간주하지 않는다.

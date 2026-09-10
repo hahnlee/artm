@@ -14096,6 +14096,12 @@ or admission exception was added.
   `Stub!` GMS 경고는 비치명적이지만 로그인/전투 콘텐츠 진입은 아직
   검증하지 못했다.
 
+- Checkpoint 954 (2026-09-10): JIT contiguous reservation과 APK error-path
+  `_exit` teardown을 포함한 현재 아키텍처를 기준선으로 고정했다. 기존
+  Chromium/계산기/시계/캘린더 acceptance와 Blue Archive native startup,
+  input/audio 증거는 유지된다. GMS provider 및 로그인/전투 진입은 호환성
+  계층의 후속 작업으로 명시적으로 남긴다.
+
 - Checkpoint 949 (2026-09-10): expected-address hint 실험이 일부 child의
   JIT fallback을 유발해 되돌렸다. graphics bootstrap/link audit는 PASS이며,
   AOSP stack-map 범위를 유지하려면 Darwin reservation 기반 bounded retry가
