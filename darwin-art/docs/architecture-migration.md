@@ -13361,6 +13361,9 @@ or admission exception was added.
 - Checkpoint 799 (2026-09-10): Fresh corpus advanced through
   `1917-get-stack-frame`, reaching 222 completed tests with zero failures.
   Four workers remain active.
+- Checkpoint 803 (2026-09-10): Fresh corpus advanced through
+  `1933-monitor-current-contended`, reaching 236 completed tests with zero
+  failures. Four workers remain active.
 - Checkpoint 802 (2026-09-10): Fresh corpus advanced through
   `1928-exception-event-exception`, reaching 232 completed tests with zero
   failures. Four workers remain active.
