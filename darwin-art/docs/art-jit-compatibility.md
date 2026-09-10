@@ -9823,3 +9823,9 @@ incomplete and still requires managed caller unwind validation.
   Calendar Day/Week/Month, Chrome New-tab과 Android popup ViewRoot/InputChannel/
   SurfaceFlinger 계약이 모두 PASS했으며, 실행 산출물이 이전 run과 섞이지 않음을
   manifest로 확인했다.
+
+- Checkpoint 985 (2026-09-10): native lifecycle/JNI ownership 회귀를 단독
+  `darwin-art-runtime` 실행으로 재검증했다. 28개 테스트와 doc-tests가
+  `rc=0`으로 PASS했으며, 출력된 foreign acquire/clear panic은 fail-closed
+  panic 복구 테스트의 의도된 로그로 확인했다. 이전 orphan host 관측은 재현되지
+  않아 runtime shutdown 코드는 변경하지 않았다.

@@ -14259,3 +14259,8 @@ or admission exception was added.
 - Checkpoint 984 (2026-09-10): window-menu acceptance를 run별 임시 로그 디렉터리와
   start/end manifest를 사용해 재검증했다. Calculator popup/resize/outside dismiss,
   Calendar spinner, Chrome new-tab 및 SurfaceFlinger popup 계약이 모두 PASS했다.
+
+- Checkpoint 985 (2026-09-10): AOSP lifecycle ownership 및 VM shutdown 관련
+  Rust crate를 단독·출력 보존 실행해 28/28 테스트와 doc-tests PASS를 확인했다.
+  foreign callback panic 출력은 의도된 fail-closed 검증이며, 실제 deadlock이나
+  shutdown 회귀는 재현되지 않았다.
