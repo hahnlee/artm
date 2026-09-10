@@ -14014,3 +14014,8 @@ or admission exception was added.
   24 native libraries resolve, `libmain`/`libil2cpp` namespace 게시,
   RegisterNatives 321건, ARM64/12-core 환경 인식 후 fatal 없이 rc=0이었다.
   현재 남은 범위는 화면 캡처·물리 입력을 포함한 interactive acceptance다.
+
+- Checkpoint 939 (2026-09-10): 변경 없는 Blue Archive를 pointer sequence와
+  함께 5초 실행해 startup/renderer 안정성을 재확인했다. rc=0 및 fatal-free
+  종료였으나 synthetic move count=0으로 기록되어, 게임 내부 hit와 상태
+  변화까지 닫는 interactive input 계측은 다음 작업으로 남겼다.

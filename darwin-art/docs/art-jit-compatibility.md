@@ -9547,3 +9547,9 @@ incomplete and still requires managed caller unwind validation.
   Metal backend가 확인됐고 SIGSEGV/SIGABRT 없이 rc=0으로 종료했다.
   Unity가 ARM64/12 cores/8192 MB 환경을 인식한 로그는
   `/tmp/bluearchive-acceptance-long.log`에 보존했다.
+
+- Checkpoint 939 (2026-09-10): Blue Archive에 pointer sequence를 함께
+  주입해 5초 physical-input harness를 실행했다. Unity 초기화·Metal 및
+  JNI 등록은 유지됐고 fatal 없이 rc=0이었다. 현재 host 로그의 synthetic
+  move count가 0이므로 실제 게임 UI hit/상태변화 증거는 별도 입력 계측이
+  필요하다.
