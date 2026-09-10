@@ -14067,3 +14067,9 @@ or admission exception was added.
   mmap이 거부되어 JIT fallback이 발생했다. 이는 완료가 아니며, 매핑을
   제한된 횟수로 재시도하고 범위 불만족 시 초기화 오류를 반환하는 구조로
   보강해야 한다. teardown SIGABRT 검출도 acceptance gate에 반영했다.
+
+- Checkpoint 948 (2026-09-10): APK process-scoped 오류 종료를 guard에
+  반영해 live Chromium DSO unload/DestroyJavaVM 대신 `_exit(1)`을 사용한다.
+  최신 window-menu acceptance에서 560x1233 popup과 `new_tab_menu_id`를
+  확인했고 SIGABRT는 사라졌다. 일부 child의 MAP_JIT expected-address
+  거부와 JIT fallback은 후속 bounded retry 과제로 남아 있다.

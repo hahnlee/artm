@@ -9605,3 +9605,9 @@ incomplete and still requires managed caller unwind validation.
   비활성화되는 회귀가 확인됐다. acceptance 스크립트는 SIGABRT를 이제
   실패로 판정하며, 다음 단계는 AOSP uint32 stack-map 계약을 유지하는
   bounded placement 재시도/실패 처리를 구현하는 것이다.
+
+- Checkpoint 948 (2026-09-10): APK 오류 경로에서 `RuntimeShutdownGuard`가
+  live DSO/ART teardown을 수행하지 않고 `_exit(1)`로 끝나도록 정책을
+  통일했다. Chrome window-menu acceptance는 실제 popup과 `new_tab_menu_id`
+  입력을 PASS했고 SIGABRT는 재현되지 않았다. 다만 일부 child는 expected
+  MAP_JIT 주소 거부로 JIT fallback이 남아 있어 JIT 활성화는 미완료다.
