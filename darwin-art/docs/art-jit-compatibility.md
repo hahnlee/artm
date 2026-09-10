@@ -8876,6 +8876,8 @@ incomplete and still requires managed caller unwind validation.
 - Checkpoint 826 (2026-09-10): Fresh corpus advanced through
   `2262-default-conflict-methods`, reaching 404 completed tests with zero
   failures. Four workers remain active.
+- Checkpoint 827 (2026-09-10): Fresh corpus reached 849 completed tests with
+  zero failures; the four-worker run remains active.
 - Checkpoint 825 (2026-09-10): Fresh corpus advanced through
   `2243-checker-not-inline-into-throw`, reaching 381 completed tests with zero
   failures. Four workers remain active.
