@@ -1566,6 +1566,17 @@ pub(crate) fn emit_graph(out: &Path) -> io::Result<()> {
     graph.push_str(&bootstrap_cli_target);
     graph.push(' ');
     graph.push_str(&runtime_library);
+    graph.push_str(" jit-layout-audit\n\n");
+    graph.push_str("rule jit_layout_audit\n");
+    graph.push_str("  command = cd ");
+    graph.push_str(&shell_quote(&root_for_shell));
+    graph.push_str(" && tools/audit-jit-layout.sh\n");
+    graph.push_str("  description = JIT metadata-first MAP_JIT layout smoke\n");
+    graph.push_str("  restat = 1\n\n");
+    graph.push_str("build jit-layout-audit: jit_layout_audit ");
+    graph.push_str(&ninja_path(&root.join("tools/audit-jit-layout.sh")));
+    graph.push(' ');
+    graph.push_str(&ninja_path(&root.join("tools/jit-layout-smoke.cc")));
     graph.push('\n');
     graph.push_str("\nrule surfaceflinger_core\n");
     graph.push_str("  command = ");

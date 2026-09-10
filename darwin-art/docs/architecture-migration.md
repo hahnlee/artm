@@ -14202,3 +14202,7 @@ or admission exception was added.
 - Checkpoint 973 (2026-09-10): metadata-first 배치 smoke로 실제 주소와
   ordering/span을 검증했고, runtime fallback 반영 후 최종 JIT acceptance가 PASS했다.
   다음은 이 smoke를 재현 가능한 build graph gate로 편입하는 것이다.
+
+- Checkpoint 974 (2026-09-10): metadata-first smoke를 Ninja `jit-layout-audit` rule로
+  편입하고 graphics-audit 의존성으로 고정했다. graph 생성 결과는 gate edge를 포함하며,
+  전체 graph audit은 기존 ICU cache 미완성 상태에서 선행 검증에 의해 중단됐다.

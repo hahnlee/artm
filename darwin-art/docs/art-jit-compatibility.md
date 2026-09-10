@@ -9758,3 +9758,8 @@ incomplete and still requires managed caller unwind validation.
   pair의 ordering와 uint32 span 모두 PASS했다. runtime fallback 반영 후 최신
   `audit-art-jit.sh`에서 JIT eligibility, compiled arithmetic, post-GC, JNI,
   exception, field/string/exit-hook acceptance가 모두 PASS했다.
+
+- Checkpoint 974 (2026-09-10): `jit-layout-audit` Ninja rule을 추가하고
+  `graphics-audit` phony target dependency로 연결했다. graph inputs에 smoke source와
+  script를 포함했으며 생성된 graph에서 gate edge를 확인했다. native-graph 전체 audit은
+  기존 ICU cache incomplete(0/458 TUs)에서 중단되어 전체 graph 실행은 별도 작업이다.

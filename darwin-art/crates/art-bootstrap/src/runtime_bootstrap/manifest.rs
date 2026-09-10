@@ -188,7 +188,9 @@ mod tests {
                 .contains(&"patches/art/0030-darwin-large-object-bitmap-window.patch")
         );
         assert!(PATCHED_RUNTIME_PATCHES.contains(&"patches/art/0038-darwin-jit-memory.patch"));
-        assert!(PATCHED_RUNTIME_PATCHES.contains(&"patches/art/0040-darwin-jit-exact-data-api.patch"));
+        assert!(
+            PATCHED_RUNTIME_PATCHES.contains(&"patches/art/0040-darwin-jit-exact-data-api.patch")
+        );
         assert!(!PATCHED_RUNTIME_PATCHES.contains(&"patches/art/0017-darwin-disable-nterp.patch"));
         assert!(
             !PATCHED_RUNTIME_PATCHES

@@ -24,6 +24,8 @@ pub(crate) fn graph_inputs(root: &Path) -> Vec<PathBuf> {
         PathBuf::from("_build/runtime-common/cache-identity"),
         PathBuf::from("tools/build-android-elf-jni-fixture.sh"),
         PathBuf::from("tools/audit-android16-graphics-closure.sh"),
+        PathBuf::from("tools/audit-jit-layout.sh"),
+        PathBuf::from("tools/jit-layout-smoke.cc"),
         PathBuf::from("probes/runtime_filesystem_probe.cc"),
         PathBuf::from("probes/runtime_filesystem_probe.h"),
         PathBuf::from("probes/runtime_network_probe.cc"),
