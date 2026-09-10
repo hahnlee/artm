@@ -13757,3 +13757,7 @@ or admission exception was added.
 - Checkpoint 891 (2026-09-10): The live worker advanced to 278 completed tests
   (277 PASS). It is processing later JIT/JNI cases (`1968-force-early-return`
   through `1972-jni-id-swap-indices`), with no new failures or timeouts.
+- Checkpoint 892 (2026-09-10): The full worker remains active at 283 completed
+  tests (282 PASS). No new failure has appeared; the only non-pass record is
+  the known `099-vmdebug` 60-second calibration timeout, already passing at
+  120 seconds in isolation.
