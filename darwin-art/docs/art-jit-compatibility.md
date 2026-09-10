@@ -8858,3 +8858,6 @@ incomplete and still requires managed caller unwind validation.
 - Checkpoint 787 (2026-09-10): The same fresh run remains live through
   `086-null-super`, with 99 tests completed and no failures recorded. Worker
   processes are active; final aggregate classification is still deferred.
+- Checkpoint 788 (2026-09-10): Fresh corpus advanced through
+  `103-string-append`, reaching 118 completed tests with zero failures. The
+  four-worker process remains live and the isolated ledger is authoritative.
