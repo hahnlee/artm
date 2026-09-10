@@ -9718,3 +9718,9 @@ incomplete and still requires managed caller unwind validation.
   owning 전환을 시험했지만 `MemMap` source 변형별 적용/소유권 조건이 맞지 않아
   되돌렸다. 기존 `MAP_JIT` anywhere 구현과 범위 guard를 보존하며, 다음 시도는
   공통 `MemMap` API에 exact allocator를 추가하는 방식이어야 한다.
+
+- Checkpoint 966 (2026-09-10): Astra 재리뷰 후 runtime 우회(`MapPlaceholder`)도
+  실제 JIT 초기화에서 유효 mapping을 만들지 못함을 재현했다. 문제는 runtime patch
+  계층이 아니라 foundation `libartbase MemMap` API에 exact allocator가 없는 구조적
+  한계로 확정했다. 다음 작업은 foundation patch와 runtime patch를 분리해 API 계약을
+  먼저 추가하는 것이다.

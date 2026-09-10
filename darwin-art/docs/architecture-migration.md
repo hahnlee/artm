@@ -14169,3 +14169,8 @@ or admission exception was added.
 - Checkpoint 965 (2026-09-10): Mach exact 후보 후속 패치는 source 변형별 hunk 및
   `MemMap` ownership 조건을 통과하지 못해 제거했다. 현재 baseline은 깨끗하며,
   공통 libartbase API를 먼저 확장한 뒤 JIT가 이를 사용하도록 재구성해야 한다.
+
+- Checkpoint 966 (2026-09-10): runtime 단독 Mach 후보를 재현 검증했으나 JIT 초기화
+  mapping이 성립하지 않았다. source 계층별 patch mismatch가 아니라 foundation
+  `MemMap` ownership/API 부재가 원인으로 확정됐고, 다음 구현은 foundation API 확장 후
+  runtime 소비 패치로 분리한다.
