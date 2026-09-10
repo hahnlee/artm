@@ -14264,3 +14264,8 @@ or admission exception was added.
   Rust crate를 단독·출력 보존 실행해 28/28 테스트와 doc-tests PASS를 확인했다.
   foreign callback panic 출력은 의도된 fail-closed 검증이며, 실제 deadlock이나
   shutdown 회귀는 재현되지 않았다.
+
+- Checkpoint 986 (2026-09-10): runtime ownership/shutdown 단독 검증 28/28,
+  JIT·native graph·APK fixture 및 window-menu acceptance 결과를 최신 상태로
+  재확인했다. Chromium page-side TLS acceptance는 macOS 키체인에 생성된
+  mkcert root를 신뢰하도록 사용자가 설정해야 하는 외부 전제만 남아 있다.

@@ -9829,3 +9829,8 @@ incomplete and still requires managed caller unwind validation.
   `rc=0`으로 PASS했으며, 출력된 foreign acquire/clear panic은 fail-closed
   panic 복구 테스트의 의도된 로그로 확인했다. 이전 orphan host 관측은 재현되지
   않아 runtime shutdown 코드는 변경하지 않았다.
+
+- Checkpoint 986 (2026-09-10): 최신 source 상태에서 runtime ownership/shutdown
+  단독 테스트를 Astra와 재검증해 28/28 및 doc-tests PASS를 확인했다. window-menu
+  전체 acceptance도 run-isolated 로그에서 PASS했고, Chromium page-side HTTPS만
+  macOS mkcert root trust 설정이 없는 환경 전제로 보류되어 있다.
