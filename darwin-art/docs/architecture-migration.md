@@ -13361,6 +13361,9 @@ or admission exception was added.
 - Checkpoint 799 (2026-09-10): Fresh corpus advanced through
   `1917-get-stack-frame`, reaching 222 completed tests with zero failures.
   Four workers remain active.
+- Checkpoint 811 (2026-09-10): Fresh corpus advanced through
+  `1965-get-set-local-primitive-no-tables`, reaching 268 completed tests with
+  zero failures. Four workers remain active.
 - Checkpoint 810 (2026-09-10): Fresh corpus advanced through
   `1961-checker-loop-vectorizer`, reaching 264 completed tests with zero
   failures. Four workers remain active.
