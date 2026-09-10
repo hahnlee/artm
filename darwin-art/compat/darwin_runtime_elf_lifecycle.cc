@@ -170,9 +170,11 @@ int PublishRuntimeElfImage(void* context, uintptr_t start, uintptr_t end) {
   }
   if (darwin_art_bionic_dso_lifecycle_publish_image(
           library->dso_lifecycle, start, end) == 0) {
-    std::fprintf(stderr, "DARWIN ELF loader: published image=[0x%llx,0x%llx)\n",
+    std::fprintf(stderr, "DARWIN ELF loader: published image=[0x%llx,0x%llx) soname=%s path=%s\n",
                  static_cast<unsigned long long>(start),
-                 static_cast<unsigned long long>(end));
+                 static_cast<unsigned long long>(end),
+                 library->cached_root_soname.empty() ? "<unknown>" : library->cached_root_soname.c_str(),
+                 library->resolved_path.empty() ? "<unknown>" : library->resolved_path.c_str());
     return 0;
   }
   std::fprintf(stderr, "DARWIN ELF loader: publish rejected DSO lifecycle range=[0x%llx,0x%llx)\n",

@@ -13832,3 +13832,11 @@ or admission exception was added.
   translated image range but not a published ART JIT range. This is a real-app
   compatibility failure, not a corpus timeout, and remains the next blocking
   runtime diagnosis before claiming app acceptance.
+- Checkpoint 911 (2026-09-10): Added soname/path attribution to ELF image
+  publication logs and rebuilt/audited the graphics runtime successfully.
+  Reproduction confirms the failing Chromium signal enters ART's unexpected
+  signal path with `pc` inside `HandleUnexpectedSignalCommon` and a null
+  `ucontext->uc_mcontext` dereference at offset `0x110`; this is a signal ABI
+  /second-fault handling bug masking the original native producer. The
+  Chromium acceptance remains failing and requires preserving/validating the
+  original Darwin ucontext before ART's fatal path.
