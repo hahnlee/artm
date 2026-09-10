@@ -9297,3 +9297,6 @@ incomplete and still requires managed caller unwind validation.
   `099-vmdebug` calibration case plus `2041-bad-cleaner` and
   `2048-bad-native-registry`, both pending isolated reruns with a longer
   timeout; no hard failures have been recorded.
+- Checkpoint 900 (2026-09-10): The worker reached 606 completed tests
+  (603 PASS), with no hard failures. The same three timeout records remain
+  pending isolated longer-timeout reruns while the corpus continues.
