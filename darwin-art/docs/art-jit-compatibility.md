@@ -9961,3 +9961,10 @@ incomplete and still requires managed caller unwind validation.
   를 재현했다. closure audit는 다시 `archive-members=1970`으로 PASS했고,
   동일 Ninja 그래프는 `no work to do`를 반환했다. 단일 artifact identity가
   캐시 재사용과 독립적으로 안정적임을 확인했다.
+
+- Checkpoint 1008 (2026-09-11): Chromium full HTTPS acceptance를 현재
+  macOS에서 재시도했으나 mkcert root가 system trust store에 없어 실행 전
+  `rc=69`로 중단됐다. Astra 검토 결과 `curl --cacert`나 인증서 오류 무시는
+  DarwinAndroidCAStore↔Chromium TLS 계약을 대체하지 못한다. `mkcert -install`
+  은 System.keychain/admin trust를 변경하므로 사용자 명시 승인 전에는 수행하지
+  않는다. 내부 런타임/JIT/APK acceptance는 계속 PASS 상태다.

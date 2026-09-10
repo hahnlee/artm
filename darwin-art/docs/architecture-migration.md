@@ -14391,3 +14391,9 @@ or admission exception was added.
   `1458dd4bf96e2d9e95c2eca0c7577a224934e845ff4c3d924cc3eeb255499715`로
   이전 산출물과 일치했다. `archive-members=1970` audit와 Ninja no-op을 통해
   closure 및 최종 graphics artifact의 재현 가능한 입력 identity를 확인했다.
+
+- Checkpoint 1008 (2026-09-11): full Chromium HTTPS gate는 생성된 localhost
+  인증서의 mkcert root가 macOS system trust에 등록되지 않아 `rc=69`로
+  차단됐다. 이는 코드 결함이 아닌 외부 trust prerequisite이며, `mkcert -install`
+  은 System.keychain/admin trust를 변경하므로 승인 없이 실행하지 않는다.
+  CA 우회 없이 사용자의 trust 등록 승인 후 gate를 재실행해야 한다.
