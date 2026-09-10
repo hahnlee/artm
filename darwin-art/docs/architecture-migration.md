@@ -13716,3 +13716,8 @@ or admission exception was added.
   unmodified interpreter+optimized lanes all passed; every logged barrier
   completed and no `SuspendAll` timeout occurred. This separates the runtime
   path from the corpus wrapper's intermittent 30-second timeout behavior.
+- Checkpoint 882 (2026-09-10): Measured the direct `149-suspend-all-stress`
+  runner at 38.62 seconds wall time for its three required lanes. Re-running
+  the corpus wrapper with `--timeout 60` passed the lane, proving the earlier
+  30-second failures were validation-harness false negatives rather than ART
+  runtime failures.
