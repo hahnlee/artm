@@ -14245,3 +14245,8 @@ or admission exception was added.
   graph는 runtime=258/graphics-jni=63/ICU=458/cached-tu=809, warm no-op,
   depfile, direct-source invalidation까지 PASS했다. APK fixture 감사와
   Blue Archive 원본 split 실행도 PASS 상태를 유지한다.
+
+- Checkpoint 982 (2026-09-10): 변경 없는 Calculator/DeskClock graphics acceptance를
+  최신 artifact에서 재검증했다. 계산 결과 `2+3=5`, Timer 동작 및
+  HWUI+SurfaceFlinger+Metal 공통 경로가 PASS했으며, 테스트 중 생성된 host는
+  모두 종료했다.

@@ -9807,3 +9807,7 @@ incomplete and still requires managed caller unwind validation.
   root·shutdown 항목을 모두 PASS했다. native graph audit도 runtime=258,
   graphics-jni=63, ICU=458, cached-tu=809와 warm no-op/depfile/direct-source
   invalidation을 PASS했다. 변경 없는 Blue Archive split 실행은 `rc=0`이었다.
+
+- Checkpoint 982 (2026-09-10): AOSP Calculator와 DeskClock graphics acceptance를
+  최신 artifact에서 재실행해 `2+3=5`, Timer, HWUI+SurfaceFlinger+Metal 경로를
+  PASS했다. JIT와 native graph 결과는 checkpoint 981과 동일하게 유지된다.
