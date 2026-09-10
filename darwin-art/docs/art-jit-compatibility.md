@@ -9193,3 +9193,8 @@ incomplete and still requires managed caller unwind validation.
   predicate matches. Direct signal-context clobbering is therefore less likely
   than a native object/vtable lifetime or memory overwrite during `SuspendAll`.
   No runtime behavior was changed.
+- Checkpoint 875 (2026-09-10): Re-ran `149-suspend-all-stress` with macOS
+  `MallocScribble=1 MallocGuardEdges=1`. The lane timed out after 30 seconds
+  without allocator diagnostics or a guard-page report. This provides no
+  evidence for a simple malloc overrun; investigation remains focused on the
+  native `sp<RenderNode>`/vtable lifetime race during concurrent `SuspendAll`.
