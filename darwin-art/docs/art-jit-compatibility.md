@@ -9413,3 +9413,7 @@ incomplete and still requires managed caller unwind validation.
   auto-detach는 TLS destructor contract를 위반하는 fatal을 재현하므로
   보류한다. 기존 corpus PASS 수치는 유지하되 기능별 compiled execution
   증거와 앱 acceptance를 별도 ledger로 관리한다.
+- Checkpoint 919 (2026-09-10): ART 0188을 manifest에서 제외하고 runtime
+  bootstrap을 성공적으로 재생성했다. `ThreadExitCallback` 전역 우회는
+  제거된 상태이며, Chromium worker별 attach 성공·소유권·detach 순서를
+  다음 검증 대상으로 고정한다.

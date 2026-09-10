@@ -13886,3 +13886,8 @@ or admission exception was added.
   thread that is not attached` fatal을 새로 재현함을 확인했다. 0188을
   해법으로 간주하지 않고 정확한 thread owner의 attach/detach와 VM shutdown
   순서를 먼저 닫는다.
+- Checkpoint 919 (2026-09-10): ART 0188을 runtime patch manifest에서
+  제거하고 `build-runtime-bootstrap-internal`을 재생성했다. patched
+  `thread.cc`에 전역 auto-detach가 더 이상 없음을 확인했다. 다음은
+  Chromium worker의 실제 생성/종료 owner를 계측해 명시적 attach ownership을
+  구현하는 단계다.
