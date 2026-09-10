@@ -14291,3 +14291,10 @@ or admission exception was added.
   detached worker가 VM shutdown보다 오래 살 수 있는 구조적 후속 과제가
   식별됐다. 해당 변경은 source/patch identity를 함께 갱신하는 별도 작업으로
   남겨 두며, Chromium HTTPS trust는 여전히 사용자 키체인 설정 전제다.
+
+- Checkpoint 991 (2026-09-10): detached CommonPool worker의 VM shutdown race를
+  해소하기 위해 tracked framework patch `0013`을 추가했다. staged source에
+  patch가 실제 적용되고 static foundation 88개 object 재빌드가 성공했으며,
+  graphics link closure 및 Calculator/DeskClock HWUI acceptance를 동일
+  artifact 계열에서 재검증했다. Chromium page-side TLS trust는 외부 전제로
+  계속 분리해 기록한다.

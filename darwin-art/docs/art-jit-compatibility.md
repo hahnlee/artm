@@ -9856,3 +9856,9 @@ incomplete and still requires managed caller unwind validation.
   실행 이미지에는 `ThreadExitCallback`의 직접 Runtime detach 호출이 없는
   것을 확인했지만, CommonPool 변경은 upstream shadow가 아닌 tracked patch로
   정식 반영하기 전까지 완료로 표시하지 않는다.
+
+- Checkpoint 991 (2026-09-10): AOSP HWUI CommonPool shutdown patch를 tracked
+  `0013`으로 추가했다. worker를 pool이 소유하고 stop 신호 후 queue를 drain한
+  뒤 join하도록 staged shadow에 적용되며, patch 적용 자체와 HWUI static
+  foundation 재빌드가 PASS했다. 최신 graphics link closure와 Calculator/
+  DeskClock GPU acceptance도 PASS했으며, Chromium HTTPS trust 전제는 남아 있다.
