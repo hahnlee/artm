@@ -9518,3 +9518,17 @@ incomplete and still requires managed caller unwind validation.
   `__bss_start__`와 `_bss_end__`를 추가했다. 재링크 후 libmain 로드는
   통과했지만 Unity native `pc=0` SIGSEGV가 새로 드러나 acceptance는 아직
   미완료이며 Astra에 다음 원인 분석을 요청했다.
+
+- Checkpoint 935 (2026-09-10): Astra가 Blue Archive의 `pc=0`를
+  `libmain+0xcbc`의 JNI `FatalError` 슬롯(18) null 호출로 매핑했다.
+  실제 선행 원인은 `libil2cpp.so` `dlopen` 실패이며 JIT target 문제가
+  아니었다. JNI proxy에 host ART `FatalError` 전달과 비반환 fallback을
+  추가하고, `DARWIN_ART_DEBUG_GUEST_LIBDL=1`에서 원문 loader error를
+  free 전에 기록하도록 했다. proxy unit build는 통과했으며 Unity
+  acceptance는 정확한 `libil2cpp` 거부 사유 확인을 남긴다.
+
+- Checkpoint 936 (2026-09-10): `libil2cpp.so`의 표준 `end` 및
+  `__stop_<section>` GNU marker를 PT_LOAD 경계 계약 안에서 허용하도록
+  ELF loader를 일반화했다. 새 링크 후 Blue Archive Unity graph가 실제
+  로드되었고 `libil2cpp` capability rejection은 사라졌다. 이후 비제로
+  PC의 null 참조(SIGSEGV)가 드러나 Astra native mapping을 진행 중이다.

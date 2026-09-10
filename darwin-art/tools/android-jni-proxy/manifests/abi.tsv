@@ -13,6 +13,7 @@ ThrowNew	JNIEnv	14	jint(JNIEnv*,jclass,const-char*)	direct-register-only	impleme
 ExceptionOccurred	JNIEnv	15	jthrowable(JNIEnv*)	direct-register-only	forward-current-ART-env
 ExceptionDescribe	JNIEnv	16	void(JNIEnv*)	direct-register-only	forward-current-ART-env
 ExceptionClear	JNIEnv	17	void(JNIEnv*)	direct-register-only	forward-current-ART-env
+FatalError	JNIEnv	18	void(JNIEnv*,const-char*)	direct-register-only	forward-current-ART-env-never-returns
 PushLocalFrame	JNIEnv	19	jint(JNIEnv*,jint)	direct-register-only	forward-current-ART-env
 PopLocalFrame	JNIEnv	20	jobject(JNIEnv*,jobject)	direct-register-only	forward-current-ART-env
 NewGlobalRef	JNIEnv	21	jobject(JNIEnv*,jobject)	direct-register-only	forward-current-ART-env

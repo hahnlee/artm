@@ -16,6 +16,7 @@
 #define DARWIN_ART_JNI_SLOT_ExceptionOccurred 15u
 #define DARWIN_ART_JNI_SLOT_ExceptionDescribe 16u
 #define DARWIN_ART_JNI_SLOT_ExceptionClear 17u
+#define DARWIN_ART_JNI_SLOT_FatalError 18u
 #define DARWIN_ART_JNI_SLOT_PushLocalFrame 19u
 #define DARWIN_ART_JNI_SLOT_PopLocalFrame 20u
 #define DARWIN_ART_JNI_SLOT_NewGlobalRef 21u

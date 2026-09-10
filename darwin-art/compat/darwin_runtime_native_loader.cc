@@ -197,6 +197,10 @@ void* GuestDsoOpen(void* context, const char* path, int, const void*,
                                     ? "Android guest ELF open failed"
                                     : native_error;
     CopyLoaderError(message, error, capacity);
+    if (std::getenv("DARWIN_ART_DEBUG_GUEST_LIBDL") != nullptr) {
+      std::fprintf(stderr, "DARWIN guest libdl open failure path=%s error=%s\n",
+                   path, message.c_str());
+    }
   }
   NativeLoaderFreeErrorMessage(native_error);
   if (std::getenv("DARWIN_ART_DEBUG_GUEST_LIBDL") != nullptr) {

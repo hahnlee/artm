@@ -2370,7 +2370,7 @@ impl LoadedElf {
         // Bionic exposes these as load-bias-relative dlsym values. Accept only
         // the tightly bounded form whose address lies in (or exactly at the
         // end of) a PT_LOAD; arbitrary absolute constants remain rejected.
-        const LINKER_MARKERS: [&[u8]; 7] = [
+        const LINKER_MARKERS: [&[u8]; 8] = [
             b"__bss_start",
             b"__bss_end__",
             b"__bss_start__",
@@ -2378,10 +2378,24 @@ impl LoadedElf {
             b"_bss_end__",
             b"_end",
             b"__end__",
+            b"end",
         ];
+        let section_marker = name
+            .strip_prefix(b"__start_")
+            .or_else(|| name.strip_prefix(b"__stop_"))
+            .is_some_and(|suffix| {
+                !suffix.is_empty()
+                    && suffix.iter().enumerate().all(|(index, byte)| {
+                        if index == 0 {
+                            byte.is_ascii_alphabetic() || *byte == b'_'
+                        } else {
+                            byte.is_ascii_alphanumeric() || *byte == b'_'
+                        }
+                    })
+            });
         symbol.section_index == SHN_ABS
             && symbol.size == 0
-            && LINKER_MARKERS.contains(&name)
+            && (LINKER_MARKERS.contains(&name) || section_marker)
             && self
                 .require_loaded_range(symbol.value, 0, None, "image-relative absolute marker")
                 .is_ok()

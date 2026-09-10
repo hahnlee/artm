@@ -13988,3 +13988,16 @@ or admission exception was added.
   whitelist에 추가하는 최소 loader 변경을 적용했으며, 재실행에서
   namespace 등록까지 진행했다. 이후 Unity generated-code `pc=0`
   SIGSEGV가 발생해 native symbol/JNI 호출 타깃 문제로 분리 중이다.
+
+- Checkpoint 935 (2026-09-10): Astra native review로 Unity crash의
+  호출 지점을 `libmain.so`의 `FatalError` JNI slot 18 null로 확정했다.
+  이는 먼저 발생한 `libil2cpp.so` 로드 실패를 보고하는 경로였으므로,
+  proxy가 host ART `FatalError`에 전달하고 libdl 실패 문자열을 보존해
+  기록하도록 수정했다. 다음 단계는 해당 원문 오류에 따른 ELF namespace/
+  relocation 누락을 수정하는 것이다.
+
+- Checkpoint 936 (2026-09-10): 앱별 whitelist 대신 GNU linker의
+  `end`와 `__start_/__stop_` zero-sized marker family를 ASCII C identifier
+  및 PT_LOAD bounds로 검증해 허용했다. 변경 없는 Blue Archive의
+  `libil2cpp.so`가 namespace에 게시·로드되었으며, 다음 blocker는 로드
+  직후 발생한 Unity native null dereference다.

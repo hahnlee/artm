@@ -54,6 +54,7 @@ def main() -> int:
         "ExceptionOccurred",
         "ExceptionDescribe",
         "ExceptionClear",
+        "FatalError",
         "PushLocalFrame",
         "PopLocalFrame",
         "NewGlobalRef",

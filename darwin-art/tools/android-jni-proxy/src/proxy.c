@@ -201,6 +201,22 @@ static void ProxyExceptionDescribe(void* raw_env) {
   if (raw != NULL) ((void (*)(void*))raw)(host_env);
 }
 
+/* JNI FatalError is a terminal VM operation.  Forward it to the real ART
+ * environment so guest loader failures retain their diagnostic and process
+ * boundary, instead of dereferencing an unpopulated proxy slot. */
+static void ProxyFatalError(void* raw_env, const char* message) {
+  struct DarwinArtJniProxy* proxy = EnvOwner(raw_env);
+  void* host_env = HostEnv(proxy);
+  RawJniSlot raw = HostSlot(host_env, DARWIN_ART_JNI_SLOT_FatalError);
+  if (raw != NULL) {
+    ((void (*)(void*, const char*))raw)(host_env,
+                                        message == NULL ? "JNI FatalError" : message);
+  }
+  fprintf(stderr, "DARWIN JNI FatalError: %s\n",
+          message == NULL ? "JNI FatalError" : message);
+  abort();
+}
+
 static int32_t ProxyPushLocalFrame(void* raw_env, int32_t capacity) {
   struct DarwinArtJniProxy* proxy = EnvOwner(raw_env);
   void* host_env = HostEnv(proxy);
@@ -1196,6 +1212,7 @@ static const RawJniSlot kNativeTable[DARWIN_ART_JNI_NATIVE_SLOT_COUNT] = {
     [DARWIN_ART_JNI_SLOT_ExceptionDescribe] =
         (RawJniSlot)ProxyExceptionDescribe,
     [DARWIN_ART_JNI_SLOT_ExceptionClear] = (RawJniSlot)ProxyExceptionClear,
+    [DARWIN_ART_JNI_SLOT_FatalError] = (RawJniSlot)ProxyFatalError,
     [DARWIN_ART_JNI_SLOT_PushLocalFrame] = (RawJniSlot)ProxyPushLocalFrame,
     [DARWIN_ART_JNI_SLOT_PopLocalFrame] = (RawJniSlot)ProxyPopLocalFrame,
     [DARWIN_ART_JNI_SLOT_NewGlobalRef] = (RawJniSlot)ProxyNewGlobalRef,
