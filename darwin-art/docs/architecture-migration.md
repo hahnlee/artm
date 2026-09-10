@@ -13721,3 +13721,7 @@ or admission exception was added.
   the corpus wrapper with `--timeout 60` passed the lane, proving the earlier
   30-second failures were validation-harness false negatives rather than ART
   runtime failures.
+- Checkpoint 883 (2026-09-10): Started the full pinned ART corpus with
+  `--parallel 4 --timeout 60` after calibrating the false 30-second timeout.
+  The live ledger has completed 101 tests so far, all PASS; the process remains
+  active and is intentionally left running for the complete result.
