@@ -9618,6 +9618,13 @@ incomplete and still requires managed caller unwind validation.
   JIT code-cache fallback·stack-map abort 없이 popup/`new_tab_menu_id` 경로와
   SIGABRT gate를 통과했다.
 
+- Checkpoint 951 (2026-09-10): Astra가 Blue Archive 실패를 분석해 최초
+  원인이 `libssl.so`의 Android LIBC_R unwind provider 부재(status=27)임을
+  확인했다. 오류 cleanup에서 `DestroyJavaVM`에 들어가던 경로를 차단해
+  APK `RuntimeShutdownGuard::shutdown()`도 `_exit(1)`로 종료하도록 했다.
+  JIT/graphics 및 Chrome acceptance 결과는 유지되며, LIBC_R provider 연결은
+  별도 미완료 항목이다.
+
 - Checkpoint 949 (2026-09-10): expected-address hint 실험이 일부 child의
   JIT fallback을 유발해 되돌렸다. graphics bootstrap/link audit는 PASS이며,
   reservation 기반 bounded retry 없이는 JIT 주소 배치를 완료로 간주하지 않는다.

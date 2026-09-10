@@ -14079,6 +14079,12 @@ or admission exception was added.
   Chromium 다중 child window-menu acceptance가 PASS했으며, expected-address
   거부/fallback 및 teardown SIGABRT가 재현되지 않았다.
 
+- Checkpoint 951 (2026-09-10): Blue Archive 실행의 최초 실패는
+  `libssl.so`가 Android LIBC_R unwind provider를 찾지 못한 status=27로
+  확정됐다. APK 오류 cleanup도 명시적 shutdown 대신 `_exit(1)`을 사용해
+  DestroyJavaVM/ELF unload hang을 피하도록 수정했다. provider 연결과 실제
+  Blue Archive 콘텐츠 진입은 다음 과제로 남아 있다.
+
 - Checkpoint 949 (2026-09-10): expected-address hint 실험이 일부 child의
   JIT fallback을 유발해 되돌렸다. graphics bootstrap/link audit는 PASS이며,
   AOSP stack-map 범위를 유지하려면 Darwin reservation 기반 bounded retry가

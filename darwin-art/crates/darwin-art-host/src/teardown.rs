@@ -32,6 +32,16 @@ impl<'a> RuntimeShutdownGuard<'a> {
     }
 
     pub(super) fn shutdown(mut self) -> Result<(), HostError> {
+        if self.process_exit_on_drop {
+            // APK processes must never enter DestroyJavaVM/ELF teardown,
+            // including explicit error cleanup paths. The caller has already
+            // recorded the failure; preserve it at the OS process boundary.
+            self.inner.take();
+            unsafe {
+                libc::fflush(std::ptr::null_mut());
+                libc::_exit(1);
+            }
+        }
         self.inner
             .take()
             .expect("shutdown guard already consumed")
