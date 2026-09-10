@@ -9671,6 +9671,14 @@ incomplete and still requires managed caller unwind validation.
   `exit=0`을 확인했고 `Stub!`, `Component not initialized`,
   `ACCESS_NETWORK_STATE`, fatal/SIG 로그가 모두 없었다.
 
+- Checkpoint 959 (2026-09-10): Astra가 지적한 Chromium framework 계약 누락을
+  수정했다. `ConnectivityManager.getLinkProperties(Network)`와 최소
+  `LinkProperties` 구현을 추가하고 netId=1 registry, unknown/null network의
+  null 반환, callback link-properties 통지를 AOSP 순서로 정렬했다. framework
+  compat를 재생성한 뒤 Chromium 변경 없는 tab/grid 물리 입력 acceptance가
+  `target-states=11`, GLES/ANGLE/Graphite/Dawn/MoltenVK/AHB/SurfaceFlinger/Metal,
+  exit=0으로 PASS했다.
+
 - Checkpoint 949 (2026-09-10): expected-address hint 실험이 일부 child의
   JIT fallback을 유발해 되돌렸다. graphics bootstrap/link audit는 PASS이며,
   reservation 기반 bounded retry 없이는 JIT 주소 배치를 완료로 간주하지 않는다.

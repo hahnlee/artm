@@ -14126,6 +14126,13 @@ or admission exception was added.
   manifest receiver 조회와 normal network permission 경계가 작동했고,
   GMS 초기화 연쇄 오류 없이 Unity/CoreAudio 및 exit=0을 재확인했다.
 
+- Checkpoint 959 (2026-09-10): Chromium이 요구하는 Android 네트워크 API를
+  framework compat 계층에 복원했다. 단일 host network record와
+  defensive-copy `LinkProperties`를 제공하고 미등록 handle은 null로 처리해
+  서비스 계약을 명시했다. 재빌드 후 단독 Chromium tab/grid acceptance가
+  물리 MotionEvent와 11개 composed states로 PASS했으며, 이번 수정은 앱별
+  probe가 아닌 공통 Android framework 경로에만 적용됐다.
+
 - Checkpoint 949 (2026-09-10): expected-address hint 실험이 일부 child의
   JIT fallback을 유발해 되돌렸다. graphics bootstrap/link audit는 PASS이며,
   AOSP stack-map 범위를 유지하려면 Darwin reservation 기반 bounded retry가

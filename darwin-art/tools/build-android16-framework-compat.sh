@@ -49,6 +49,7 @@ javac --release 8 -encoding UTF-8 -d "$classes" -classpath "$android_jar" \
   "$root/tools/android-framework-compat/src/android/util/StatsLog.java" \
   "$root/compat/java/android/media/MediaCommunicationManager.java" \
   "$root/compat/java/android/net/ConnectivityManager.java" \
+  "$root/compat/java/android/net/LinkProperties.java" \
   "$root/compat/java/android/net/Network.java" \
   "$root/compat/java/android/net/NetworkCapabilities.java" \
   "$root/compat/java/android/net/NetworkInfo.java" \
@@ -79,6 +80,7 @@ fi
   "$classes/android/net/ConnectivityManager.class" \
   "$classes/android/net/ConnectivityManager\$NetworkCallback.class" \
   "$classes/android/net/ConnectivityManager\$OnNetworkActiveListener.class" \
+  "$classes/android/net/LinkProperties.class" \
   "$classes/android/net/Network.class" \
   "$classes/android/net/NetworkCapabilities.class" \
   "$classes/android/net/NetworkInfo.class" \
