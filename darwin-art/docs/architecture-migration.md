@@ -13361,6 +13361,9 @@ or admission exception was added.
 - Checkpoint 799 (2026-09-10): Fresh corpus advanced through
   `1917-get-stack-frame`, reaching 222 completed tests with zero failures.
   Four workers remain active.
+- Checkpoint 808 (2026-09-10): Fresh corpus advanced through
+  `1954-pop-frame-jit`, reaching 254 completed tests with zero failures. Four
+  workers remain active.
 - Checkpoint 807 (2026-09-10): Fresh corpus advanced through
   `1948-obsolete-const-method-handle`, reaching 250 completed tests with zero
   failures. Four workers remain active.
