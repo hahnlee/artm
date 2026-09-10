@@ -8873,3 +8873,6 @@ incomplete and still requires managed caller unwind validation.
 - Checkpoint 792 (2026-09-10): Fresh corpus advanced through
   `153-reference-stress`, reaching 174 completed tests with zero failures.
   Four workers remain active; no completion claim yet.
+- Checkpoint 793 (2026-09-10): Fresh corpus advanced through
+  `168-vmstack-annotated`, reaching 188 completed tests with zero failures.
+  Four workers remain active.
