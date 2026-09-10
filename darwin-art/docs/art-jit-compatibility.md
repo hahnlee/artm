@@ -9579,3 +9579,10 @@ incomplete and still requires managed caller unwind validation.
   `libdarwin_art_runtime_graphics.dylib` SHA-256이
   `9ca2b85fb0ca1cf1b305fd6e9278738a620d9d8f2901aff995b752f89adca080`로
   동일해 source/patch→archive→dylib 단일 identity 재현성을 확인했다.
+
+- Checkpoint 944 (2026-09-10): Astra 진단으로 Chromium acceptance
+  스크립트의 `env` 연속행 중간 주석이 환경변수 전달을 끊던 문제를
+  수정했다. 격리된 app-data/scale 환경으로 최신 Chromium을 재실행해
+  실제 TabSwitcherButtonView·TabGridView, MotionEvent, child SurfaceControl
+  및 GLES/ANGLE/Graphite/Dawn/MoltenVK/SurfaceFlinger/Metal 경로를
+  `target-states=10`으로 PASS했다.

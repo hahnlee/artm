@@ -14043,3 +14043,9 @@ or admission exception was added.
   전후 SHA-256이 동일(`9ca2b85fb0ca1cf1b305fd6e9278738a620d9d8f2901aff995b752f89adca080`)
   하므로 stale/mixed artifact 없이 단일 재현 빌드 산출물 identity를
   검증했다.
+
+- Checkpoint 944 (2026-09-10): Chromium acceptance의 잘못 배치된 주석을
+  고쳐 `DARWIN_ART_APP_DATA_ROOT`와 window scale이 실제 앱 프로세스에
+  전달되도록 복구했다. 재실행 결과 실제 탭 버튼/그리드 전환과 물리
+  MotionEvent, child SurfaceControl 및 전체 GPU closure가 `target-states=10`
+  으로 PASS했으며 이전 mutex abort는 재현되지 않았다.
