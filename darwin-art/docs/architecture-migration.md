@@ -14085,6 +14085,12 @@ or admission exception was added.
   DestroyJavaVM/ELF unload hang을 피하도록 수정했다. provider 연결과 실제
   Blue Archive 콘텐츠 진입은 다음 과제로 남아 있다.
 
+- Checkpoint 952 (2026-09-10): 올바른 base+arm64 split 조합으로 변경 없는
+  Blue Archive를 실행해 Unity/IL2CPP와 24개 native library, 실제
+  InputChannel MotionEvent, CoreAudio를 확인했다. 실행은 exit=0였고 fatal
+  오류 없이 종료됐다. 로그인 이후 실제 전투 콘텐츠 진입은 여전히 별도
+  acceptance 범위다.
+
 - Checkpoint 949 (2026-09-10): expected-address hint 실험이 일부 child의
   JIT fallback을 유발해 되돌렸다. graphics bootstrap/link audit는 PASS이며,
   AOSP stack-map 범위를 유지하려면 Darwin reservation 기반 bounded retry가

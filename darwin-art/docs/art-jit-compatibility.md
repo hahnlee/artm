@@ -9625,6 +9625,11 @@ incomplete and still requires managed caller unwind validation.
   JIT/graphics 및 Chrome acceptance 결과는 유지되며, LIBC_R provider 연결은
   별도 미완료 항목이다.
 
+- Checkpoint 952 (2026-09-10): Blue Archive base+arm64 split을 변경 없이
+  재설치·실행했다. Unity/IL2CPP(`Product Name: Blue Archive`)와 24 native
+  libraries가 로드되고 InputChannel MotionEvent DOWN/UP 및 CoreAudio가
+  동작했으며 exit=0, fatal/JIT code-cache 오류 없이 완료됐다.
+
 - Checkpoint 949 (2026-09-10): expected-address hint 실험이 일부 child의
   JIT fallback을 유발해 되돌렸다. graphics bootstrap/link audit는 PASS이며,
   reservation 기반 bounded retry 없이는 JIT 주소 배치를 완료로 간주하지 않는다.
