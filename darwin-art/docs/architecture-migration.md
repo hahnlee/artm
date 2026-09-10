@@ -14255,3 +14255,7 @@ or admission exception was added.
   frame과 IOSurface physical extent 불일치를 수정했다. Metal composer와
   Android surface/HardwareBuffer import가 실제 IOSurface 폭·높이를 descriptor에
   사용하며 graphics-link audit과 독립 resize 실행이 PASS했다.
+
+- Checkpoint 984 (2026-09-10): window-menu acceptance를 run별 임시 로그 디렉터리와
+  start/end manifest를 사용해 재검증했다. Calculator popup/resize/outside dismiss,
+  Calendar spinner, Chrome new-tab 및 SurfaceFlinger popup 계약이 모두 PASS했다.

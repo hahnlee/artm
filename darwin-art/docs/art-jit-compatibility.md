@@ -9817,3 +9817,9 @@ incomplete and still requires managed caller unwind validation.
   composer target/source 및 AHardwareBuffer/surface backing texture descriptor가
   IOSurface 실제 extent를 사용하도록 정규화됐고 graphics-link audit PASS 및
   독립 Calculator resize 실행 `rc=0`(SIGABRT 없음)을 확인했다.
+
+- Checkpoint 984 (2026-09-10): 최신 graphics link에서 window-menu acceptance를
+  run별 임시 로그/manifest로 재실행했다. Calculator History·outside dismiss·resize,
+  Calendar Day/Week/Month, Chrome New-tab과 Android popup ViewRoot/InputChannel/
+  SurfaceFlinger 계약이 모두 PASS했으며, 실행 산출물이 이전 run과 섞이지 않음을
+  manifest로 확인했다.

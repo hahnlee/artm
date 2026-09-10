@@ -20,11 +20,15 @@ chrome="$(find "$root/_build/installed-apps/org.chromium.chrome" -name base.apk 
   exit 66
 }
 mkdir -p "$output"
+run_output="$(mktemp -d "$output/run.XXXXXX")"
+manifest="$run_output/manifest.log"
+printf 'run_start=%s pid=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$$" >"$manifest"
+trap 'printf "run_end=%s\n" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >>"$manifest"' EXIT
 
 # Never validate product APKs with stale compatibility classes. This command
 # is incremental, but also enforces the exact support-DEX class/method contract.
 cargo run -q --manifest-path "$root/Cargo.toml" -p art-bootstrap -- build-button-dex \
-  >"$output/support-dex.log" 2>&1
+  >"$run_output/support-dex.log" 2>&1
 cargo build -q --manifest-path "$root/Cargo.toml" -p darwin-art-host
 
 common_env=(
@@ -36,7 +40,7 @@ common_env=(
   DARWIN_ART_DEBUG_VIEW_TEXT=1
 )
 
-calculator_log="$output/calculator.log"
+calculator_log="$run_output/calculator.log"
 env "${common_env[@]}" \
   DARWIN_ART_TEST_POINTER_SEQUENCE='0,0,0;340,45,2500;340,45,300;250,35,300' \
   "$root/tools/run-android-apk-app.sh" "$calculator" 8 \
@@ -51,7 +55,7 @@ grep -a -F 'input window index=1 type=1002' "$calculator_log" | \
 grep -a -E 'View text .* text=History$' "$calculator_log" >/dev/null
 grep -a -F 'window remove argc=1 session=true' "$calculator_log" >/dev/null
 
-calculator_outside_log="$output/calculator-outside.log"
+calculator_outside_log="$run_output/calculator-outside.log"
 env "${common_env[@]}" \
   DARWIN_ART_TEST_POINTER_SEQUENCE='0,0,0;340,45,2500;50,250,300' \
   "$root/tools/run-android-apk-app.sh" "$calculator" 8 \
@@ -64,7 +68,7 @@ if grep -a -F 'app:id/digit_7' "$calculator_outside_log" >/dev/null; then
   exit 1
 fi
 
-calculator_resize_log="$output/calculator-resize.log"
+calculator_resize_log="$run_output/calculator-resize.log"
 # Leave the popup ViewRoot alive after opening it. A third tap at 340,45
 # selects History and removes the popup before the delayed resize begins.
 env "${common_env[@]}" \
@@ -83,7 +87,7 @@ grep -a -F 'ART Android resize: 720x1280 -> 600x1000' \
 grep -a -F 'window frame request=392x192 layout=392x192 output=392x192 at=208,8 type=1002' \
   "$calculator_resize_log" >/dev/null
 
-calendar_log="$output/calendar.log"
+calendar_log="$run_output/calendar.log"
 env "${common_env[@]}" \
   DARWIN_ART_TEST_POINTER_SEQUENCE='0,0,0;100,30,800;100,70,300' \
   "$root/tools/run-android-apk-app.sh" "$calendar" 5 \
@@ -97,7 +101,7 @@ for label in Day Week Month; do
 done
 grep -a -F 'window remove argc=1 session=true' "$calendar_log" >/dev/null
 
-chrome_log="$output/chrome.log"
+chrome_log="$run_output/chrome.log"
 env "${common_env[@]}" \
   DARWIN_ART_TEST_POINTER_SEQUENCE='0,0,0;315,610,6000;180,100,500' \
   "$root/tools/run-android-apk-app.sh" "$chrome" 13 \
@@ -120,4 +124,4 @@ if grep -a -E 'FATAL EXCEPTION|Fatal signal|SIG(SEGV|BUS|ABRT|TRAP)|runtime abor
 fi
 
 echo 'android-window-menu-acceptance: PASS Calculator=History+outside-dismiss+resize Calendar=Day/Week/Month Chrome=New-tab Android-popup=ViewRoot+InputChannel+SurfaceFlinger'
-echo "logs=$output"
+echo "logs=$run_output"
