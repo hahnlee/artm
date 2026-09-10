@@ -23,6 +23,9 @@ struct JitMethodEntry {
 // SIGSEGV handler. Keep ample headroom for boot plus app code while retaining
 // the signal-safe, bounded representation.
 constexpr size_t kJitMethodEntries = 16384;
+// A non-zero reservation marker keeps signal-path readers from observing a
+// slot between its start CAS and the publication of end/method.
+constexpr uintptr_t kJitEntryPublishing = 1u;
 // ART's quick-code size describes the instruction stream but may omit the
 // short signal/epilogue/alignment tail reached by the PC reported on Darwin.
 // Keep the published range inclusive of that tail so implicit-null faults are
@@ -42,13 +45,20 @@ void DarwinArtRegisterJitMethod(uintptr_t code, size_t size, uintptr_t method) {
   for (auto& entry : g_jit_method_entries) {
     uintptr_t current = entry.start.load(std::memory_order_acquire);
     if (current == code || current == 0) {
-      if (current == 0 &&
-          !entry.start.compare_exchange_strong(current, code, std::memory_order_acq_rel,
-                                               std::memory_order_acquire)) {
-        continue;
+      if (current == 0) {
+        uintptr_t expected = 0;
+        if (!entry.start.compare_exchange_strong(expected, kJitEntryPublishing,
+                                                 std::memory_order_acq_rel,
+                                                 std::memory_order_acquire)) {
+          continue;
+        }
+        entry.end.store(end, std::memory_order_relaxed);
+        entry.method.store(method, std::memory_order_relaxed);
+        entry.start.store(code, std::memory_order_release);
+      } else {
+        entry.end.store(end, std::memory_order_relaxed);
+        entry.method.store(method, std::memory_order_release);
       }
-      entry.end.store(end, std::memory_order_relaxed);
-      entry.method.store(method, std::memory_order_release);
       if (std::getenv("DARWIN_ART_DEBUG_JIT") != nullptr) {
         std::fprintf(stderr, "DARWIN JIT publish code=%p end=%p size=%zu method=%p\n",
                      reinterpret_cast<void*>(code), reinterpret_cast<void*>(end), size,
@@ -64,7 +74,7 @@ uintptr_t DarwinArtLookupJitMethod(uintptr_t pc) {
   for (const auto& entry : g_jit_method_entries) {
     const uintptr_t start = entry.start.load(std::memory_order_acquire);
     const uintptr_t end = entry.end.load(std::memory_order_acquire);
-    if (start != 0 && pc >= start && pc < end) {
+    if (start > kJitEntryPublishing && pc >= start && pc < end) {
       return entry.method.load(std::memory_order_acquire);
     }
   }
@@ -80,7 +90,7 @@ extern "C" bool DarwinArtLookupJitCode(uintptr_t pc) {
   for (const auto& entry : g_jit_method_entries) {
     const uintptr_t start = entry.start.load(std::memory_order_acquire);
     const uintptr_t end = entry.end.load(std::memory_order_acquire);
-    if (start != 0 && pc >= start && pc < end) return true;
+    if (start > kJitEntryPublishing && pc >= start && pc < end) return true;
   }
   return false;
 }

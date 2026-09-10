@@ -8999,3 +8999,8 @@ incomplete and still requires managed caller unwind validation.
   four-worker run, while six isolated JIT reruns (including four concurrent)
   passed. Treat this as an unresolved concurrency/flakiness defect, not a
   completion signal.
+- Checkpoint 835 (2026-09-10): Fixed lock-free JIT range publication by
+  reserving slots with a sentinel and release-publishing the start after
+  end/method payload initialization. Graphics-link audit and eight concurrent
+  `978-virtual-interface` JIT reruns passed; a full 1,076-test final corpus
+  rerun is now active.
