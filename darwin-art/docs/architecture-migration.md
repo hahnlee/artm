@@ -13768,3 +13768,6 @@ or admission exception was added.
 - Checkpoint 894 (2026-09-10): The full corpus worker advanced to 301
   completed tests (300 PASS). No new failure or timeout appeared; the worker
   remains active for the remaining pinned AOSP cases.
+- Checkpoint 895 (2026-09-10): The live corpus worker reached 308 completed
+  tests (307 PASS). No new failures or timeouts appeared; the known
+  `099-vmdebug` calibration timeout remains the only non-pass ledger entry.
