@@ -14186,3 +14186,7 @@ or admission exception was added.
 - Checkpoint 969 (2026-09-10): runtime JIT source에 `mach_vm_region` 후보 탐색을
   연결했다. 현재 후보 오류가 blind fallback으로 덮일 수 있어, 다음 작업은 AOSP
   data-before-code 계약을 유지하면서 query/allocate 결과를 분리 검증하는 것이다.
+
+- Checkpoint 970 (2026-09-10): JIT 후보 탐색에서 blind fallback을 제거하고 VM region
+  query 오류·영역 overflow·collision retry를 명시적으로 처리했다. runtime staged
+  compile은 통과했으며, 다음은 최종 link와 acceptance로 free-gap 계약을 확인한다.

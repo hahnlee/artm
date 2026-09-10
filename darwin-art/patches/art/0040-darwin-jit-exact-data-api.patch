@@ -11,7 +11,7 @@ diff --git a/runtime/jit/jit_memory_region.cc b/runtime/jit/jit_memory_region.cc
  #endif
  #include <android-base/unique_fd.h>
  #include <log/log.h>
-@@ -122,10 +123,58 @@
+@@ -122,10 +123,63 @@
      if (!exec_pages.IsValid()) {
        *error_msg = "Failed to create Darwin MAP_JIT code cache: " + error_str;
        return false;
@@ -21,14 +21,17 @@ diff --git a/runtime/jit/jit_memory_region.cc b/runtime/jit/jit_memory_region.cc
 -                                      nullptr, &error_str);
 +    const size_t rounded_data = RoundUp(data_capacity, MemMap::GetPageSize());
 +    const uintptr_t exec_base = reinterpret_cast<uintptr_t>(exec_pages.Begin());
++    const uintptr_t exec_limit_end = reinterpret_cast<uintptr_t>(exec_pages.End());
 +    // Mach-O binaries reserve the complete low 4GiB (__PAGEZERO). Keep the
 +    // AOSP ordering (data below executable) while never probing that region.
 +    constexpr uintptr_t kDarwinPageZeroEnd = UINT64_C(0x100000000);
 +    uintptr_t free_candidate = 0;
 +    const uintptr_t lower = std::max(kDarwinPageZeroEnd,
-+                                     exec_base > UINT32_MAX ? exec_base - UINT32_MAX : 0u);
++                                     exec_limit_end > UINT32_MAX ? exec_limit_end - UINT32_MAX : 0u);
 +    mach_vm_address_t cursor = RoundUp(lower, MemMap::GetPageSize());
 +    const mach_vm_address_t limit = exec_base;
++    size_t collisions = 0;
++    error_str = "no fitting Darwin JIT metadata gap";
 +    for (size_t regions = 0; regions != 4096 && cursor < limit; ++regions) {
 +      mach_vm_address_t region = cursor;
 +      mach_vm_size_t region_size = 0;
@@ -41,34 +44,36 @@ diff --git a/runtime/jit/jit_memory_region.cc b/runtime/jit/jit_memory_region.cc
 +      if (object != MACH_PORT_NULL) {
 +        (void)mach_port_deallocate(mach_task_self(), object);
 +      }
-+      if (status != KERN_SUCCESS || region > limit) {
-+        if (limit - cursor >= rounded_data) free_candidate = cursor;
++      if (status != KERN_SUCCESS) {
++        error_str = "Darwin JIT VM region query failed";
++        break;
++      }
++      if (region > limit) {
++        if (limit - cursor >= rounded_data) {
++          free_candidate = cursor;
++          data_pages = MemMap::MapAnonymousExact(data_cache_name.c_str(),
++                                                 reinterpret_cast<uint8_t*>(free_candidate),
++                                                 data_capacity, kProtRW, &error_str);
++        }
 +        break;
 +      }
 +      if (region > cursor && region - cursor >= rounded_data) {
 +        free_candidate = RoundDown(region - rounded_data, MemMap::GetPageSize());
++        data_pages = MemMap::MapAnonymousExact(data_cache_name.c_str(),
++                                               reinterpret_cast<uint8_t*>(free_candidate),
++                                               data_capacity, kProtRW, &error_str);
++        if (data_pages.IsValid()) break;
++        if (++collisions >= 32) {
++          error_str = "Darwin JIT gap allocation retries exhausted: " + error_str;
++          break;
++        }
++        continue;
++      }
++      if (region_size == 0 || region > UINTPTR_MAX - region_size) {
++        error_str = "invalid Darwin JIT VM region extent";
 +        break;
 +      }
-+      if (region_size == 0 || region > UINTPTR_MAX - region_size) break;
 +      cursor = RoundUp(region + region_size, MemMap::GetPageSize());
-+    }
-+    if (free_candidate != 0) {
-+      data_pages = MemMap::MapAnonymousExact(data_cache_name.c_str(),
-+                                             reinterpret_cast<uint8_t*>(free_candidate),
-+                                             data_capacity, kProtRW, &error_str);
-+    }
-+    for (size_t attempt = 0; attempt != 128 && !data_pages.IsValid(); ++attempt) {
-+      const uintptr_t delta = rounded_data * (attempt + 1);
-+      if (exec_base < delta) {
-+        break;
-+      }
-+      const uintptr_t candidate = exec_base - delta;
-+      if (candidate < kDarwinPageZeroEnd) {
-+        break;
-+      }
-+      data_pages = MemMap::MapAnonymousExact(data_cache_name.c_str(),
-+                                             reinterpret_cast<uint8_t*>(candidate),
-+                                             data_capacity, kProtRW, &error_str);
 +    }
      if (!data_pages.IsValid()) {
        exec_pages.Reset();

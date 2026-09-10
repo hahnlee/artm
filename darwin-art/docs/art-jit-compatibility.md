@@ -9738,3 +9738,8 @@ incomplete and still requires managed caller unwind validation.
 - Checkpoint 969 (2026-09-10): free-gap 후보 탐색과 Mach region headers를 runtime
   patch에 연결했다. staged compile은 통과했지만 blind fallback/query 오류 처리가
   진단을 가리므로, 다음은 정상 gap만 시도하고 allocate 결과를 보존하도록 정리한다.
+
+- Checkpoint 970 (2026-09-10): blind fallback을 제거하고 `mach_vm_region` 정상 gap만
+  exact allocate하도록 정리했다. query/extent 오류와 collision retry를 분리했으며,
+  staged runtime compile은 PASS다. 다음은 새 dylib relink 후 JIT acceptance에서
+  실제 gap 후보와 Mach 오류를 검증하는 단계다.
