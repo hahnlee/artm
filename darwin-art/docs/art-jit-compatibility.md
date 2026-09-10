@@ -9273,3 +9273,7 @@ incomplete and still requires managed caller unwind validation.
   tests (282 PASS). No new failure has appeared; the only non-pass record is
   the known `099-vmdebug` 60-second calibration timeout, already passing at
   120 seconds in isolation.
+- Checkpoint 893 (2026-09-10): The live full-corpus worker advanced to 293
+  completed tests (292 PASS). No new failures appeared; the only non-pass
+  record remains the already isolated `099-vmdebug` timeout under the shorter
+  parallel-run budget.
