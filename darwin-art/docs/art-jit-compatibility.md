@@ -9880,3 +9880,9 @@ incomplete and still requires managed caller unwind validation.
   호출자 실행 fallback을 push 전에 적용했다. patch 적용 검증과 foundation/link
   audit는 PASS했다. 다만 명시적 VM shutdown API에서 pool을 호출하는 경계와
   worker JNI-detach 순서 증거는 아직 남아 있다.
+
+- Checkpoint 995 (2026-09-10): latest tracked `0013` patch를 pristine HWUI
+  source에 다시 적용해 patch 문법과 queue stop predicate를 검증했다. 현재
+  foundation/link 산출물은 해당 patch 계열로 재빌드되었으며, explicit
+  `darwin_art_shutdown_process` 호출 경계와 JNI detach ordering acceptance는
+  미완료 상태로 유지한다.

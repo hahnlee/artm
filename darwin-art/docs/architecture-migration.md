@@ -14315,3 +14315,8 @@ or admission exception was added.
   foundation/link 재검증을 완료했다. 실제 `darwin_art_shutdown_process`가
   VM 생존 중 pool drain/join을 명시 호출하는 acceptance는 다음 단계로
   남겨 두었다.
+
+- Checkpoint 995 (2026-09-10): tracked CommonPool patch의 pristine-source
+  적용을 재검증하고 staged build identity가 그 patch를 포함하는지 확인했다.
+  shutdown API에서 명시적으로 pool을 drain/join하고 worker JNI detach를
+  VM 해제보다 앞세우는 end-to-end 증거는 다음 단계로 남겼다.
