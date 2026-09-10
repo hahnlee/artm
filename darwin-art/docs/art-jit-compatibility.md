@@ -9008,3 +9008,6 @@ incomplete and still requires managed caller unwind validation.
   completed tests with zero failures; four workers remain active.
 - Checkpoint 837 (2026-09-10): The post-fix final corpus rerun reached 132
   completed tests with zero failures; four workers remain active.
+- Checkpoint 838 (2026-09-10): Post-fix final corpus reached 203 completed
+  tests; two SIGILL failures are recorded (`127-checker-secondarydex` and
+  `149-suspend-all-stress`), so concurrency safety remains unresolved.
