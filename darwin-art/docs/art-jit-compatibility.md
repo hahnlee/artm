@@ -9218,3 +9218,8 @@ incomplete and still requires managed caller unwind validation.
   path before producing a fault record; the new lookup did not crash or emit
   invalid output. Image attribution therefore remains pending a crash-bearing
   run, while the timeout itself remains an unresolved concurrency failure.
+- Checkpoint 880 (2026-09-10): Re-linked the stress harness with
+  `DARWIN_ART_DEBUG_SUSPEND=1`. Every observed suspend wait started at
+  barrier=1 and completed within the polling loop; no barrier timeout was
+  logged. The 30-second harness timeout therefore occurs after dex2oat/startup,
+  narrowing the blocker away from the non-futex suspend barrier itself.
