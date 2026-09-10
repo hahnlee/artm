@@ -9630,6 +9630,12 @@ incomplete and still requires managed caller unwind validation.
   libraries가 로드되고 InputChannel MotionEvent DOWN/UP 및 CoreAudio가
   동작했으며 exit=0, fatal/JIT code-cache 오류 없이 완료됐다.
 
+- Checkpoint 953 (2026-09-10): 동일 APK를 90초 window와 물리 입력
+  sequence로 재실행했다. Unity/IL2CPP 초기화와 실제 `Product Name: Blue
+  Archive`, InputChannel DOWN/UP, CoreAudio가 유지됐고 fatal/SIG 오류 없이
+  exit=0이었다. 로그인 이후 전투 화면은 네트워크/GMS 계층 때문에 아직
+  미검증이다.
+
 - Checkpoint 949 (2026-09-10): expected-address hint 실험이 일부 child의
   JIT fallback을 유발해 되돌렸다. graphics bootstrap/link audit는 PASS이며,
   reservation 기반 bounded retry 없이는 JIT 주소 배치를 완료로 간주하지 않는다.

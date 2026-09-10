@@ -14091,6 +14091,11 @@ or admission exception was added.
   오류 없이 종료됐다. 로그인 이후 실제 전투 콘텐츠 진입은 여전히 별도
   acceptance 범위다.
 
+- Checkpoint 953 (2026-09-10): Blue Archive를 90초 동안 실제 물리 입력과
+  함께 실행해 Unity/IL2CPP, InputChannel, CoreAudio 및 exit=0을 재확인했다.
+  `Stub!` GMS 경고는 비치명적이지만 로그인/전투 콘텐츠 진입은 아직
+  검증하지 못했다.
+
 - Checkpoint 949 (2026-09-10): expected-address hint 실험이 일부 child의
   JIT fallback을 유발해 되돌렸다. graphics bootstrap/link audit는 PASS이며,
   AOSP stack-map 범위를 유지하려면 Darwin reservation 기반 bounded retry가
