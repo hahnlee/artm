@@ -13355,3 +13355,6 @@ or admission exception was added.
 - Checkpoint 790 (2026-09-10): Fresh corpus advanced through
   `133-static-invoke-super`, reaching 148 completed tests with zero failures.
   The same four-worker run remains active.
+- Checkpoint 791 (2026-09-10): Fresh corpus advanced through
+  `140-field-packing`, reaching 160 completed tests with zero failures. The
+  four-worker process remains active.
