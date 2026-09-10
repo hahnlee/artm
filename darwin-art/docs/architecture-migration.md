@@ -13329,3 +13329,9 @@ or admission exception was added.
   artifact is not consuming `compat/darwin_jit_memory.cc` directly; range
   publication must therefore be fixed at the ART patch call sites/archive
   input boundary before trusting any registry-only change.
+- Checkpoint 784 (2026-09-10): Explicitly removing the cached graphics archive
+  and relinking made the `4096`-byte page-tail publication active. Direct
+  reruns then passed `800-smali`, `1004-checker-volatile-ref-load`, and
+  `2045-uffd-kernelfault`; the corpus `--resume` command only replayed its
+  prior ledger and did not invalidate those rows. A full fresh corpus run is
+  required before updating aggregate counts.
