@@ -9168,3 +9168,12 @@ incomplete and still requires managed caller unwind validation.
   deterministic bad code sequence. The live run ended before an attachable
   process snapshot was possible, so no ownership claim was made and the
   concurrent JIT/AOT ABI issue remains open.
+- Checkpoint 872 (2026-09-10): Decoded the four-word fault sequence against
+  the linked runtime's ARM64 text. The `ldr x8,[x23] ; ldr x8,[x8,#8] ; mov
+  x0,x23 ; blr x8` form is the normal C++ virtual-dispatch sequence emitted by
+  the host runtime (the same shape appears in Skia/native ART code), not an
+  ART Java compressed-reference load. The faulting x23 values are host-sized
+  addresses outside the managed 1-TiB reference window. This redirects the
+  investigation to native-object/vtable corruption during `SuspendAll`, while
+  retaining the JIT/AOT stress reproducer; no unsafe signal-path probe or
+  speculative fix was added.
