@@ -9386,3 +9386,7 @@ incomplete and still requires managed caller unwind validation.
   Darwin shutdown can race runtime teardown. It now unconditionally exits the
   callback after attempting ART detach, preventing the second-callback fatal;
   runtime rebuild and acceptance rerun remain required.
+- Checkpoint 917 (2026-09-10): Corrected the ART 0188 patch hunk count after
+  the first rebuild caught a malformed patch; dry-run now applies cleanly to
+  pinned `runtime/thread.cc`. The corrected patch is pushed and is ready for
+  the next runtime rebuild/Chromium acceptance run.
