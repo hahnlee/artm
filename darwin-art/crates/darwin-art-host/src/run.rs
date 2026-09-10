@@ -212,7 +212,8 @@ fn run_owner(
         // Arm cleanup before opening the dynamic image. Every subsequent
         // early return, including loader/provider attach failures, now drops
         // through the same owner-thread shutdown path.
-        let mut shutdown_guard = RuntimeShutdownGuard::new(&mut runtime);
+        let mut shutdown_guard =
+            RuntimeShutdownGuard::new(&mut runtime, options.terminate_android_process);
 
         let bootstrap = attach_runtime(shutdown_guard.runtime(), &options.library)?;
         let graphics_attached = bootstrap.graphics_attached;
