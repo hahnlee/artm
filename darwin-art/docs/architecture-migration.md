@@ -13754,3 +13754,6 @@ or admission exception was added.
 - Checkpoint 890 (2026-09-10): The live corpus worker advanced to 266 tests
   (265 PASS). Active cases are late AOSP JVMTI/multithread tests, including
   `1962-multi-thread-events`; no new failures have appeared.
+- Checkpoint 891 (2026-09-10): The live worker advanced to 278 completed tests
+  (277 PASS). It is processing later JIT/JNI cases (`1968-force-early-return`
+  through `1972-jni-id-swap-indices`), with no new failures or timeouts.
