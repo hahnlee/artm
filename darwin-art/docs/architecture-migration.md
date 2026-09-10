@@ -13494,3 +13494,5 @@ or admission exception was added.
   rerun is now active.
 - Checkpoint 836 (2026-09-10): The post-fix final corpus rerun reached 92
   completed tests with zero failures; four workers remain active.
+- Checkpoint 837 (2026-09-10): The post-fix final corpus rerun reached 132
+  completed tests with zero failures; four workers remain active.
