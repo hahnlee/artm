@@ -14037,3 +14037,9 @@ or admission exception was added.
   MotionEvent ingress는 fatal 없이 통과했다. GMS local measurement의
   `RuntimeException: Stub!`은 앱을 중단하지 않은 optional service 경고로
   분류했으며, 범용 GMS 호환성 과제로 별도 남긴다.
+
+- Checkpoint 943 (2026-09-10): 동일 소스 상태에서 graphics link audit를
+  반복 실행해 rc=0 및 registrar=51을 확인했다. 최종 graphics dylib의
+  전후 SHA-256이 동일(`9ca2b85fb0ca1cf1b305fd6e9278738a620d9d8f2901aff995b752f89adca080`)
+  하므로 stale/mixed artifact 없이 단일 재현 빌드 산출물 identity를
+  검증했다.

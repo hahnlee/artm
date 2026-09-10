@@ -9573,3 +9573,9 @@ incomplete and still requires managed caller unwind validation.
   Unity/Metal 및 MotionEvent 초기화는 유지됐고 rc=0이었다. GMS
   measurement의 `Stub!`은 worker에서 catch된 optional analytics 예외로
   남아 있으며 핵심 앱 그래픽/입력 acceptance와 분리해 추적한다.
+
+- Checkpoint 943 (2026-09-10): `audit-runtime-graphics-link-fast`를
+  재실행해 closure/registrar=51 검사를 통과시켰다. 실행 전후 최종
+  `libdarwin_art_runtime_graphics.dylib` SHA-256이
+  `9ca2b85fb0ca1cf1b305fd6e9278738a620d9d8f2901aff995b752f89adca080`로
+  동일해 source/patch→archive→dylib 단일 identity 재현성을 확인했다.
