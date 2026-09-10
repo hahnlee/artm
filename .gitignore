@@ -1,3 +1,11 @@
 # macOS
 .DS_Store
 *.dSYM/
+/target/
+/_aosp/
+/_downloads/
+/_build/
+/_prebuilt/
+.ninja_log
+.ninja_deps
+tools/__pycache__/
