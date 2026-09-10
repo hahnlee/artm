@@ -14234,3 +14234,8 @@ or admission exception was added.
   도달했으며, 이후 TelephonyFrameworkInitializer manager 초기화 계약을 추가했다.
   macOS에 존재하지 않는 SIM/통신사 데이터를 합성하지 않고 AOSP의 absent-service
   기본값 경로를 유지한다.
+
+- Checkpoint 980 (2026-09-10): 변경 없는 Blue Archive base+arm64 split 실행이
+  `rc=0`으로 Unity 초기화까지 통과했다. platform unwind provider export와
+  TelephonyFrameworkInitializer manager 설치가 실사용 경로에서 검증됐으며,
+  art-bootstrap 14개 테스트와 APK runtime 감사가 PASS했다.

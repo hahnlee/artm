@@ -9795,3 +9795,9 @@ incomplete and still requires managed caller unwind validation.
   사라졌고 Unity/NPALogInfo 초기화까지 진행됐다. 다음 실패는 실제 SIM 근거 없이
   합성하지 않도록 TelephonyFrameworkInitializer의 manager만 AOSP 순서로 설치한
   뒤 재검증 중이며, subscription Binder는 아직 제공하지 않는다.
+
+- Checkpoint 980 (2026-09-10): 수정 후 Blue Archive 원본 base+arm64 split이
+  `rc=0`으로 종료되고 Unity 초기화 로그를 남겼다. 런처의 platform unwind
+  provider 회귀와 Telephony framework manager 초기화가 함께 검증됐다.
+  `cargo test -p art-bootstrap` 14개와 android-apk-app-runtime 감사
+  (fixture native/multidex/JNI 계약 포함)도 PASS했다.
