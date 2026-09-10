@@ -14157,3 +14157,7 @@ or admission exception was added.
   JIT fallback을 유발해 되돌렸다. graphics bootstrap/link audit는 PASS이며,
   AOSP stack-map 범위를 유지하려면 Darwin reservation 기반 bounded retry가
   추가로 필요하다.
+
+- Checkpoint 963 (2026-09-10): Astra 리뷰에 따라 Darwin JIT에서 `MAP_JIT|MAP_FIXED`를
+  제거했다. bootstrap/link audit는 PASS했으나 data/code 간격이 uint32 계약을 초과해
+  JIT audit는 미완료다. 다음 구현은 `mach_vm_allocate(VM_FLAGS_FIXED)` 후보 탐색이다.

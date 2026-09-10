@@ -9704,3 +9704,8 @@ incomplete and still requires managed caller unwind validation.
 - Checkpoint 949 (2026-09-10): expected-address hint 실험이 일부 child의
   JIT fallback을 유발해 되돌렸다. graphics bootstrap/link audit는 PASS이며,
   reservation 기반 bounded retry 없이는 JIT 주소 배치를 완료로 간주하지 않는다.
+
+- Checkpoint 963 (2026-09-10): Astra 리뷰에 따라 `MAP_JIT|MAP_FIXED`를 제거하고
+  실행 영역을 anywhere로 먼저 할당하도록 수정했다. graphics bootstrap/link audit는
+  PASS했으나 metadata가 32-bit stack-map 범위를 벗어나 JIT audit는 아직 실패한다.
+  다음 단계는 non-overwrite exact 후보를 bounded retry로 구현하는 것이다.
