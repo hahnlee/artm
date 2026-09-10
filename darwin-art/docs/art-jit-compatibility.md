@@ -9454,3 +9454,11 @@ incomplete and still requires managed caller unwind validation.
   전달되어 `ChromeImageButton` avatar를 명확히 hit했으며, 이전 acceptance
   좌표는 `(450,1220)`에서 miss였다. 현재 탭 전환 버튼 좌표/레이아웃은
   별도 고정이 필요하고, 이 실행에서도 native-thread fatal은 없었다.
+
+- Checkpoint 926 (2026-09-10): Astra 리뷰에 따라 process-exit 순서를
+  수정했다. Chromium 서비스 프로세스를 먼저 종료하고 ART/graphics
+  shutdown을 수행한 뒤 호스트를 종료한다. 재검증에서 실제
+  `TabSwitcherButtonView`와 `TabGridView`가 모두 hit되고 synthetic MOVE도
+  전달됐지만, 종료 시점에 여전히 `signal=6` 및 `hwuiTask0/1` detach
+  warning이 발생해 PASS로 닫히지 않았다. guest Bionic abort 표식은 없어
+  host-side abort stack을 LLDB로 확보하는 것이 다음 단계다.

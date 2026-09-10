@@ -13929,3 +13929,11 @@ or admission exception was added.
   `ChromeImageButton`에 도달했으며, 기존 `(225,610)` 계열은 실제 화면
   하단/콘텐츠로 변환되어 tab switcher를 miss했다. 따라서 남은 Chromium
   acceptance 실패는 JNI fatal보다 좌표·레이아웃 계약 문제로 분리한다.
+
+- Checkpoint 926 (2026-09-10): AOSP shutdown 계약에 맞추기 위해 Chrome
+  process-exit 경로에서 서비스 child를 먼저 drain한 후 전체 runtime
+  shutdown하도록 변경했다. 재검증은 두 실제 탭 뷰의 물리 hit와 framework
+  pulse를 확인했으나 종료 중 host `SIGABRT`가 남았다. 이는 입력/회전
+  문제가 아니라 native worker가 살아 있는 상태에서의 teardown 조건 문제로
+  분리되며, 다음 작업은 LLDB abort backtrace와 worker join 소유권을
+  고정하는 것이다.

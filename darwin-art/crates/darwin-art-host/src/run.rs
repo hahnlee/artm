@@ -350,20 +350,16 @@ fn run_owner(
                 graphics_attached,
             );
             if options.terminate_android_process {
-                if shutdown_guard
-                    .runtime()
-                    .engine()
-                    .map_or(-1, EngineSession::prepare_process_exit)
-                    != 0
-                {
-                    eprintln!("darwin-art-host: native DSO unload before exit failed");
-                }
+                // Stop child Android services before tearing down ART. Their
+                // renderer threads may still call through guest JNI/ELF
+                // trampolines, so unloading the graph first races live code.
                 let service_cleanup = service_processes
                     .terminate_for_process_exit()
                     .map_err(HostError::HostService);
-                let status = match (&outcome, &service_cleanup) {
-                    (Ok(_), Ok(())) => 0,
-                    (Err(error), _) | (_, Err(error)) => {
+                let runtime_cleanup = shutdown_guard.shutdown();
+                let status = match (&outcome, &service_cleanup, &runtime_cleanup) {
+                    (Ok(_), Ok(()), Ok(())) => 0,
+                    (Err(error), _, _) | (_, Err(error), _) | (_, _, Err(error)) => {
                         eprintln!("darwin-art-host: {error}");
                         1
                     }
@@ -408,17 +404,12 @@ fn run_owner(
             last_frame: frame_host.last_frame,
         };
         if options.terminate_android_process {
-            if shutdown_guard
-                .runtime()
-                .engine()
-                .map_or(-1, EngineSession::prepare_process_exit)
-                != 0
-            {
-                eprintln!("darwin-art-host: native DSO unload before exit failed");
-            }
             service_processes
                 .terminate_for_process_exit()
                 .map_err(HostError::HostService)?;
+            shutdown_guard
+                .shutdown()
+                .map_err(|_| HostError::RuntimeFailed(-1))?;
             exit_android_process(0);
         }
         shutdown_guard.shutdown()?;
