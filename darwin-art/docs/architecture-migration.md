@@ -13593,3 +13593,10 @@ or admission exception was added.
   failures, so the change removes a real publication race candidate but does
   not yet establish concurrent suspend correctness; the ABI corruption remains
   open.
+- Checkpoint 864 (2026-09-10): Added opt-in entrypoint-target diagnostics at
+  the generated `ArtMethod` quick-entrypoint getter and reran eight concurrent
+  `149-suspend-all-stress` processes against the atomic-pointer runtime. Four
+  failed, but zero getter calls observed the corrupt target pattern; all
+  failures still occurred after valid entrypoint loads. The defect is therefore
+  narrowed to post-getter generated-code register/frame restoration or the
+  indirect-call ABI, not entrypoint field publication itself.
