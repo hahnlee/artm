@@ -14367,3 +14367,10 @@ or admission exception was added.
   `d1d6843882bba3f1c4d686256fa04904c1268be2bc1d61c8a31af2321c0e8602`다. Chrome
   acceptance에서 세 worker attach와 key-create 성공을 확인했고, detach/join은
   Chrome `_exit` 특성상 embedded fixture에서 검증 대상으로 남겼다.
+
+- Checkpoint 1004 (2026-09-10): graphics bootstrap adapter에 RenderNode TU의
+  `DARWIN_ART_REAL_GRAPHICS` flag를 추가해 최종 dylib에서 fake RenderNode
+  구현을 제거했다. closure audit는 `fake-symbols=0`으로 PASS했고 Chromium
+  tab/grid도 PASS했다. worker detach의 동일-tid 증거는 raw embedded probe가
+  실제 ViewRoot HWUI를 만들지 않아 아직 미완료이며, 별도 test-only embedded
+  HWUI harness가 다음 작업이다.

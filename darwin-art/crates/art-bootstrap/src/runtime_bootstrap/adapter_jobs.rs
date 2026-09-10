@@ -49,6 +49,7 @@ pub(super) fn adapter_jobs(
             && matches!(
                 adapter_source,
                 "darwin_framework_natives.cc"
+                    | "darwin_framework_render_node_natives.cc"
                     | "darwin_framework_resource_registration.cc"
                     | "darwin_framework_graphics_runtime.cc"
             )

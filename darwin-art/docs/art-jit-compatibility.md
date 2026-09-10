@@ -9935,3 +9935,10 @@ incomplete and still requires managed caller unwind validation.
   attach 및 TLS 성공 로그를 확인했다. Chrome은 `_exit` 경로라 detach 로그는
   embedded shutdown fixture에서 별도 수집한다. full HTTPS gate는 macOS trust
   prerequisite 미충족으로 계속 보류한다.
+
+- Checkpoint 1004 (2026-09-10): Astra 리뷰로 graphics bootstrap의
+  `darwin_framework_render_node_natives.cc`가 real-graphics 매크로 없이
+  컴파일되어 fake RenderNode 심볼이 섞이던 결함을 확인했다. adapter flavor
+  allowlist를 수정하고 graphics closure를 재생성한 결과 `fake-symbols=0`,
+  Chromium tab/grid acceptance PASS를 확인했다. JIT audit는 의도적으로 UI를
+  생략하는 compiler-only 모드라 HWUI worker 증거로 사용하지 않는다.
