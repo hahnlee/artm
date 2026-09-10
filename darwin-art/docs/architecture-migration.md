@@ -14364,7 +14364,7 @@ or admission exception was added.
 - Checkpoint 1003 (2026-09-10): AOSP `attachRenderThreadToJvm` 소유권 계약은
   유지하고 Apple 전용 debug 계측만 추가했다. detached worker는 daemon attach 후
   pthread TLS destructor가 소유 detach하도록 재빌드했으며, graphics dylib SHA-256은
-  `d1d6843882bba3f1c4d686256fa04904c1268be2bc1d61c8a31af2321c0e8602`다. Chrome
+  `fe431b7031747d97bb9a205fd375e05b4b8f391b14fa0b9bc9911cac3566f7da`다. Chrome
   acceptance에서 세 worker attach와 key-create 성공을 확인했고, detach/join은
   Chrome `_exit` 특성상 embedded fixture에서 검증 대상으로 남겼다.
 
@@ -14374,3 +14374,9 @@ or admission exception was added.
   tab/grid도 PASS했다. worker detach의 동일-tid 증거는 raw embedded probe가
   실제 ViewRoot HWUI를 만들지 않아 아직 미완료이며, 별도 test-only embedded
   HWUI harness가 다음 작업이다.
+
+- Checkpoint 1005 (2026-09-10): HWUI closure의 private extern 보존과 단일
+  owner 링크를 적용해 CommonPool singleton 중복을 제거했다. Calculator 원본
+  APK의 실제 ViewRoot 경로에서 RenderThread 및 hwuiTask0/1 소유 attach,
+  task detach `result=0`, `async-workers-joined` 이전 detach, 이후 VM teardown을
+  확인했다. Chrome production `_exit` 경로 acceptance도 별도로 PASS했다.

@@ -120,7 +120,12 @@ fn main_result() -> Result<(), Box<dyn Error>> {
         // children. NativeLoader DSOs are explicitly unloaded immediately
         // before this process-style exit so JNI_OnUnload still observes the
         // Android lifecycle without racing an app-owned DestroyJavaVM.
-        terminate_android_process: env::var_os("DARWIN_ART_APK_APP_PACKAGE").is_some(),
+        // Production APK launches follow the Android process boundary and
+        // terminate with _exit.  The explicit opt-in is test-only: it keeps
+        // the real APK/ViewRoot/HWUI path but exercises the embeddable
+        // RuntimeShutdownGuard so worker JNI detach can be observed.
+        terminate_android_process: env::var_os("DARWIN_ART_APK_APP_PACKAGE").is_some()
+            && env::var_os("DARWIN_ART_FORCE_EMBEDDED_SHUTDOWN").is_none(),
     };
     let outcome = run(&options)?;
     if let Some(path) = frame_output {

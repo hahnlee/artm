@@ -219,9 +219,17 @@ for angle_library in libEGL.dylib libGLESv2.dylib; do
   fi
 done
 closure_object="$stage_dir/$closure_object_name"
+closure_private_extern_flags=()
+if [[ "$audit_mode" == art-runtime ]]; then
+  # Preserve HWUI's private extern bindings through ld -r. Without this,
+  # AnimationContext/RenderNodeDrawable/CommonPool become local symbols and
+  # the final image is forced to extract a second HWUI archive instance.
+  closure_private_extern_flags+=( -keep_private_externs )
+fi
 "$ld_bin" -r -arch arm64 \
   -platform_version macos "$sdk_version" "$sdk_version" \
   -syslibroot "$sdk_root" \
+  "${closure_private_extern_flags[@]}" \
   "${linker_archives[@]}" -o "$closure_object"
 if [[ "$(file "$closure_object")" != *"Mach-O 64-bit object arm64"* ]]; then
   echo "graphics-closure: relocatable closure is not arm64 Mach-O" >&2

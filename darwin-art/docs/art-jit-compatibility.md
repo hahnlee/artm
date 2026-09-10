@@ -9930,7 +9930,7 @@ incomplete and still requires managed caller unwind validation.
 
 - Checkpoint 1003 (2026-09-10): Apple-only HWUI JNI attach 계측을 추가하고
   JNI/HWUI archive 및 graphics dylib를 재빌드했다. 최종 dylib SHA-256은
-  `d1d6843882bba3f1c4d686256fa04904c1268be2bc1d61c8a31af2321c0e8602`다.
+  `fe431b7031747d97bb9a205fd375e05b4b8f391b14fa0b9bc9911cac3566f7da`다.
   Chrome tab/grid acceptance는 PASS했고 RenderThread와 hwuiTask0/1의 daemon
   attach 및 TLS 성공 로그를 확인했다. Chrome은 `_exit` 경로라 detach 로그는
   embedded shutdown fixture에서 별도 수집한다. full HTTPS gate는 macOS trust
@@ -9942,3 +9942,10 @@ incomplete and still requires managed caller unwind validation.
   allowlist를 수정하고 graphics closure를 재생성한 결과 `fake-symbols=0`,
   Chromium tab/grid acceptance PASS를 확인했다. JIT audit는 의도적으로 UI를
   생략하는 compiler-only 모드라 HWUI worker 증거로 사용하지 않는다.
+
+- Checkpoint 1005 (2026-09-10): Astra 분석으로 CommonPool/RenderThread 중복
+  링크를 확정했다. ART closure에 `ld -r -keep_private_externs`를 적용하고
+  최종 링크에서 HWUI archive 재입력을 제거한 뒤 closure/graphics audit가
+  `fake-symbols=0`으로 PASS했다. 실제 Calculator APK embedded shutdown에서
+  hwuiTask0/1 attach(tls=0) 후 `detach result=0`이 `async-workers-joined`보다
+  먼저 발생했고, 이후 libcore/ELF/VM teardown 순서도 PASS했다.

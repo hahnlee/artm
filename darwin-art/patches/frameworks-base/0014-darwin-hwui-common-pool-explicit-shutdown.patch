@@ -28,7 +28,7 @@
 +    instance().stop();
 +}
 +
-+extern "C" void darwin_art_hwui_shutdown_common_pool() {
++extern "C" __attribute__((visibility("default"))) void darwin_art_hwui_shutdown_common_pool() {
 +    CommonPool::shutdown();
 +}
 +

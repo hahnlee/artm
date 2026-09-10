@@ -704,6 +704,9 @@ pub(crate) fn audit_runtime_graphics_link_mode(
         .arg(&hwui_object)
         .arg(&surface_object)
         .arg(&surface_gpu_object)
+        // The relocatable graphics closure is the sole owner of HWUI's
+        // process-singleton pools; resolve it before optional providers.
+        .arg(&graphics_closure)
         // SurfaceControl transactions cross the exact Android 16
         // TransactionHandler/ResolvedComposerState boundary before the
         // Darwin Composer consumes them. Keep the frontend and its AOSP
@@ -714,10 +717,10 @@ pub(crate) fn audit_runtime_graphics_link_mode(
         .arg(root.join("_build/surfaceflinger-core/libui-fence-darwin.a"))
         .arg(root.join("_build/skia-metal-gpu/libskia.a"))
         .arg(root.join("_build/skia-metal-gpu/libskcms.a"))
-        // RenderNode/RecordingCanvas are the real HWUI display-list path. Keep
-        // these AOSP objects in the same GPU link so RenderNodeDrawable replay
-        // cannot silently fall back to the bitmap/CPU bridge.
-        .arg(root.join("_build/hwui-static-foundation/libhwui-static-darwin.a"))
+        // The relocatable graphics closure already force-loads the complete
+        // HWUI archive. Do not add the archive again here: CommonPool and
+        // RenderThread contain process-singleton state, and a second archive
+        // edge would create a distinct pool that shutdown cannot join.
         .arg(root.join("_build/android-graphics-jni/libandroid-graphics-jni-darwin.a"))
         // HWUI is an Android EGL/GLES client.  Keep its standard C ABI bound
         // to the project-built ANGLE dylibs instead of manufacturing another
@@ -726,10 +729,6 @@ pub(crate) fn audit_runtime_graphics_link_mode(
         // platform dispatch bridge linked below.
         .arg(root.join("_build/angle-source/out/DarwinArtRelease/libEGL.dylib"))
         .arg(root.join("_build/angle-source/out/DarwinArtRelease/libGLESv2.dylib"))
-        // This is the already-audited force/normal composition of all 32
-        // graphics archives. Place its fixed definitions before ART's normal
-        // archives so the latter extract only additional runtime providers.
-        .arg(&graphics_closure)
         // Keep OpenJDK JVMTI in the same ART image on Darwin. Its implementation
         // consumes ART-private symbols that are hidden across Android DSOs as
         // part of one APEX closure; embedding the archive preserves that
