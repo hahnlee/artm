@@ -9223,3 +9223,8 @@ incomplete and still requires managed caller unwind validation.
   barrier=1 and completed within the polling loop; no barrier timeout was
   logged. The 30-second harness timeout therefore occurs after dex2oat/startup,
   narrowing the blocker away from the non-futex suspend barrier itself.
+- Checkpoint 881 (2026-09-10): Ran `run-art-upstream-test.py` directly for
+  `149-suspend-all-stress` with suspend diagnostics. Interpreter, JIT, and
+  unmodified interpreter+optimized lanes all passed; every logged barrier
+  completed and no `SuspendAll` timeout occurred. This separates the runtime
+  path from the corpus wrapper's intermittent 30-second timeout behavior.
