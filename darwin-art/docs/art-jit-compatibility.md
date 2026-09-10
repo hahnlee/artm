@@ -9138,3 +9138,11 @@ incomplete and still requires managed caller unwind validation.
   generated call path (or its post-GC state), not the already-patched standard
   virtual/interface fast path. No speculative code change was made; the goal
   remains open pending path identification.
+- Checkpoint 868 (2026-09-10): Compared the failing LR addresses with the
+  `DARWIN JIT publish` ledger. The faulting call sites are at `0x109…`, while
+  this run's JIT cache publications are at `0x100…`; none of the failing LRs
+  falls inside a published JIT range. This identifies the reproduced crash as
+  an AOT/OAT or boot-image generated-call path (still exercised while JIT is
+  enabled), not a corrupt JIT allocation slot. A global CFI-registration trace
+  was too noisy and timed out, so no source change was made; the next probe
+  must map AOT ranges without logging every registration.
