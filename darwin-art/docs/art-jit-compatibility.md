@@ -9921,3 +9921,9 @@ incomplete and still requires managed caller unwind validation.
   `ThreadExitCallback`에 이전 stale `DetachCurrentThread(false)` 호출이
   없음을 역어셈블로 확인했다. Chromium lifecycle와 tab/grid graphics
   acceptance가 각각 PASS했다.
+
+- Checkpoint 1002 (2026-09-10): 재생성된 동일 graphics dylib에서 Chrome
+  process lifecycle(2회)와 tab/grid graphics acceptance, Calculator/Calendar
+  window-menu acceptance를 통과했다. 변경 없는 Blue Archive installed-record
+  base+arm64 split도 10초 실행 `rc=0`으로 Unity/IL2CPP 초기화까지 도달했다.
+  full HTTPS Chromium gate는 macOS trust prerequisite 미충족으로 보류한다.

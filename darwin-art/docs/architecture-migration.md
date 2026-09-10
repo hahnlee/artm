@@ -14354,3 +14354,9 @@ or admission exception was added.
   direct Runtime detach 경로는 제거된 이미지에 반영됐다. Chromium process
   lifecycle(2회)와 tab/grid Surface·입력·GLES/ANGLE/Graphite acceptance가
   PASS했다. HTTPS full gate는 macOS trust prerequisite 미충족으로 보류한다.
+
+- Checkpoint 1002 (2026-09-10): 새 runtime graphics artifact에서 Chrome
+  lifecycle/tab-grid, Calculator/Calendar menu, Blue Archive 원본 split 실행을
+  재검증했다. Chrome child services가 모두 reap되고 실제 MotionEvent·Surface
+  경로가 PASS했으며 Blue Archive는 Unity/IL2CPP 초기화와 `rc=0`을 기록했다.
+  HTTPS 통합 acceptance만 시스템 CA 신뢰 설정 대기 상태다.
