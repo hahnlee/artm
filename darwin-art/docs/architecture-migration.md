@@ -13794,3 +13794,8 @@ or admission exception was added.
 - Checkpoint 902 (2026-09-10): The live worker reached 801 completed tests
   (798 PASS), still with no hard failures. The three timeout records remain
   isolated follow-up work after the full run.
+- Checkpoint 903 (2026-09-10): The live worker reached 831 completed tests
+  (826 PASS). Two additional short-budget timeouts appeared (`658-fp-read-
+  barrier`, `659-unpadded-array`); no hard failures are recorded. All timeout
+  cases will be rerun in isolation with calibrated longer limits after corpus
+  completion.
