@@ -9781,3 +9781,10 @@ incomplete and still requires managed caller unwind validation.
   거부하며 owner 호출만 phase/failure를 변경한다. runtime 28, engine-sys 7,
   host 10개 테스트와 변경 없는 AOSP Calculator `2+3=5` 및 DeskClock Timer
   실제 입력·HWUI SurfaceTransaction acceptance가 모두 PASS했다.
+
+- Checkpoint 978 (2026-09-10): 공식 변경 없는 Chromium acceptance를 실행해
+  런타임의 macOS CA export/projection(157 roots)과 AndroidCAStore 반영을
+  확인했다. page-side HTTPS는 macOS `security verify-cert`가 생성된 mkcert
+  root를 `CSSMERR_TP_NOT_TRUSTED`로 거부하는 환경 전제 때문에 Chromium
+  `-202`에서 중단됐다. acceptance script에 사전 trust 검사를 추가했으며
+  시스템 키체인 변경은 수행하지 않았다.

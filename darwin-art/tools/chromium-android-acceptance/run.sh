@@ -29,6 +29,11 @@ port="${DARWIN_ART_CHROMIUM_ACCEPTANCE_PORT:-$((20000 + RANDOM % 20000))}"
 cert="$output/localhost.pem"
 key="$output/localhost-key.pem"
 mkcert -cert-file "$cert" -key-file "$key" 127.0.0.1 localhost ::1 >/dev/null
+if ! security verify-cert -c "$cert" -p ssl -s 127.0.0.1 >/dev/null 2>&1; then
+  echo "Chromium acceptance requires the generated mkcert root to be trusted by macOS" >&2
+  echo "Install/trust the current user's mkcert root, then rerun this gate" >&2
+  exit 69
+fi
 python3 "$fixture_source/server.py" --directory "$fixture" \
   --report "$output/reports.log" --cert "$cert" --key "$key" --port "$port" \
   >"$output/server.log" 2>&1 &

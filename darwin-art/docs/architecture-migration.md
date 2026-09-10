@@ -14221,3 +14221,9 @@ or admission exception was added.
   `begin_shutdown`, `mark_failed`의 foreign 호출도 Rust 상태를 건드리지
   않으며 owner만 변경할 수 있다. 관련 Rust/FFI 테스트와 AOSP Calculator/
   DeskClock 실제 APK acceptance가 PASS했다.
+
+- Checkpoint 978 (2026-09-10): Chromium 공식 APK 실행에서 runtime CA bridge가
+  157개 macOS root를 export/projection하는 증거를 확인했지만, host
+  `security verify-cert`가 임시 mkcert root를 신뢰하지 않아 Chromium TLS
+  `net_error -202`가 발생했다. 테스트는 시스템 변경 없이 명확한 preflight
+  오류를 내도록 보강했으며, 키체인 설치 후 재실행이 남은 단계다.
