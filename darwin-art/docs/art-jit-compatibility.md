@@ -9485,3 +9485,10 @@ incomplete and still requires managed caller unwind validation.
   요청 후 join/await 없이 ELF unload로 진행하는 경계를 지적했으며, 각
   worker와 cleanup 단계의 entry/exit 계측을 추가해 다음 실행에서 정확한
   abort 지점을 분리한다.
+
+- Checkpoint 930 (2026-09-10): 최신 debug host를 재빌드한 뒤 Chromium
+  acceptance를 재실행해 `PASS actual-views=button+grid`를 확인했다.
+  물리 MotionEvent와 `GLES+ANGLE+Graphite+Dawn+MoltenVK+AHB+
+  SurfaceFlinger+Metal` 경로가 통과했고, APK process-exit는 ELF unload
+  없이 `_exit`해 이전 SIGABRT 없이 종료됐다. 산출물은
+  `_build/chromium-tab-graphics-acceptance/run.PPgNWK`에 보존됐다.

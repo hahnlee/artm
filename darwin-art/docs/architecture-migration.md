@@ -13958,3 +13958,10 @@ or admission exception was added.
   interrupt만 요청하고 완료를 기다리지 않는 상태가 확인되어, stop과
   후속 ELF unload/detach/DestroyJavaVM 경계를 구분하는 단계 계측을
   추가했다. 다음은 이 증거로 AOSP식 worker drain/join 소유권을 고정한다.
+
+- Checkpoint 930 (2026-09-10): 수정된 debug host로 실제 Chromium을
+  재검증해 `actual-views=button+grid` 및 GPU/SurfaceFlinger 전체 경로
+  PASS를 확인했다. APK 프로세스는 AOSP 경계대로 service child를 reap한
+  뒤 live native graph를 유지한 채 `_exit`했고, 이전 shutdown SIGABRT는
+  재현되지 않았다. 임베디드/fixture의 명시적 teardown 계약은 별도로
+  유지한다.
