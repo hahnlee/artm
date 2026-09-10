@@ -13900,3 +13900,9 @@ or admission exception was added.
   `JNI_EDETACHED`인 callback 경계에서만 daemon attach하며 TLS lease가
   소유한 경우에만 종료 시 detach한다. 비-detached GetEnv 오류는 그대로
   거부한다.
+- Checkpoint 922 (2026-09-10): Astra 재리뷰로 이전 Chromium fatal이 stale
+  graphics dylib에서 나온 것임을 확인했다. runtime graphics closure를
+  재링크하고 LLDB disassembly로 `ThreadExitCallback`에 0188 전역 detach가
+  없고 `CurrentArtEnv`의 detached GetEnv/attach 경로가 반영된 것을 검증했다.
+  새 이미지 acceptance는 이제 upstream native-thread 미-detach fatal까지
+  진행하며, 이 남은 경로는 실제 worker owner 문제로 분리한다.

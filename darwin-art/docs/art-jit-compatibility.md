@@ -9425,3 +9425,9 @@ incomplete and still requires managed caller unwind validation.
   실제로 도달 가능하게 고쳤다. `JNI_EDETACHED`만 명시적으로 attach하고
   TLS ownership lease가 새 attachment만 detach하도록 하여 JNI 조회 계약과
   소유권을 분리했다.
+- Checkpoint 922 (2026-09-10): stale graphics dylib를 제거하기 위해 runtime
+  graphics closure를 재생성하고 link audit를 통과시켰다. 최종 dylib의
+  `ThreadExitCallback` disassembly에는 0188의 Runtime detach 호출이 없고,
+  `CurrentArtEnv`에는 detached `GetEnv` 후 attach 경로가 존재한다. 동일
+  이미지의 Chromium 재실행은 upstream native-thread detach fatal을 남겨
+  실제 worker owner lifecycle 문제로 고정했다.

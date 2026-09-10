@@ -14,6 +14,7 @@ critical_patch="$project_root/patches/frameworks-base/0001-darwin-android-critic
 lazy_native_window_patch="$project_root/patches/frameworks-base/0002-darwin-lazy-native-window-jni.patch"
 require_jni_env_patch="$project_root/patches/frameworks-base/0011-darwin-hwui-require-jni-env.patch"
 globalref_jni_patch="$project_root/patches/frameworks-base/0012-darwin-hwui-globalref-attach.patch"
+thread_detach_patch="$project_root/patches/frameworks-base/0010-darwin-hwui-thread-detach.patch"
 hwui_gpu_patch="$project_root/patches/frameworks-base/0003-darwin-hwui-gpu-layoutlib.patch"
 mode=full
 cpu_diagnostic=0
@@ -72,6 +73,7 @@ verify_hash "$source_hwui/platform/darwin/utils/SharedLib.cpp" "$DARWIN_SHARED_L
 verify_hash "$critical_patch" "$CRITICAL_JNI_PATCH_SHA256"
 verify_hash "$lazy_native_window_patch" "$LAZY_NATIVE_WINDOW_PATCH_SHA256"
 verify_hash "$globalref_jni_patch" "$GLOBALREF_JNI_PATCH_SHA256"
+verify_hash "$thread_detach_patch" "$THREAD_DETACH_PATCH_SHA256"
 
 mkdir -p "$build_dir" "$object_dir"
 sources_file="$build_dir/android-graphics-jni-sources.txt"
@@ -197,6 +199,7 @@ fi
 cp -R "$source_hwui" "$patched_hwui"
 patch -s -d "$patched_hwui" -p1 < "$critical_patch"
 patch -s -d "$patched_hwui" -p1 < "$lazy_native_window_patch"
+patch -s -d "$patched_hwui" -p1 < "$thread_detach_patch"
 patch -s -d "$patched_hwui" -p1 < "$require_jni_env_patch"
 patch -s -d "$patched_hwui" -p1 < "$globalref_jni_patch"
 gpu_mode=1

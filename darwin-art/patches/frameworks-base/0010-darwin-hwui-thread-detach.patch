@@ -11,29 +11,40 @@ diff --git a/jni/android_graphics_HardwareRenderer.cpp b/jni/android_graphics_Ha
  #ifdef __ANDROID__
  #include <pipeline/skia/ShaderCache.h>
  #include <private/EGL/cache.h>
-@@ -1076,4 +1079,16 @@
+@@ -1076,6 +1079,18 @@
  };
- 
+
  static JavaVM* mJvm = nullptr;
 +#if defined(__APPLE__)
 +static pthread_key_t gArtThreadKey;
 +static pthread_once_t gArtThreadKeyOnce = PTHREAD_ONCE_INIT;
 +static void detachArtThread(void*) {
 +    if (mJvm != nullptr) {
-+        mJvm->DetachCurrentThread();
++        (void)mJvm->DetachCurrentThread();
 +    }
 +}
 +static void initArtThreadKey() {
 +    pthread_key_create(&gArtThreadKey, &detachArtThread);
 +}
 +#endif
+ 
  static void attachRenderThreadToJvm(const char* name) {
-@@ -1086,4 +1102,8 @@
+     LOG_ALWAYS_FATAL_IF(!mJvm, "No jvm but we set the hook??");
+@@ -1085,7 +1100,18 @@
+     args.name = name;
      args.group = NULL;
      JNIEnv* env;
-     mJvm->AttachCurrentThreadAsDaemon(&env, (void*) &args);
+-    mJvm->AttachCurrentThreadAsDaemon(&env, (void*) &args);
 +#if defined(__APPLE__)
 +    pthread_once(&gArtThreadKeyOnce, &initArtThreadKey);
++#endif
++    JNIEnv* existing = nullptr;
++    const jint state = mJvm->GetEnv(reinterpret_cast<void**>(&existing), JNI_VERSION_1_6);
++    if (state == JNI_OK) return;
++    LOG_ALWAYS_FATAL_IF(state != JNI_EDETACHED, "Unexpected JavaVM GetEnv result: %d", state);
++    LOG_ALWAYS_FATAL_IF(mJvm->AttachCurrentThreadAsDaemon(&env, (void*) &args) != JNI_OK,
++                       "Failed to attach HWUI render thread");
++#if defined(__APPLE__)
 +    pthread_setspecific(gArtThreadKey, reinterpret_cast<void*>(1));
 +#endif
  }
