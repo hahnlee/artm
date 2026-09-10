@@ -1,0 +1,8 @@
+diff --git a/jni/GraphicsJNI.h b/jni/GraphicsJNI.h
+--- a/jni/GraphicsJNI.h
++++ b/jni/GraphicsJNI.h
+@@ -362,1 +362,3 @@
+-            LOG_ALWAYS_FATAL("Failed to get JNIEnv for JavaVM: %p", mVm);
++            if (mVm->AttachCurrentThreadAsDaemon(&env, nullptr) != JNI_OK) {
++                LOG_ALWAYS_FATAL("Failed to get JNIEnv for JavaVM: %p", mVm);
++            }

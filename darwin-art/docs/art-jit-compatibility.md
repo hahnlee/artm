@@ -9413,6 +9413,10 @@ incomplete and still requires managed caller unwind validation.
   auto-detach는 TLS destructor contract를 위반하는 fatal을 재현하므로
   보류한다. 기존 corpus PASS 수치는 유지하되 기능별 compiled execution
   증거와 앱 acceptance를 별도 ledger로 관리한다.
+- Checkpoint 920 (2026-09-10): graphics JNI `0012` 패치의 SHA-256을
+  `android16-android-graphics-jni.lock`에 추가하고 object-audit를 통과시켰다.
+  registrar=51/archive-members=62와 patch 적용을 확인했으며, stale patch
+  산출물을 조용히 재사용하지 않도록 build identity 검증을 강화했다.
 - Checkpoint 919 (2026-09-10): ART 0188을 manifest에서 제외하고 runtime
   bootstrap을 성공적으로 재생성했다. `ThreadExitCallback` 전역 우회는
   제거된 상태이며, Chromium worker별 attach 성공·소유권·detach 순서를

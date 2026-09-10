@@ -13891,3 +13891,7 @@ or admission exception was added.
   `thread.cc`에 전역 auto-detach가 더 이상 없음을 확인했다. 다음은
   Chromium worker의 실제 생성/종료 owner를 계측해 명시적 attach ownership을
   구현하는 단계다.
+- Checkpoint 920 (2026-09-10): graphics JNI의 미커밋 `0012` GlobalRef attach
+  패치를 lock manifest에 SHA-256으로 고정하고 object-audit에서 patch 적용,
+  registrar=51, archive-members=62를 재검증했다. graphics script가 이제
+  패치 identity를 검증한 뒤에만 산출물을 materialize한다.
