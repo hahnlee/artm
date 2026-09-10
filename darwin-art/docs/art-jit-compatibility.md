@@ -9892,3 +9892,15 @@ incomplete and still requires managed caller unwind validation.
   호출하도록 연결했다. worker join은 ART/ JNI와 ICU teardown 전에 수행된다.
   patch 적용, 88-object foundation 빌드, graphics closure 및 Calculator/
   DeskClock acceptance를 최신 artifact에서 PASS했다.
+
+- Checkpoint 997 (2026-09-10): Astra가 지적한 실제 호출 순서를 수정했다.
+  CommonPool join을 `ShutdownFrameworkAsyncWorkers()`로 분리해
+  `DestroyJavaVM()` 이전에 호출하고, ICU cleanup은 기존 늦은 단계에 유지했다.
+  이는 worker JNI detach-before-VM 계약을 위한 구조적 연결이며, end-to-end
+  ordering 로그 acceptance는 추가 검증 대상으로 남아 있다.
+
+- Checkpoint 998 (2026-09-10): CommonPool 헤더 의존성이 Darwin 호스트
+  헤더와 충돌해 Astra 리뷰 후 제거했다. 실제 CommonPool.cpp 소유 TU에
+  C ABI shutdown wrapper를 두고 runtime adapter는 단일 함수만 호출한다.
+  native suspension에서 libcore/ELF unload 전에 pool drain/join을 수행하며
+  graphics closure와 Calculator/DeskClock acceptance가 PASS했다.

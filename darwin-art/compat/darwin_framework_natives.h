@@ -16,6 +16,9 @@ enum class FrameworkGraphicsBackend {
 FrameworkGraphicsBackend GetFrameworkGraphicsBackend();
 bool InitializeFrameworkGraphicsRuntime();
 void ShutdownFrameworkGraphicsRuntime();
+// Stop HWUI asynchronous workers while ART/JNI are still alive, before VM
+// detach/destruction. This is separate from ICU teardown below.
+void ShutdownFrameworkAsyncWorkers();
 bool InstallFrameworkResourceRuntime(JNIEnv* env);
 bool ShutdownFrameworkResourceRuntime(JNIEnv* env);
 bool RegisterFrameworkNatives(JNIEnv* env);

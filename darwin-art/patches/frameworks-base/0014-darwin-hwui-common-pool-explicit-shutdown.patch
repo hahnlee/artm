@@ -17,7 +17,7 @@
      void workerLoop();
 --- a/thread/CommonPool.cpp
 +++ b/thread/CommonPool.cpp
-@@ -53,6 +53,14 @@
+@@ -53,6 +53,18 @@
  }
  
  CommonPool::~CommonPool() {
@@ -26,6 +26,10 @@
 +
 +void CommonPool::shutdown() {
 +    instance().stop();
++}
++
++extern "C" void darwin_art_hwui_shutdown_common_pool() {
++    CommonPool::shutdown();
 +}
 +
 +void CommonPool::stop() {

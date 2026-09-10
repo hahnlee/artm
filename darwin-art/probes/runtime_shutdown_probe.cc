@@ -349,6 +349,14 @@ int32_t run_shutdown(const ShutdownState& state) {
         }
         std::cerr << "ART Darwin shutdown stage=graphics-finalize exit\n";
       }
+      // Stop HWUI async producers and join their attached workers while all
+      // framework/resource owners and the VM are still live.  This mirrors
+      // Android's producer-quiescence boundary before libcore/ELF teardown.
+      {
+        art::ScopedThreadSuspension suspended(art_thread, art::ThreadState::kNative);
+        darwin_art::ShutdownFrameworkAsyncWorkers();
+      }
+      std::cerr << "ART Darwin shutdown stage=async-workers-joined\n";
       std::cerr << "ART Darwin shutdown stage=libcore-unload enter\n";
       if (!darwin_art::ShutdownLibcoreNatives()) {
         std::cerr << "ART Darwin shutdown: libcore host state restore failed\n";

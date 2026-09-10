@@ -14326,3 +14326,15 @@ or admission exception was added.
   staged patch 적용과 static foundation/link audit, Calculator/DeskClock
   acceptance를 통과했다. 실제 worker JNI detach-before-VM 로그 증거는
   다음 acceptance에서 수집한다.
+
+- Checkpoint 997 (2026-09-10): graphics shutdown 전체를 VM 이후에 실행하던
+  순서 오류를 바로잡았다. async worker drain/join만 별도 경계로 분리해
+  resource/ELF teardown과 owner detach 전에 실행하고, ICU backing cleanup은
+  VM 파괴 후 유지한다. 동일 artifact link audit는 PASS했으며 실제 worker
+  detach 순서 로그 acceptance는 아직 남아 있다.
+
+- Checkpoint 998 (2026-09-10): HWUI async worker 종료를 플랫폼 헤더 없이
+  유지하도록 CommonPool 소유 TU의 C ABI wrapper로 경계를 축소했다.
+  graphics finalize 뒤 `ScopedThreadSuspension(kNative)`에서 drain/join하고
+  이후 libcore/ELF/resource teardown 및 VM detach/destroy를 수행한다.
+  graphics closure와 AOSP Calculator/DeskClock acceptance가 PASS했다.
