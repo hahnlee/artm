@@ -14279,3 +14279,8 @@ or admission exception was added.
   closure `undefined=0 exports=15`를 PASS했다. Rust lifecycle/JNI ownership 및
   shutdown 테스트, JIT 기능별 ledger, native graph, 변경 없는 핵심 APK와
   window-menu acceptance가 같은 artifact 계열에서 모두 통과했다.
+
+- Checkpoint 989 (2026-09-10): Chromium page-side acceptance 결과를 다시
+  확인했지만 host macOS가 mkcert root를 신뢰하지 않아 HTTPS report가 생성되지
+  않았다. 시스템 키체인이나 APK를 임의로 변경하지 않고, 해당 외부 전제를
+  명시적인 잔여 항목으로 유지한다.

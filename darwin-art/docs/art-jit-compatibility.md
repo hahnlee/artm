@@ -9843,3 +9843,8 @@ incomplete and still requires managed caller unwind validation.
   artifact에서 재실행해 C ABI dylib closure `undefined=0 exports=15`를
   확인했다. lifecycle/JNI ownership 28개 테스트, JIT 전체 audit, native graph,
   core/window APK acceptance 결과도 모두 PASS 상태로 유지된다.
+
+- Checkpoint 989 (2026-09-10): Chromium acceptance 산출물을 재확인했으나
+  page-side HTTPS `reports.log`는 비어 있고 macOS mkcert root trust 전제가
+  충족되지 않은 상태다. 런타임 CA projection이나 APK 경로는 변경하지 않았으며,
+  trust 설정 없이 성공을 주장하지 않는다.
