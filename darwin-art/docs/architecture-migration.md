@@ -13814,3 +13814,9 @@ or admission exception was added.
 - Checkpoint 907 (2026-09-10): The worker reached 1,056 completed tests
   (1,049 PASS), with no hard failures. Twenty tests remain in the corpus;
   timeout classification is still deferred until the worker terminates.
+- Checkpoint 908 (2026-09-10): The full 1,076-test corpus terminated with
+  1,069 PASS, zero hard failures, and seven 60-second budget timeouts.
+  Isolated longer-budget runs now pass all three lanes for `099-vmdebug`,
+  `2041-bad-cleaner`, `2048-bad-native-registry`, `658-fp-read-barrier`,
+  `659-unpadded-array`, `916-obsolete-jit`, and `924-threads`; the short
+  timeout ledger is therefore classified as calibration, not runtime failure.
