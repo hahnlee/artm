@@ -9665,6 +9665,12 @@ incomplete and still requires managed caller unwind validation.
   사라졌다. metadata release inspector와 support DEX를 재생성했으며
   android-apk-app-runtime audit도 PASS했다.
 
+- Checkpoint 958 (2026-09-10): receiver metadata와 permission 변경을 반영한
+  support DEX(`methods=3097`) 및 release inspector를 재생성했다. 최종
+  Blue Archive 30초 실행은 `Product Name: Blue Archive`, CoreAudio와
+  `exit=0`을 확인했고 `Stub!`, `Component not initialized`,
+  `ACCESS_NETWORK_STATE`, fatal/SIG 로그가 모두 없었다.
+
 - Checkpoint 949 (2026-09-10): expected-address hint 실험이 일부 child의
   JIT fallback을 유발해 되돌렸다. graphics bootstrap/link audit는 PASS이며,
   reservation 기반 bounded retry 없이는 JIT 주소 배치를 완료로 간주하지 않는다.

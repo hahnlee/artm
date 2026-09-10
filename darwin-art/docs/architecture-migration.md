@@ -14121,6 +14121,11 @@ or admission exception was added.
   exit=0으로 종료했다. metadata inspector unit/audit gate도 PASS했으며,
   로그인·전투 화면 전환은 여전히 별도 acceptance로 남긴다.
 
+- Checkpoint 958 (2026-09-10): support DEX(`methods=3097`)와 release metadata
+  inspector를 최신 소스에서 재생성한 뒤 Blue Archive를 단독 실행했다.
+  manifest receiver 조회와 normal network permission 경계가 작동했고,
+  GMS 초기화 연쇄 오류 없이 Unity/CoreAudio 및 exit=0을 재확인했다.
+
 - Checkpoint 949 (2026-09-10): expected-address hint 실험이 일부 child의
   JIT fallback을 유발해 되돌렸다. graphics bootstrap/link audit는 PASS이며,
   AOSP stack-map 범위를 유지하려면 Darwin reservation 기반 bounded retry가
