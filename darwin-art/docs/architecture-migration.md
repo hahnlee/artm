@@ -13906,3 +13906,12 @@ or admission exception was added.
   없고 `CurrentArtEnv`의 detached GetEnv/attach 경로가 반영된 것을 검증했다.
   새 이미지 acceptance는 이제 upstream native-thread 미-detach fatal까지
   진행하며, 이 남은 경로는 실제 worker owner 문제로 분리한다.
+
+- Checkpoint 923 (2026-09-10): Astra가 지적한 stale native object 원인을
+  빌드 캐시 identity 누락으로 확정했다. HWUI와 graphics JNI의
+  `compile_cached` key에 materialized patch identity를 추가해 헤더 전용
+  변경도 재컴파일되도록 수정했고, 재빌드 후 CommonPool object에서
+  `getOnStartHook()` undefined reference를 확인했다. graphics closure
+  audit는 PASS했으나 최신 Chromium acceptance는 TabSwitcher/TabGrid
+  evidence 부족으로 종료됐다. 남은 과제는 CommonPool 종료 순서 및
+  acceptance 입력 타이밍을 실제 AOSP lifecycle에 맞춰 닫는 것이다.

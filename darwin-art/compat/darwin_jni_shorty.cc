@@ -1,5 +1,7 @@
 #include <cstring>
 #include <cstdint>
+#include <pthread.h>
+#include <new>
 #include <string>
 
 #include "darwin_jni_shorty.h"
@@ -11,16 +13,54 @@
 namespace android {
 
 namespace {
-struct LazyAttachment {
-  art::JavaVMExt* vm = nullptr;
-  ~LazyAttachment() {
-    if (vm != nullptr) {
-      (void)vm->DetachCurrentThread();
+struct OwnedAttachment {
+  art::JavaVMExt* vm;
+};
+pthread_key_t g_lazy_attach_key;
+pthread_once_t g_lazy_attach_key_once = PTHREAD_ONCE_INIT;
+void DetachLazyAttachment(void* value) {
+  auto* owned = static_cast<OwnedAttachment*>(value);
+  if (owned != nullptr && owned->vm != nullptr) {
+    JNIEnv* env = nullptr;
+    if (owned->vm->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_6) == JNI_OK) {
+      (void)owned->vm->DetachCurrentThread();
     }
   }
+  delete owned;
+}
+void InitLazyAttachmentKey() {
+  (void)pthread_key_create(&g_lazy_attach_key, &DetachLazyAttachment);
+}
+
+struct ProviderAttachment {
+  art::JavaVMExt* vm = nullptr;
+  bool owned = false;
 };
-thread_local LazyAttachment g_lazy_attachment;
+thread_local ProviderAttachment g_provider_attachment;
 }  // namespace
+
+extern "C" int darwin_art_attach_native_thread() {
+  art::Runtime* runtime = art::Runtime::Current();
+  if (runtime == nullptr || runtime->GetJavaVM() == nullptr) return 0;
+  art::JavaVMExt* vm = runtime->GetJavaVM();
+  JNIEnv* env = nullptr;
+  const jint state = vm->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_6);
+  if (state == JNI_OK) return 0;
+  if (state != JNI_EDETACHED || vm->AttachCurrentThreadAsDaemon(&env, nullptr) != JNI_OK) {
+    return -1;
+  }
+  g_provider_attachment.vm = vm;
+  g_provider_attachment.owned = true;
+  return 1;
+}
+
+extern "C" void darwin_art_detach_native_thread() {
+  art::JavaVMExt* vm = g_provider_attachment.vm;
+  const bool owned = g_provider_attachment.owned;
+  g_provider_attachment.vm = nullptr;
+  g_provider_attachment.owned = false;
+  if (owned && vm != nullptr) (void)vm->DetachCurrentThread();
+}
 
 JNIEnv* CurrentArtEnv() {
   art::Runtime* runtime = art::Runtime::Current();
@@ -39,10 +79,16 @@ JNIEnv* CurrentArtEnv() {
   const jint state = vm->GetEnv(reinterpret_cast<void**>(&existing), JNI_VERSION_1_6);
   if (state != JNI_EDETACHED) return state == JNI_OK ? existing : nullptr;
   JNIEnv* attached = nullptr;
+  (void)pthread_once(&g_lazy_attach_key_once, &InitLazyAttachmentKey);
   if (vm->AttachCurrentThreadAsDaemon(&attached, nullptr) != JNI_OK) {
     return nullptr;
   }
-  g_lazy_attachment.vm = vm;
+  auto* owned = new (std::nothrow) OwnedAttachment{vm};
+  if (owned == nullptr || pthread_setspecific(g_lazy_attach_key, owned) != 0) {
+    delete owned;
+    (void)vm->DetachCurrentThread();
+    return nullptr;
+  }
   return attached;
 }
 

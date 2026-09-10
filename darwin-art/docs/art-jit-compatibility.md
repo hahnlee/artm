@@ -9431,3 +9431,13 @@ incomplete and still requires managed caller unwind validation.
   `CurrentArtEnv`에는 detached `GetEnv` 후 attach 경로가 존재한다. 동일
   이미지의 Chromium 재실행은 upstream native-thread detach fatal을 남겨
   실제 worker owner lifecycle 문제로 고정했다.
+
+- Checkpoint 923 (2026-09-10): Astra 분석으로 HWUI/graphics native object
+  cache가 `.cpp` SHA만 사용해 헤더 패치 변경을 놓치던 문제를 확정했다.
+  두 빌드 스크립트의 cache key에 materialized patch identity를 포함하고
+  전체 HWUI/graphics closure를 재생성했다. `thread_CommonPool.cpp.o`의
+  `RenderThread::getOnStartHook()` 참조를 확인했고 graphics link audit는
+  `registrar=51 fake-symbols=0`으로 통과했다. 새 Chromium 실행에서는
+  기존 fatal은 사라졌지만 acceptance가 실제 TabSwitcher/TabGrid 로그를
+  만들지 못해 실패했으며, CommonPool 종료 warning과 별도 abort 경로를
+  다음 단계에서 분리 조사한다.

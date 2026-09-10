@@ -353,7 +353,11 @@ compile_cached() {
   local command_text
   command_text="$(printf '%q ' "${command[@]}")"
   local key
-  key="$(printf '%s\n%s\n' "$source_sha" "$command_text" | shasum -a 256 | awk '{print $1}')"
+  # The source shadow tree is materialized from tracked patches, while the
+  # object cache is shared across invocations. Include the complete patched
+  # tree identity so header-only patch changes cannot reuse stale objects.
+  key="$(printf '%s\n%s\n%s\n' "$patch_identity" "$source_sha" "$command_text" |
+    shasum -a 256 | awk '{print $1}')"
   if [[ -f "$object" && -f "$meta" && -f "$command_file" && "$(<"$meta")" == "$key" ]]; then
     echo "hwui-static-foundation: cache $label"
     return

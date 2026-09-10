@@ -20,8 +20,20 @@
 #include <unordered_set>
 
 extern "C" void darwin_art_bionic_errno_store(int32_t android_errno);
+extern "C" __attribute__((weak)) int darwin_art_attach_native_thread(void) {
+  return 0;
+}
+extern "C" __attribute__((weak)) void darwin_art_detach_native_thread(void) {}
 
 namespace {
+thread_local bool g_art_provider_attachment = false;
+
+void DetachArtProviderThread(void*) {
+  if (g_art_provider_attachment && darwin_art_detach_native_thread != nullptr) {
+    darwin_art_detach_native_thread();
+    g_art_provider_attachment = false;
+  }
+}
 
 static_assert(sizeof(DarwinArtAndroidPthread) == 8);
 static_assert(sizeof(DarwinArtAndroidPthreadKey) == 4);
@@ -348,6 +360,9 @@ void* HostOwnedThreadStart(void* opaque) {
     while (!entry->published) entry->startup_condition.wait(lock);
   }
   current_thread_token = static_cast<uint64_t>(entry->token);
+  if (darwin_art_attach_native_thread != nullptr) {
+    g_art_provider_attachment = darwin_art_attach_native_thread() > 0;
+  }
   if (std::getenv("DARWIN_ART_DEBUG_PTHREAD_WAITS") != nullptr) {
     std::fprintf(stderr,
                  "DARWIN pthread thread-start token=%llu routine=%p argument=%p\n",
@@ -380,7 +395,10 @@ void* HostOwnedThreadStart(void* opaque) {
                    static_cast<unsigned long long>(words[15]));
     }
   }
-  void* result = entry->routine(entry->argument);
+  void* result = nullptr;
+  pthread_cleanup_push(&DetachArtProviderThread, nullptr);
+  result = entry->routine(entry->argument);
+  pthread_cleanup_pop(1);
   if (std::getenv("DARWIN_ART_DEBUG_PTHREAD_WAITS") != nullptr) {
     char thread_name[64] = {};
     (void)pthread_getname_np(pthread_self(), thread_name, sizeof(thread_name));

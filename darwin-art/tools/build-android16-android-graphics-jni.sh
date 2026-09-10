@@ -290,6 +290,15 @@ else
   common_flags+=( -DHWUI_NULL_GPU )
 fi
 
+# Object files are shared across builds, but their sources come from a
+# materialized tree assembled from several tracked patches. Pin the cache to
+# that complete patch identity so header-only changes cannot reuse stale JNI
+# objects.
+patch_identity="$(for patch_file in "$critical_patch" "$lazy_native_window_patch" \
+    "$thread_detach_patch" "$require_jni_env_patch" "$globalref_jni_patch" \
+    "$hwui_gpu_patch"; do sha256 "$patch_file"; done |
+    shasum -a 256 | awk '{print $1}')"
+
 compile_cached() {
   local label="$1" source="$2" object="$3"
   shift 3
@@ -301,7 +310,8 @@ compile_cached() {
   local command_text
   command_text="$(printf '%q ' "${command[@]}")"
   local key
-  key="$(printf '%s\n%s\n' "$source_sha" "$command_text" | shasum -a 256 | awk '{print $1}')"
+  key="$(printf '%s\n%s\n%s\n' "$patch_identity" "$source_sha" "$command_text" |
+    shasum -a 256 | awk '{print $1}')"
   if [[ -f "$object" && -f "$meta" && -f "$command_file" && "$(<"$meta")" == "$key" ]]; then
     echo "android-graphics-jni: cache $label"
     return
