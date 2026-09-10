@@ -13361,6 +13361,9 @@ or admission exception was added.
 - Checkpoint 799 (2026-09-10): Fresh corpus advanced through
   `1917-get-stack-frame`, reaching 222 completed tests with zero failures.
   Four workers remain active.
+- Checkpoint 824 (2026-09-10): Fresh corpus advanced through
+  `2239-varhandle-perf-vh-get-bav`, reaching 368 completed tests with zero
+  failures. Four workers remain active.
 - Checkpoint 823 (2026-09-10): Fresh corpus advanced through
   `2239-varhandle-perf-vh-gaa`, reaching 363 completed tests with zero
   failures. Four workers remain active.
