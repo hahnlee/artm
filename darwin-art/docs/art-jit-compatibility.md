@@ -9592,3 +9592,9 @@ incomplete and still requires managed caller unwind validation.
   compiled arithmetic·JNI·OSR/deopt·moving GC·exception·field/array 및
   native exit hook/Surface/MediaCodec 항목이 모두 출력됐고, ART shutdown
   단계도 `destroy-vm complete`까지 도달했다.
+
+- Checkpoint 946 (2026-09-10): AOSP core-apps와 Chromium window-menu를
+  재실행했다. Astra 리뷰에서 Chrome 로그의 `elf-unload` 직후 SIGABRT와
+  일부 0x0 popup relayout을 별도 lifecycle 문제로 판정했다. 호스트는
+  `run_request` 실패 status 및 실제 executable/app DEX identity를 cleanup
+  전에 기록하도록 보강했으며 teardown abort를 성공으로 무시하지 않는다.

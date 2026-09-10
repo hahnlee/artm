@@ -94,6 +94,13 @@ fn main_result() -> Result<(), Box<dyn Error>> {
         )
         .into());
     }
+    eprintln!(
+        "ART host identity pid={} exe={} app_dex={}",
+        std::process::id(),
+        std::env::current_exe()
+            .map_or_else(|_| "<unknown>".into(), |path| path.display().to_string()),
+        values[5].to_string_lossy()
+    );
     let options = RunOptions {
         library: PathBuf::from(&values[0]),
         core_oj_jar: PathBuf::from(&values[1]),

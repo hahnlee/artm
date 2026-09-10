@@ -312,6 +312,10 @@ fn run_owner(
             match engine.run_request(&request) {
                 Ok(result) => result,
                 Err(error) => {
+                    eprintln!(
+                        "ART host run_request failed status={} before cleanup; service_processes_shutdown=1",
+                        error
+                    );
                     let _ = service_processes.shutdown_all();
                     let _ = shutdown_guard.shutdown();
                     return Err(HostError::RuntimeFailed(error));

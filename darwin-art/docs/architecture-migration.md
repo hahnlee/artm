@@ -14055,3 +14055,9 @@ or admission exception was added.
   graphics 및 native exit hook 증거를 갱신했다. 종료 로그는 callback drain,
   thread stop, ELF unload, detach, `destroy-vm complete` 순서를 모두
   통과했다.
+
+- Checkpoint 946 (2026-09-10): Chromium window-menu 재검증 중 `elf-unload`
+  직후 SIGABRT와 0x0 popup relayout이 관측됐다. Astra 리뷰를 먼저 받아
+  early-error cleanup과 teardown abort를 분리하기로 했고, 호스트에
+  `run_request` 실패 status 및 실행 binary/app DEX identity 로그를 추가했다.
+  메뉴 PASS 문구만으로 이 lifecycle 문제를 닫지 않는다.
