@@ -13686,3 +13686,8 @@ or admission exception was added.
   without allocator diagnostics or a guard-page report. This provides no
   evidence for a simple malloc overrun; investigation remains focused on the
   native `sp<RenderNode>`/vtable lifetime race during concurrent `SuspendAll`.
+- Checkpoint 876 (2026-09-10): Audited the RenderProxy raw-pointer candidate.
+  The current graphics build does not consume `patches/art` for HWUI sources,
+  and the targeted stress lane still reproduced the same invalid native
+  dispatch (plus a SuspendAll timeout). The speculative RenderProxy retain
+  change was therefore reverted rather than left as an unbuilt fix.
