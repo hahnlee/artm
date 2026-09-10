@@ -8864,3 +8864,6 @@ incomplete and still requires managed caller unwind validation.
 - Checkpoint 789 (2026-09-10): Fresh corpus advanced through
   `120-hashcode`, reaching 133 completed tests with zero failures. Four workers
   remain active; aggregate completion is still pending.
+- Checkpoint 790 (2026-09-10): Fresh corpus advanced through
+  `133-static-invoke-super`, reaching 148 completed tests with zero failures.
+  The same four-worker run remains active.
