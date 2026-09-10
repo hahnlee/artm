@@ -9553,3 +9553,10 @@ incomplete and still requires managed caller unwind validation.
   JNI 등록은 유지됐고 fatal 없이 rc=0이었다. 현재 host 로그의 synthetic
   move count가 0이므로 실제 게임 UI hit/상태변화 증거는 별도 입력 계측이
   필요하다.
+
+- Checkpoint 940 (2026-09-10): `DARWIN_ART_DEBUG_POINTER`와 latency
+  계측을 켠 변경 없는 Blue Archive 실행에서 실제 Android MotionEvent가
+  InputChannel/ViewRoot 경로로 전달됨을 확인했다. DOWN/UP 모두
+  `consumed=1`, dispatch latency 83–139us로 기록됐고 fatal은 없었다.
+  창 scale 좌표 보정 전이라 두 번째 tap의 hit=0이어서 게임 UI 상태변화
+  증거는 다음 단계로 남겼다.

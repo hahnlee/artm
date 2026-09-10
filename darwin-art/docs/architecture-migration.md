@@ -14019,3 +14019,9 @@ or admission exception was added.
   함께 5초 실행해 startup/renderer 안정성을 재확인했다. rc=0 및 fatal-free
   종료였으나 synthetic move count=0으로 기록되어, 게임 내부 hit와 상태
   변화까지 닫는 interactive input 계측은 다음 작업으로 남겼다.
+
+- Checkpoint 940 (2026-09-10): Blue Archive에서 pointer ingress를
+  `MotionEvent ABI2` 로그로 검증했다. InputChannel window=1 경로의
+  DOWN/UP 두 이벤트가 consumed=1로 처리되고 dispatch_us=83–139로
+  측정됐다. 테스트 좌표는 window scale 2에 의해 콘텐츠 밖으로 변환되어
+  hit=0이므로, 좌표 보정 후 실제 Unity UI hit을 추가 검증한다.
