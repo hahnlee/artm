@@ -9694,6 +9694,13 @@ incomplete and still requires managed caller unwind validation.
   stress가 모두 PASS했다. 이는 native thread ownership의 provider 경계를
   단순 smoke가 아닌 반복 lifecycle로 확인한 증거다.
 
+- Checkpoint 962 (2026-09-10): `cargo test -p darwin-art-runtime`의 27개
+  테스트를 통과시켜 Rust owner/session/shutdown state machine을 재검증했다.
+  subsystem lease generation, stale handle 거부, provider clear 대기 및
+  graphics→surface→provider→engine reverse close 순서가 모두 PASS했다.
+  이는 native provider lifecycle과 ART shutdown coordinator 사이의 공통
+  ownership 계약에 대한 현재 회귀 기준선이다.
+
 - Checkpoint 949 (2026-09-10): expected-address hint 실험이 일부 child의
   JIT fallback을 유발해 되돌렸다. graphics bootstrap/link audit는 PASS이며,
   reservation 기반 bounded retry 없이는 JIT 주소 배치를 완료로 간주하지 않는다.

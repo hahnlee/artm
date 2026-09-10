@@ -14147,6 +14147,12 @@ or admission exception was added.
   ASan clean으로 PASS했다. 다음 단계는 이 ownership 증거를 ART JavaVM
   attachment generation 및 VM shutdown 경합까지 연결하는 것이다.
 
+- Checkpoint 962 (2026-09-10): Rust runtime ownership crate의 전체 27개
+  unit test가 PASS했다. session generation과 stale lease 차단, provider
+  in-flight clear 대기, native shutdown reverse-order 및 implicit-drop 경로를
+  모두 같은 owner state machine으로 검증했다. 실제 JavaVM attach generation
+  경합을 추가하기 전 shutdown ordering의 결정적 기준선으로 보존한다.
+
 - Checkpoint 949 (2026-09-10): expected-address hint 실험이 일부 child의
   JIT fallback을 유발해 되돌렸다. graphics bootstrap/link audit는 PASS이며,
   AOSP stack-map 범위를 유지하려면 Darwin reservation 기반 bounded retry가
