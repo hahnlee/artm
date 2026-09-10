@@ -14348,3 +14348,9 @@ or admission exception was added.
   재실행했다. JIT 기능별 증거가 PASS했고, graphics finalize 뒤 CommonPool
   join이 libcore/ELF unload 및 VM detach/destroy보다 먼저 완료되는 순서를
   로그로 확인했다.
+
+- Checkpoint 1001 (2026-09-10): 전체 graphics 실행 이미지를 현재 소스에서
+  재생성하고 SHA-256 및 `ThreadExitCallback` 역어셈블을 확인했다. stale
+  direct Runtime detach 경로는 제거된 이미지에 반영됐다. Chromium process
+  lifecycle(2회)와 tab/grid Surface·입력·GLES/ANGLE/Graphite acceptance가
+  PASS했다. HTTPS full gate는 macOS trust prerequisite 미충족으로 보류한다.

@@ -9914,3 +9914,10 @@ incomplete and still requires managed caller unwind validation.
   Nterp/JIT arithmetic·GC·JNI·field/string/root load·exit-hook acceptance를
   통과했다. 같은 로그에서 `graphics-finalize → async-workers-joined →
   libcore-unload → elf-unload → detach → destroy-vm` 순서가 확인됐다.
+
+- Checkpoint 1001 (2026-09-10): stale graphics 실행 이미지를 제거하고 동일
+  그래프에서 runtime/common 및 graphics dylib를 재생성했다. 실행 dylib
+  SHA-256은 `2861b0165f8f8c255b31f14790e7c397d38ebbbc2b2f9a9edb9ea6c66d9cb9d7`이며,
+  `ThreadExitCallback`에 이전 stale `DetachCurrentThread(false)` 호출이
+  없음을 역어셈블로 확인했다. Chromium lifecycle와 tab/grid graphics
+  acceptance가 각각 PASS했다.
