@@ -13981,3 +13981,10 @@ or admission exception was added.
   실행해 exit 0을 확인했다. Nterp/JIT 실행, GC·예외·monitor·interface,
   invoke-polymorphic, VarHandle 및 native/graphics fixture가 모두
   통과했으며, 다음 호환성 대상은 아직 설치되지 않은 Blue Archive APK다.
+
+- Checkpoint 934 (2026-09-10): 변경 없는 Blue Archive 1.93.454564
+  XAPK를 base/arm64 split으로 설치해 실제 Unity 앱 부팅을 시작했다.
+  `libmain.so`의 표준 SHN_ABS linker marker alias 두 개를 bounded
+  whitelist에 추가하는 최소 loader 변경을 적용했으며, 재실행에서
+  namespace 등록까지 진행했다. 이후 Unity generated-code `pc=0`
+  SIGSEGV가 발생해 native symbol/JNI 호출 타깃 문제로 분리 중이다.

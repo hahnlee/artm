@@ -9510,3 +9510,11 @@ incomplete and still requires managed caller unwind validation.
   GC/OOME, monitor/interface/invoke-polymorphic, VarHandle ordering,
   typed array/field access, native exit hook 및 Surface/MediaCodec fixture가
   모두 PASS해 JIT 기능별 ledger의 현재 증거를 갱신했다.
+
+- Checkpoint 934 (2026-09-10): 계정 없이 APKPure `apkeep`로 변경 없는
+  Blue Archive `com.nexon.bluearchive` 1.93.454564 XAPK(base+
+  arm64 split)을 확보했다. 첫 실행에서 `libmain.so`의 GNU linker marker
+  두 alias가 누락된 capability rejection을 확인해 bounded whitelist에
+  `__bss_start__`와 `_bss_end__`를 추가했다. 재링크 후 libmain 로드는
+  통과했지만 Unity native `pc=0` SIGSEGV가 새로 드러나 acceptance는 아직
+  미완료이며 Astra에 다음 원인 분석을 요청했다.

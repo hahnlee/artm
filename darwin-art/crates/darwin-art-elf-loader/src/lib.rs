@@ -2370,10 +2370,12 @@ impl LoadedElf {
         // Bionic exposes these as load-bias-relative dlsym values. Accept only
         // the tightly bounded form whose address lies in (or exactly at the
         // end of) a PT_LOAD; arbitrary absolute constants remain rejected.
-        const LINKER_MARKERS: [&[u8]; 5] = [
+        const LINKER_MARKERS: [&[u8]; 7] = [
             b"__bss_start",
             b"__bss_end__",
+            b"__bss_start__",
             b"_edata",
+            b"_bss_end__",
             b"_end",
             b"__end__",
         ];
