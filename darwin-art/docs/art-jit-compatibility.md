@@ -8873,6 +8873,9 @@ incomplete and still requires managed caller unwind validation.
 - Checkpoint 799 (2026-09-10): Fresh corpus advanced through
   `1917-get-stack-frame`, reaching 222 completed tests with zero failures.
   Four workers remain active.
+- Checkpoint 806 (2026-09-10): Fresh corpus advanced through
+  `1942-suspend-raw-monitor-exit`, reaching 247 completed tests with zero
+  failures. Four workers remain active.
 - Checkpoint 805 (2026-09-10): Fresh corpus advanced through
   `1938-transform-abstract-single-impl`, reaching 243 completed tests with
   zero failures. Four workers remain active.
