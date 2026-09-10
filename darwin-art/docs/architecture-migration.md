@@ -13739,3 +13739,7 @@ or admission exception was added.
   The direct runner also passed all three lanes. The live full-corpus ledger
   has reached 240 tests (239 PASS, one historical 60-second timeout), so that
   timeout is now classified as calibration rather than a runtime failure.
+- Checkpoint 887 (2026-09-10): The full `--parallel 4 --timeout 60` run remains
+  active at 249 completed tests (248 PASS). Its sole non-pass record is the
+  already isolated `099-vmdebug` timeout; the same test passes standalone with
+  `--timeout 120`, so it will be reconciled after the worker finishes.
