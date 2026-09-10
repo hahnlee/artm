@@ -9286,3 +9286,6 @@ incomplete and still requires managed caller unwind validation.
 - Checkpoint 896 (2026-09-10): The live full-corpus worker reached 315
   completed tests (314 PASS). No new failure or timeout appeared; execution is
   continuing through the remaining pinned AOSP tests.
+- Checkpoint 897 (2026-09-10): The active full-corpus worker reached 331
+  completed tests (330 PASS). No new failure or timeout appeared; the worker
+  remains active across the remaining AOSP compatibility cases.
