@@ -13673,3 +13673,11 @@ or admission exception was added.
   remaining reproducible condition is native-object/vtable state during
   concurrent `SuspendAll`; the runtime source remains unchanged while the
   next step moves ownership capture to a pre-signal execution hook.
+- Checkpoint 874 (2026-09-10): Audited the Darwin signal dispatcher and
+  `TryRecoverJitExecutionFault` against the reproduced path. When the special
+  ART handlers decline a non-JIT SIGSEGV, the dispatcher restores the
+  interrupted signal mask and leaves the Mach register context untouched; the
+  W^X recovery callback also returns without mutation unless its permission
+  predicate matches. Direct signal-context clobbering is therefore less likely
+  than a native object/vtable lifetime or memory overwrite during `SuspendAll`.
+  No runtime behavior was changed.
