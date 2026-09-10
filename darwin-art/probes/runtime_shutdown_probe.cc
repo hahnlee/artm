@@ -85,6 +85,7 @@ bool ShutdownAndroidAsyncTaskExecutor(JNIEnv* env) {
 }
 
 bool StopAndroidApplicationThreads(JNIEnv* env) {
+  std::cerr << "ART Darwin shutdown stage=stop-threads enter\n";
   jclass thread_class = env->FindClass("java/lang/Thread");
   jclass handler_thread_class = env->FindClass("android/os/HandlerThread");
   if (thread_class == nullptr || handler_thread_class == nullptr) {
@@ -151,6 +152,7 @@ bool StopAndroidApplicationThreads(JNIEnv* env) {
       }
       if (env->IsInstanceOf(thread, handler_thread_class)) {
         env->CallBooleanMethod(thread, quit_safely);
+        std::cerr << "ART Darwin shutdown stage=thread quitSafely requested\n";
       }
       jobject target = env->GetObjectField(thread, thread_target);
       jstring name =
@@ -226,6 +228,7 @@ bool StopAndroidApplicationThreads(JNIEnv* env) {
           jobject pool = env->GetObjectField(target, owner);
           if (pool != nullptr && env->IsInstanceOf(pool, thread_pool_class)) {
             jobject abandoned = env->CallObjectMethod(pool, shutdown_pool);
+            std::cerr << "ART Darwin shutdown stage=thread-pool shutdownNow returned\n";
             env->DeleteLocalRef(abandoned);
           }
           env->DeleteLocalRef(pool);
@@ -235,6 +238,7 @@ bool StopAndroidApplicationThreads(JNIEnv* env) {
       env->DeleteLocalRef(target);
       env->DeleteLocalRef(concrete_thread_class);
       env->CallVoidMethod(thread, interrupt);
+      std::cerr << "ART Darwin shutdown stage=thread interrupt returned\n";
       if (env->ExceptionCheck()) {
         env->ExceptionDescribe();
         env->ExceptionClear();
@@ -254,12 +258,15 @@ bool StopAndroidApplicationThreads(JNIEnv* env) {
   env->DeleteLocalRef(handler_thread_class);
   env->DeleteLocalRef(thread_pool_class);
   env->DeleteLocalRef(thread_class);
+  std::cerr << "ART Darwin shutdown stage=stop-threads exit status="
+            << (succeeded ? 0 : 1) << "\n";
   return succeeded;
 }
 
 }  // namespace
 
 int32_t run_shutdown(const ShutdownState& state) {
+  std::cerr << "ART Darwin shutdown stage=run enter\n";
   // An application such as 136-daemon-jni-shutdown may legitimately invoke
   // JavaVM::DestroyJavaVM from one of its own native threads.  In that case
   // the host reaches this entry point after ART has already entered its
@@ -309,14 +316,17 @@ int32_t run_shutdown(const ShutdownState& state) {
         darwin_art_process::mark_shutdown_failed();
         return DARWIN_ART_STATUS_SHUTDOWN_FAILED;
       }
+      std::cerr << "ART Darwin shutdown stage=async-task complete\n";
       darwin_art_graphics::shutdown(shutdown.graphics_state,
                                     art_thread->GetJniEnv());
+      std::cerr << "ART Darwin shutdown stage=graphics complete\n";
       if (!shutdown.dalvikvm_process &&
           !StopAndroidApplicationThreads(art_thread->GetJniEnv())) {
         std::cerr << "ART Darwin shutdown: application thread stop failed\n";
         darwin_art_process::mark_shutdown_failed();
         return DARWIN_ART_STATUS_SHUTDOWN_FAILED;
       }
+      std::cerr << "ART Darwin shutdown stage=application-threads complete\n";
       if (art_thread->IsExceptionPending()) {
         std::cerr << "ART Darwin shutdown: global reference cleanup threw: "
                   << art_thread->GetException()->Dump() << "\n";
@@ -327,6 +337,7 @@ int32_t run_shutdown(const ShutdownState& state) {
       // owner until after DestroyJavaVM, but its eventual Drop is now a
       // memory-only erase and cannot re-enter ART.
       if (shutdown.graphics_state != nullptr) {
+        std::cerr << "ART Darwin shutdown stage=graphics-finalize enter\n";
         const int32_t graphics_finalize_status =
             darwin_art_graphics::finalize_bound_session(
                 shutdown.graphics_state);
@@ -336,20 +347,25 @@ int32_t run_shutdown(const ShutdownState& state) {
           darwin_art_process::mark_shutdown_failed();
           return DARWIN_ART_STATUS_SHUTDOWN_FAILED;
         }
+        std::cerr << "ART Darwin shutdown stage=graphics-finalize exit\n";
       }
+      std::cerr << "ART Darwin shutdown stage=libcore-unload enter\n";
       if (!darwin_art::ShutdownLibcoreNatives()) {
         std::cerr << "ART Darwin shutdown: libcore host state restore failed\n";
         darwin_art_process::mark_shutdown_failed();
         return DARWIN_ART_STATUS_SHUTDOWN_FAILED;
       }
+      std::cerr << "ART Darwin shutdown stage=libcore-unload exit\n";
       // JavaVMExt unloads NativeLoader-owned DSOs before tearing down the VM;
       // invoke the same lifecycle boundary so guest JNI_OnUnload runs while
       // its proxy VM and ART thread are still valid.
+      std::cerr << "ART Darwin shutdown stage=elf-unload enter\n";
       if (!android::ShutdownElfLibraries()) {
         std::cerr << "ART Darwin shutdown: NativeLoader DSO unload failed\n";
         darwin_art_process::mark_shutdown_failed();
         return DARWIN_ART_STATUS_SHUTDOWN_FAILED;
       }
+      std::cerr << "ART Darwin shutdown stage=elf-unload complete\n";
       if (resource_runtime_installed &&
           !darwin_art::ShutdownFrameworkResourceRuntime(
               art_thread->GetJniEnv())) {
@@ -373,10 +389,12 @@ int32_t run_shutdown(const ShutdownState& state) {
     darwin_art_process::mark_shutdown_failed();
     return DARWIN_ART_STATUS_SHUTDOWN_FAILED;
   }
+  std::cerr << "ART Darwin shutdown stage=detach complete\n";
   if (java_vm->DestroyJavaVM() != JNI_OK) {
     darwin_art_process::mark_shutdown_failed();
     return DARWIN_ART_STATUS_SHUTDOWN_FAILED;
   }
+  std::cerr << "ART Darwin shutdown stage=destroy-vm complete\n";
   darwin_art_frame_probe::reset();
   if (darwin_art::android_jni::TrampolineLiveCount() != 0) {
     std::cerr << "ART Darwin shutdown: ELF JNI trampolines remain live\n";

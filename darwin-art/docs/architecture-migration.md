@@ -13937,3 +13937,24 @@ or admission exception was added.
   문제가 아니라 native worker가 살아 있는 상태에서의 teardown 조건 문제로
   분리되며, 다음 작업은 LLDB abort backtrace와 worker join 소유권을
   고정하는 것이다.
+
+- Checkpoint 928 (2026-09-10): 최신 debug host/graphics closure에서
+  실제 종료 순서를 재현했다. `StopAndroidApplicationThreads`는 정상
+  반환했지만 application-thread cleanup 이후 `SIGABRT`가 발생했으므로,
+  AOSP식 worker drain 문제와 native teardown 경계를 분리했다. graphics
+  finalize·libcore unload·ELF unload 각각에 entry/exit 계측을 넣어 소유권
+  해제 순서를 증거로 고정하는 중이다.
+
+- Checkpoint 929 (2026-09-10): 단계별 marker로 `graphics-finalize`와
+  `libcore-unload` 이후 `elf-unload enter` 직후 SIGABRT를 확인했다.
+  AOSP NativeLoader 계약에 맞춰 APK process-exit와 embeddable VM teardown을
+  분리했다. APK 경로는 service child를 종료/reap한 뒤 `_exit`하며 live
+  app ELF graph와 ART를 unload하지 않고, fixture/임베디드 경로만 전체
+  shutdown transaction을 수행한다.
+
+- Checkpoint 927 (2026-09-10): 오래된 debug host를 재빌드한 뒤 동일
+  Chromium acceptance를 재실행해 종료 abort를 실제 최신 코드에서
+  재현했다. `StopAndroidApplicationThreads`가 worker에 quit/shutdown/
+  interrupt만 요청하고 완료를 기다리지 않는 상태가 확인되어, stop과
+  후속 ELF unload/detach/DestroyJavaVM 경계를 구분하는 단계 계측을
+  추가했다. 다음은 이 증거로 AOSP식 worker drain/join 소유권을 고정한다.

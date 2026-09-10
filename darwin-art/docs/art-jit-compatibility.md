@@ -9462,3 +9462,26 @@ incomplete and still requires managed caller unwind validation.
   전달됐지만, 종료 시점에 여전히 `signal=6` 및 `hwuiTask0/1` detach
   warning이 발생해 PASS로 닫히지 않았다. guest Bionic abort 표식은 없어
   host-side abort stack을 LLDB로 확보하는 것이 다음 단계다.
+
+- Checkpoint 928 (2026-09-10): 최신 debug host와 재생성한 graphics
+  closure로 acceptance를 실행한 결과 `stop-threads exit status=0` 및
+  `application-threads complete`까지 통과했고, 그 직후 `signal=6`이
+  발생했다. 따라서 worker stop 요청 자체가 아니라 graphics finalize,
+  libcore native cleanup, ELF unload 중 경계로 범위를 축소했다. 세 단계의
+  entry/exit marker를 추가해 다음 실행에서 정확한 호출을 식별한다.
+
+- Checkpoint 929 (2026-09-10): 단계 계측으로 abort가
+  `android::ShutdownElfLibraries()` 내부임을 확정했다. Astra 리뷰에서
+  AOSP 앱 프로세스 종료는 live NativeLoader graph/ART를 강제 unload하지
+  않고 service child를 reap한 뒤 `_exit`하는 경로임을 확인했다. 따라서
+  `terminate_android_process`에서는 in-process runtime shutdown을 건너뛰고
+  OS process boundary로 종료하도록 분리했으며, 명시적 embeddable teardown은
+  기존 `RuntimeShutdownGuard` 경로에 남겼다.
+
+- Checkpoint 927 (2026-09-10): debug 호스트를 최신 소스로 재빌드해
+  acceptance를 다시 실행했다. 이번에는 종료 순서 수정이 실제 적용됐고,
+  두 탭 뷰 hit와 framework pulse 뒤 `StopAndroidApplicationThreads` 중
+  `HandleUnexpectedSignal reentered`/SIGABRT가 재현됐다. Astra는 stop
+  요청 후 join/await 없이 ELF unload로 진행하는 경계를 지적했으며, 각
+  worker와 cleanup 단계의 entry/exit 계측을 추가해 다음 실행에서 정확한
+  abort 지점을 분리한다.
