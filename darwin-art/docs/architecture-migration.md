@@ -13361,6 +13361,9 @@ or admission exception was added.
 - Checkpoint 799 (2026-09-10): Fresh corpus advanced through
   `1917-get-stack-frame`, reaching 222 completed tests with zero failures.
   Four workers remain active.
+- Checkpoint 800 (2026-09-10): Fresh corpus advanced through
+  `1920-suspend-native-monitor`, reaching 225 completed tests with zero
+  failures. Four workers remain active.
 - Checkpoint 792 (2026-09-10): Fresh corpus advanced through
   `153-reference-stress`, reaching 174 completed tests with zero failures.
   Four workers remain active; no completion claim yet.
