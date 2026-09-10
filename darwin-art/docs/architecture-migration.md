@@ -14008,3 +14008,9 @@ or admission exception was added.
   Unity receiver 오염을 제거했다. 변경 없는 Blue Archive 최신 실행은
   libmain/libil2cpp 로드 및 전체 Unity RegisterNatives 후 3초 동안
   SIGSEGV/SIGABRT 없이 종료했다.
+
+- Checkpoint 938 (2026-09-10): Blue Archive 변경 없는 XAPK의 장시간
+  acceptance를 15초로 확장해 실제 Unity 초기화와 Metal 경로를 검증했다.
+  24 native libraries resolve, `libmain`/`libil2cpp` namespace 게시,
+  RegisterNatives 321건, ARM64/12-core 환경 인식 후 fatal 없이 rc=0이었다.
+  현재 남은 범위는 화면 캡처·물리 입력을 포함한 interactive acceptance다.

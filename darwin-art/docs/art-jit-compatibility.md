@@ -9540,3 +9540,10 @@ incomplete and still requires managed caller unwind validation.
   전후 보존하도록 수정했다. 최신 dylib로 변경 없는 Blue Archive를
   3초 실행해 309개 Unity JNI 등록과 추가 12개 등록까지 fatal 없이
   통과했다.
+
+- Checkpoint 938 (2026-09-10): 변경 없는 Blue Archive 1.93.454564를
+  최신 runtime으로 15초 실행했다. `libmain.so`·`libil2cpp.so` graph
+  로드, Unity RegisterNatives 309건 및 후속 등록 세트, Unity 초기화와
+  Metal backend가 확인됐고 SIGSEGV/SIGABRT 없이 rc=0으로 종료했다.
+  Unity가 ARM64/12 cores/8192 MB 환경을 인식한 로그는
+  `/tmp/bluearchive-acceptance-long.log`에 보존했다.
