@@ -9504,3 +9504,9 @@ incomplete and still requires managed caller unwind validation.
   Day/Week/Month 메뉴, popup ViewRoot/InputChannel/SurfaceFlinger 경로가
   통과했고 Calculator popup·outside-dismiss·resize 및 Chrome new-tab도
   함께 PASS했다. 로그는 `_build/android-window-menu-acceptance`에 남겼다.
+
+- Checkpoint 933 (2026-09-10): `tools/audit-art-jit.sh` 전체 실행이
+  exit 0으로 완료됐다. Nterp admission, JIT constructor/allocation,
+  GC/OOME, monitor/interface/invoke-polymorphic, VarHandle ordering,
+  typed array/field access, native exit hook 및 Surface/MediaCodec fixture가
+  모두 PASS해 JIT 기능별 ledger의 현재 증거를 갱신했다.

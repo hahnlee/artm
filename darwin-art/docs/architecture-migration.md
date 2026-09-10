@@ -13976,3 +13976,8 @@ or admission exception was added.
   SurfaceFlinger 계약을 통과했다. 동일 실행에서 Calculator popup
   outside-dismiss/resize와 Chrome new-tab도 통과해 다중 앱 창 경로의
   공통 lifecycle 증거를 확보했다.
+
+- Checkpoint 933 (2026-09-10): ART JIT 전체 audit를 최신 runtime으로
+  실행해 exit 0을 확인했다. Nterp/JIT 실행, GC·예외·monitor·interface,
+  invoke-polymorphic, VarHandle 및 native/graphics fixture가 모두
+  통과했으며, 다음 호환성 대상은 아직 설치되지 않은 Blue Archive APK다.
