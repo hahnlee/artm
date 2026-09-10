@@ -199,11 +199,17 @@ bool AllocateSurfaceBacking(id<MTLDevice> device, uint32_t width,
     CFRelease(io_surface);
     return false;
   }
+  const uint32_t surface_width = IOSurfaceGetWidth(io_surface);
+  const uint32_t surface_height = IOSurfaceGetHeight(io_surface);
+  if (surface_width == 0 || surface_height == 0) {
+    CFRelease(io_surface);
+    return false;
+  }
   MTLTextureDescriptor* descriptor =
       [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:
                                MTLPixelFormatBGRA8Unorm
-                                                       width:width
-                                                      height:height
+                                                       width:surface_width
+                                                      height:surface_height
                                                    mipmapped:NO];
   descriptor.storageMode = MTLStorageModeShared;
   descriptor.usage = MTLTextureUsageShaderRead;
@@ -1071,12 +1077,18 @@ static DarwinArtSurface* CreateSurfaceOnMain(
       CFRelease(io_surface);
       return finish(DARWIN_ART_SURFACE_ALLOCATION_FAILED, nullptr);
     }
+    const uint32_t surface_width = IOSurfaceGetWidth(io_surface);
+    const uint32_t surface_height = IOSurfaceGetHeight(io_surface);
+    if (surface_width == 0 || surface_height == 0) {
+      CFRelease(io_surface);
+      return finish(DARWIN_ART_SURFACE_ALLOCATION_FAILED, nullptr);
+    }
 
     MTLTextureDescriptor* texture_descriptor =
         [MTLTextureDescriptor
             texture2DDescriptorWithPixelFormat:MTLPixelFormatBGRA8Unorm
-                                         width:create_info->width
-                                        height:create_info->height
+                                         width:surface_width
+                                        height:surface_height
                                      mipmapped:NO];
     texture_descriptor.storageMode = MTLStorageModeShared;
     texture_descriptor.usage = MTLTextureUsageShaderRead;

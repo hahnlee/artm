@@ -9811,3 +9811,9 @@ incomplete and still requires managed caller unwind validation.
 - Checkpoint 982 (2026-09-10): AOSP Calculator와 DeskClock graphics acceptance를
   최신 artifact에서 재실행해 `2+3=5`, Timer, HWUI+SurfaceFlinger+Metal 경로를
   PASS했다. JIT와 native graph 결과는 checkpoint 981과 동일하게 유지된다.
+
+- Checkpoint 983 (2026-09-10): Astra 분석으로 resize 시 logical 720x1280과
+  실제 600x1000 IOSurface가 섞여 Metal stride assertion을 내던 경로를 수정했다.
+  composer target/source 및 AHardwareBuffer/surface backing texture descriptor가
+  IOSurface 실제 extent를 사용하도록 정규화됐고 graphics-link audit PASS 및
+  독립 Calculator resize 실행 `rc=0`(SIGABRT 없음)을 확인했다.

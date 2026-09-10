@@ -14250,3 +14250,8 @@ or admission exception was added.
   최신 artifact에서 재검증했다. 계산 결과 `2+3=5`, Timer 동작 및
   HWUI+SurfaceFlinger+Metal 공통 경로가 PASS했으며, 테스트 중 생성된 host는
   모두 종료했다.
+
+- Checkpoint 983 (2026-09-10): resize SurfaceFlinger crash의 원인인 logical
+  frame과 IOSurface physical extent 불일치를 수정했다. Metal composer와
+  Android surface/HardwareBuffer import가 실제 IOSurface 폭·높이를 descriptor에
+  사용하며 graphics-link audit과 독립 resize 실행이 PASS했다.

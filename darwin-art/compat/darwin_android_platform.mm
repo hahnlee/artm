@@ -780,13 +780,16 @@ static void* CreateVulkanHardwareBufferTexture(
     return nullptr;
   }
   id<MTLDevice> device = (__bridge id<MTLDevice>)metal_device;
+  const uint32_t surface_width = IOSurfaceGetWidth(buffer->surface);
+  const uint32_t surface_height = IOSurfaceGetHeight(buffer->surface);
+  if (surface_width == 0 || surface_height == 0) return nullptr;
   if (vk_format != 37 && vk_format != 43) return nullptr;
   const MTLPixelFormat format = vk_format == 43 ? MTLPixelFormatRGBA8Unorm_sRGB
                                                : MTLPixelFormatRGBA8Unorm;
   MTLTextureDescriptor* descriptor =
       [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:format
-                                                         width:buffer->description.width
-                                                        height:buffer->description.height
+                                                         width:surface_width
+                                                        height:surface_height
                                                      mipmapped:NO];
   descriptor.storageMode = MTLStorageModeShared;
   descriptor.usage = MTLTextureUsageShaderRead | MTLTextureUsageShaderWrite |
@@ -823,6 +826,9 @@ extern "C" void* darwin_art_android_iosurface_metal_texture(
     return nullptr;
   }
   id<MTLDevice> device = (__bridge id<MTLDevice>)metal_device;
+  const uint32_t surface_width = IOSurfaceGetWidth((IOSurfaceRef)iosurface);
+  const uint32_t surface_height = IOSurfaceGetHeight((IOSurfaceRef)iosurface);
+  if (surface_width == 0 || surface_height == 0) return nullptr;
   CFTypeRef storage_rgba = IOSurfaceCopyValue((IOSurfaceRef)iosurface,
                                              CFSTR("DarwinArtStorageRGBA"));
   const bool rgba = storage_rgba != nullptr && CFEqual(storage_rgba, kCFBooleanTrue);
@@ -830,8 +836,8 @@ extern "C" void* darwin_art_android_iosurface_metal_texture(
   MTLTextureDescriptor* descriptor =
       [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:
                                (rgba ? MTLPixelFormatRGBA8Unorm : MTLPixelFormatBGRA8Unorm)
-                                                         width:width
-                                                        height:height
+                                                         width:surface_width
+                                                        height:surface_height
                                                      mipmapped:NO];
   descriptor.storageMode = MTLStorageModeShared;
   descriptor.usage = MTLTextureUsageShaderRead | MTLTextureUsageShaderWrite |

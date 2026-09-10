@@ -193,14 +193,30 @@ extern "C" bool darwin_art_metal_composer_compose(
   }
   id<MTLDevice> device = reinterpret_cast<id<MTLDevice>>(metal_device);
   auto* target_surface = reinterpret_cast<IOSurfaceRef>(target_iosurface);
+  const uint32_t surface_width = IOSurfaceGetWidth(target_surface);
+  const uint32_t surface_height = IOSurfaceGetHeight(target_surface);
+  if (surface_width == 0 || surface_height == 0) return false;
+  // The transaction carries logical output dimensions, while a resized
+  // IOSurface owns the authoritative physical texture extent. Metal rejects
+  // a descriptor wider than the surface stride (e.g. 720 over a 600-wide
+  // surface), so normalize composition to the target surface generation.
+  const uint32_t compose_width = surface_width;
+  const uint32_t compose_height = surface_height;
+  if (std::getenv("DARWIN_ART_DEBUG_GRAPHICS_DSO") != nullptr &&
+      (target_width != compose_width || target_height != compose_height)) {
+    std::fprintf(stderr,
+                 "ART Metal composer: target logical=%ux%u surface=%ux%u stride=%zu\n",
+                 target_width, target_height, compose_width, compose_height,
+                 IOSurfaceGetBytesPerRow(target_surface));
+  }
   std::lock_guard<std::mutex> lock(ComposerMutex());
   MetalComposerState& state = ComposerState();
   if (!EnsurePipeline(device, state)) return false;
 
   MTLTextureDescriptor* target_descriptor =
       [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatBGRA8Unorm
-                                                         width:target_width
-                                                        height:target_height
+                                                         width:compose_width
+                                                        height:compose_height
                                                      mipmapped:NO];
   target_descriptor.storageMode = MTLStorageModeShared;
   target_descriptor.usage = MTLTextureUsageRenderTarget |
@@ -248,11 +264,22 @@ extern "C" bool darwin_art_metal_composer_compose(
         reinterpret_cast<IOSurfaceRef>(layer.iosurface), CFSTR("DarwinArtStorageRGBA"));
     const bool rgba = storage_rgba != nullptr && CFEqual(storage_rgba, kCFBooleanTrue);
     if (storage_rgba != nullptr) CFRelease(storage_rgba);
+    IOSurfaceRef source_surface = reinterpret_cast<IOSurfaceRef>(layer.iosurface);
+    const uint32_t source_surface_width = IOSurfaceGetWidth(source_surface);
+    const uint32_t source_surface_height = IOSurfaceGetHeight(source_surface);
+    if (source_surface_width == 0 || source_surface_height == 0) continue;
+    if (std::getenv("DARWIN_ART_DEBUG_GRAPHICS_DSO") != nullptr &&
+        (layer.width != source_surface_width || layer.height != source_surface_height)) {
+      std::fprintf(stderr,
+                   "ART Metal composer: source logical=%ux%u surface=%ux%u stride=%zu\n",
+                   layer.width, layer.height, source_surface_width,
+                   source_surface_height, IOSurfaceGetBytesPerRow(source_surface));
+    }
     MTLTextureDescriptor* source_descriptor =
         [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:
                                  (rgba ? MTLPixelFormatRGBA8Unorm : MTLPixelFormatBGRA8Unorm)
-                                                           width:layer.width
-                                                          height:layer.height
+                                                           width:source_surface_width
+                                                          height:source_surface_height
                                                        mipmapped:NO];
     source_descriptor.storageMode = MTLStorageModeShared;
     source_descriptor.usage = MTLTextureUsageShaderRead |
@@ -260,23 +287,23 @@ extern "C" bool darwin_art_metal_composer_compose(
                               MTLTextureUsageRenderTarget;
     id<MTLTexture> source = [device
         newTextureWithDescriptor:source_descriptor
-                       iosurface:reinterpret_cast<IOSurfaceRef>(layer.iosurface)
+                       iosurface:source_surface
                            plane:0];
     if (source == nil) continue;
 
     const float left = 2.0f * static_cast<float>(layer.destination_left) /
-                           static_cast<float>(target_width) -
+                           static_cast<float>(compose_width) -
                        1.0f;
     const float right =
         2.0f * static_cast<float>(layer.destination_right) /
-            static_cast<float>(target_width) -
+            static_cast<float>(compose_width) -
         1.0f;
     const float top = 1.0f -
                       2.0f * static_cast<float>(layer.destination_top) /
-                          static_cast<float>(target_height);
+                          static_cast<float>(compose_height);
     const float bottom =
         1.0f - 2.0f * static_cast<float>(layer.destination_bottom) /
-                   static_cast<float>(target_height);
+                   static_cast<float>(compose_height);
     const float u0 = static_cast<float>(layer.source_left) / layer.width;
     const float u1 = static_cast<float>(layer.source_right) / layer.width;
     // Surface transactions use top-left coordinates. Normalize the native
