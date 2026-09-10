@@ -15,6 +15,7 @@ darwin_wide_gamut_patch="$project_root/patches/frameworks-base/0009-darwin-hwui-
 darwin_thread_detach_patch="$project_root/patches/frameworks-base/0010-darwin-hwui-thread-detach.patch"
 darwin_require_jni_patch="$project_root/patches/frameworks-base/0011-darwin-hwui-require-jni-env.patch"
 darwin_common_pool_patch="$project_root/patches/frameworks-base/0013-darwin-hwui-common-pool-shutdown.patch"
+darwin_common_pool_explicit_patch="$project_root/patches/frameworks-base/0014-darwin-hwui-common-pool-explicit-shutdown.patch"
 
 # shellcheck disable=SC1090
 source "$lock_file"
@@ -53,6 +54,7 @@ verify_sha "$darwin_renderthread_patch" "$DARWIN_RENDERTHREAD_PATCH_SHA256"
 verify_sha "$darwin_angle_surface_patch" "$DARWIN_ANGLE_SURFACE_PATCH_SHA256"
 verify_sha "$darwin_wide_gamut_patch" "$DARWIN_WIDE_GAMUT_PATCH_SHA256"
 verify_sha "$darwin_common_pool_patch" "$DARWIN_COMMON_POOL_PATCH_SHA256"
+verify_sha "$darwin_common_pool_explicit_patch" "$DARWIN_COMMON_POOL_EXPLICIT_PATCH_SHA256"
 
 sources=(
   canvas/CanvasFrontend.cpp
@@ -257,6 +259,7 @@ patch_identity="$(printf '%s\n%s\n%s\n%s\n%s\n%s\n' "$HWUI_SOURCE_MANIFEST_SHA25
   "$DARWIN_WIDE_GAMUT_PATCH_SHA256" "$DARWIN_THREAD_DETACH_PATCH_SHA256" \
   "$DARWIN_REQUIRE_JNI_PATCH_SHA256" \
   "$DARWIN_COMMON_POOL_PATCH_SHA256" \
+  "$DARWIN_COMMON_POOL_EXPLICIT_PATCH_SHA256" \
   | shasum -a 256 | awk '{print $1}')"
 if [[ ! -f "$patched_marker" || "$(<"$patched_marker")" != "$patch_identity" ]]; then
   fresh_shadow="$output_dir/patched-source.new.$$"
@@ -270,6 +273,7 @@ if [[ ! -f "$patched_marker" || "$(<"$patched_marker")" != "$patch_identity" ]];
   patch -d "$fresh_shadow" -p1 < "$darwin_thread_detach_patch"
   patch -d "$fresh_shadow" -p1 < "$darwin_require_jni_patch"
   patch -d "$fresh_shadow" -p1 < "$darwin_common_pool_patch"
+  patch -d "$fresh_shadow" -p1 < "$darwin_common_pool_explicit_patch"
   printf '%s\n' "$patch_identity" > "$fresh_shadow/.darwin-art-patched-source"
   rm -rf "$patched_hwui"
   mv "$fresh_shadow" "$patched_hwui"

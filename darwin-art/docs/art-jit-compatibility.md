@@ -9886,3 +9886,9 @@ incomplete and still requires managed caller unwind validation.
   foundation/link 산출물은 해당 patch 계열로 재빌드되었으며, explicit
   `darwin_art_shutdown_process` 호출 경계와 JNI detach ordering acceptance는
   미완료 상태로 유지한다.
+
+- Checkpoint 996 (2026-09-10): tracked `0014`를 추가해 CommonPool에 명시적
+  `shutdown()` 경계를 제공하고 `ShutdownFrameworkGraphicsRuntime()`에서
+  호출하도록 연결했다. worker join은 ART/ JNI와 ICU teardown 전에 수행된다.
+  patch 적용, 88-object foundation 빌드, graphics closure 및 Calculator/
+  DeskClock acceptance를 최신 artifact에서 PASS했다.

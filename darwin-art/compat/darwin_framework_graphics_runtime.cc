@@ -6,6 +6,7 @@
 
 #include "darwin_art/android_runtime_host.h"
 #include "darwin_android_graphics_registration.h"
+#include "thread/CommonPool.h"
 #endif
 
 namespace {
@@ -68,6 +69,8 @@ bool InitializeFrameworkGraphicsRuntime() {
 
 void ShutdownFrameworkGraphicsRuntime() {
 #if defined(DARWIN_ART_REAL_GRAPHICS)
+  // Join HWUI async workers while ART/JNI are still alive.
+  android::uirenderer::CommonPool::shutdown();
   // The ICU JNI unload hook runs first and calls u_cleanup(); release the
   // external Android ICU data mapping only after no ICU consumer remains.
   android_icu_cleanup();

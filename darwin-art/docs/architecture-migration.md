@@ -14320,3 +14320,9 @@ or admission exception was added.
   적용을 재검증하고 staged build identity가 그 patch를 포함하는지 확인했다.
   shutdown API에서 명시적으로 pool을 drain/join하고 worker JNI detach를
   VM 해제보다 앞세우는 end-to-end 증거는 다음 단계로 남겼다.
+
+- Checkpoint 996 (2026-09-10): CommonPool `shutdown()` API를 tracked `0014`
+  framework patch로 도입하고 framework graphics shutdown 경계에 연결했다.
+  staged patch 적용과 static foundation/link audit, Calculator/DeskClock
+  acceptance를 통과했다. 실제 worker JNI detach-before-VM 로그 증거는
+  다음 acceptance에서 수집한다.

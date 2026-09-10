@@ -1,0 +1,34 @@
+--- a/thread/CommonPool.h
++++ b/thread/CommonPool.h
+@@ -83,5 +83,6 @@
+     static constexpr auto QUEUE_SIZE = 128;
+ 
+     static void post(Task&& func);
++    static void shutdown();
+ 
+     template <class F>
+@@ -111,6 +112,7 @@
+     ~CommonPool();
+ 
+     void enqueue(Task&&);
++    void stop();
+     void doWaitForIdle();
+ 
+     void workerLoop();
+--- a/thread/CommonPool.cpp
++++ b/thread/CommonPool.cpp
+@@ -53,6 +53,14 @@
+ }
+ 
+ CommonPool::~CommonPool() {
++    stop();
++}
++
++void CommonPool::shutdown() {
++    instance().stop();
++}
++
++void CommonPool::stop() {
+     {
+         std::lock_guard lock(mLock);
+         mIsStopping = true;
