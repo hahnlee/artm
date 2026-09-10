@@ -8994,3 +8994,8 @@ incomplete and still requires managed caller unwind validation.
 - Checkpoint 833 (2026-09-10): Fresh corpus reached 1,037 completed tests out
   of 1,141 discovered tests with zero failures; the four-worker run remains
   active.
+- Checkpoint 834 (2026-09-10): Fresh corpus terminated at 1,075/1,076
+  terminal tests; `978-virtual-interface` had one SIGILL under the loaded
+  four-worker run, while six isolated JIT reruns (including four concurrent)
+  passed. Treat this as an unresolved concurrency/flakiness defect, not a
+  completion signal.
