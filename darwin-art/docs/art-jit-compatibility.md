@@ -9255,3 +9255,7 @@ incomplete and still requires managed caller unwind validation.
   active at 249 completed tests (248 PASS). Its sole non-pass record is the
   already isolated `099-vmdebug` timeout; the same test passes standalone with
   `--timeout 120`, so it will be reconciled after the worker finishes.
+- Checkpoint 888 (2026-09-10): The live worker advanced to 254 completed tests
+  (253 PASS). No new failing test has appeared; the only non-pass ledger entry
+  remains the known `099-vmdebug` timeout that passes at 120 seconds. The full
+  run is left active for completion rather than being restarted.
