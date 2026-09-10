@@ -13701,3 +13701,8 @@ or admission exception was added.
   The runtime bootstrap compiled with the new ABI. A follow-up stress run
   timed out without a fault record, so the image attribution is not yet
   validated on a crash; no signal-unsafe symbolization was introduced.
+- Checkpoint 879 (2026-09-10): Rebuilt the runtime with the image snapshot
+  logger and ran two debug stress attempts. Both ended in the harness timeout
+  path before producing a fault record; the new lookup did not crash or emit
+  invalid output. Image attribution therefore remains pending a crash-bearing
+  run, while the timeout itself remains an unresolved concurrency failure.
