@@ -13803,3 +13803,7 @@ or admission exception was added.
   `2041-bad-cleaner` and `2048-bad-native-registry` pass interpreter, JIT, and
   optimized lanes. The full worker reached 989 completed (984 PASS); five
   short-budget timeout ledger entries remain pending classification.
+- Checkpoint 905 (2026-09-10): The live corpus worker reached 1,005 completed
+  tests (998 PASS), with no hard failures. Seven timeout rows are now recorded
+  under the 60-second parallel budget; isolated longer-budget classification
+  remains the next verification step after worker termination.
