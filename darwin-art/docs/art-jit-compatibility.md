@@ -9259,3 +9259,7 @@ incomplete and still requires managed caller unwind validation.
   (253 PASS). No new failing test has appeared; the only non-pass ledger entry
   remains the known `099-vmdebug` timeout that passes at 120 seconds. The full
   run is left active for completion rather than being restarted.
+- Checkpoint 889 (2026-09-10): The full worker remains live at 260 completed
+  tests (259 PASS, one known `099-vmdebug` timeout). Active tests are in the
+  late AOSP stress/diagnostics range, confirming the parallel scheduler is
+  progressing rather than stalled.
