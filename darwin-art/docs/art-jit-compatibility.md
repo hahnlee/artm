@@ -9567,3 +9567,9 @@ incomplete and still requires managed caller unwind validation.
   111–271us, Unity Product Name/Metal 초기화 및 rc=0 종료를 유지했다.
   로딩 화면에서 clickable hit=0이므로 게임 내부 버튼 상태변화는 아직
   별도 콘텐츠 로딩 후 검증이 필요하다.
+
+- Checkpoint 942 (2026-09-10): stale Blue Archive host를 정리한 뒤
+  단독 15초 재실행해 `database is locked`가 사라짐을 확인했다.
+  Unity/Metal 및 MotionEvent 초기화는 유지됐고 rc=0이었다. GMS
+  measurement의 `Stub!`은 worker에서 catch된 optional analytics 예외로
+  남아 있으며 핵심 앱 그래픽/입력 acceptance와 분리해 추적한다.

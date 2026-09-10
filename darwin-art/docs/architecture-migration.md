@@ -14031,3 +14031,9 @@ or admission exception was added.
   일치했다. DOWN/UP consumed=1, 111–271us로 측정됐으며 fatal 없이
   종료했다. Blue Archive 초기 로딩 화면에는 clickable target이 없어
   실제 게임 버튼 상호작용 증거는 콘텐츠 진입 후로 남겼다.
+
+- Checkpoint 942 (2026-09-10): stale host 종료 후 동일 profile 단독
+  실행에서 SQLite WAL 잠금 오류가 재현되지 않았다. Unity/Metal startup와
+  MotionEvent ingress는 fatal 없이 통과했다. GMS local measurement의
+  `RuntimeException: Stub!`은 앱을 중단하지 않은 optional service 경고로
+  분류했으며, 범용 GMS 호환성 과제로 별도 남긴다.
