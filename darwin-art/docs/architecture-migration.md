@@ -14284,3 +14284,10 @@ or admission exception was added.
   확인했지만 host macOS가 mkcert root를 신뢰하지 않아 HTTPS report가 생성되지
   않았다. 시스템 키체인이나 APK를 임의로 변경하지 않고, 해당 외부 전제를
   명시적인 잔여 항목으로 유지한다.
+
+- Checkpoint 990 (2026-09-10): 최신 link artifact에서 graphics closure와
+  Rust lifecycle/JNI ownership 테스트를 재검증했다. Astra 리뷰를 통해
+  stale 실행 이미지 문제는 현재 재링크로 제거됐고, AOSP HWUI CommonPool의
+  detached worker가 VM shutdown보다 오래 살 수 있는 구조적 후속 과제가
+  식별됐다. 해당 변경은 source/patch identity를 함께 갱신하는 별도 작업으로
+  남겨 두며, Chromium HTTPS trust는 여전히 사용자 키체인 설정 전제다.

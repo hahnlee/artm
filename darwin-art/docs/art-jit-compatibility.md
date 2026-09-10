@@ -9848,3 +9848,11 @@ incomplete and still requires managed caller unwind validation.
   page-side HTTPS `reports.log`는 비어 있고 macOS mkcert root trust 전제가
   충족되지 않은 상태다. 런타임 CA projection이나 APK 경로는 변경하지 않았으며,
   trust 설정 없이 성공을 주장하지 않는다.
+
+- Checkpoint 990 (2026-09-10): runtime graphics link fast audit와
+  `darwin-art-runtime` 28개 테스트 및 doc-tests를 최신 artifact에서 다시
+  PASS시켰다. Astra의 실행 이미지 점검에서 stale graphics dylib와 AOSP
+  `CommonPool` detached-worker 종료 순서가 별도 위험으로 확인됐다. 현재
+  실행 이미지에는 `ThreadExitCallback`의 직접 Runtime detach 호출이 없는
+  것을 확인했지만, CommonPool 변경은 upstream shadow가 아닌 tracked patch로
+  정식 반영하기 전까지 완료로 표시하지 않는다.
