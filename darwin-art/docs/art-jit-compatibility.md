@@ -8873,6 +8873,9 @@ incomplete and still requires managed caller unwind validation.
 - Checkpoint 799 (2026-09-10): Fresh corpus advanced through
   `1917-get-stack-frame`, reaching 222 completed tests with zero failures.
   Four workers remain active.
+- Checkpoint 826 (2026-09-10): Fresh corpus advanced through
+  `2262-default-conflict-methods`, reaching 404 completed tests with zero
+  failures. Four workers remain active.
 - Checkpoint 825 (2026-09-10): Fresh corpus advanced through
   `2243-checker-not-inline-into-throw`, reaching 381 completed tests with zero
   failures. Four workers remain active.
@@ -8972,3 +8975,6 @@ incomplete and still requires managed caller unwind validation.
 - Checkpoint 795 (2026-09-10): Fresh corpus advanced through
   `182-method-linking`, reaching 204 completed tests with zero failures.
   Four workers remain active.
+- Checkpoint 826 (2026-09-10): Fresh corpus advanced through
+  `2262-default-conflict-methods`, reaching 404 completed tests with zero
+  failures. Four workers remain active.
