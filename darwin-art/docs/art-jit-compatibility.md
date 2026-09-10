@@ -8855,3 +8855,6 @@ incomplete and still requires managed caller unwind validation.
   `070-nio-buffer`, with 78 completed tests and no failed rows so far. The
   isolated ledger is still the authoritative run; no aggregate claim is made
   until all corpus inputs finish.
+- Checkpoint 787 (2026-09-10): The same fresh run remains live through
+  `086-null-super`, with 99 tests completed and no failures recorded. Worker
+  processes are active; final aggregate classification is still deferred.
