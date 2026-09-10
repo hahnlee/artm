@@ -9319,3 +9319,7 @@ incomplete and still requires managed caller unwind validation.
   tests (998 PASS), with no hard failures. Seven timeout rows are now recorded
   under the 60-second parallel budget; isolated longer-budget classification
   remains the next verification step after worker termination.
+- Checkpoint 906 (2026-09-10): The worker reached 1,017 completed tests
+  (1,010 PASS), with no hard failures. `2041-bad-cleaner` and
+  `2048-bad-native-registry` remain confirmed PASS in all three isolated lanes;
+  five other timeout rows await the same treatment after the worker exits.
