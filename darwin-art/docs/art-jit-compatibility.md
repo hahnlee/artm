@@ -9263,3 +9263,6 @@ incomplete and still requires managed caller unwind validation.
   tests (259 PASS, one known `099-vmdebug` timeout). Active tests are in the
   late AOSP stress/diagnostics range, confirming the parallel scheduler is
   progressing rather than stalled.
+- Checkpoint 890 (2026-09-10): The live corpus worker advanced to 266 tests
+  (265 PASS). Active cases are late AOSP JVMTI/multithread tests, including
+  `1962-multi-thread-events`; no new failures have appeared.
