@@ -9498,3 +9498,9 @@ incomplete and still requires managed caller unwind validation.
   `2+3=5` 결과까지 확인했고, DeskClock은 Material 탭을 눌러 Timer 페이지로
   전환했다. 두 앱 모두 HWUI+SurfaceFlinger+Metal visible buffer를
   게시했고 crash/fatal 없이 공통 경로 PASS를 기록했다.
+
+- Checkpoint 932 (2026-09-10): 변경 없는 AOSP Calendar APK를 포함한
+  `android-window-menu-acceptance`를 실행했다. Calendar의 실제 Spinner와
+  Day/Week/Month 메뉴, popup ViewRoot/InputChannel/SurfaceFlinger 경로가
+  통과했고 Calculator popup·outside-dismiss·resize 및 Chrome new-tab도
+  함께 PASS했다. 로그는 `_build/android-window-menu-acceptance`에 남겼다.

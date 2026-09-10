@@ -13970,3 +13970,9 @@ or admission exception was added.
   APK를 공통 호환성 계층에서 실행해 Calculator `2+3=5` 연산 결과와
   DeskClock Timer 탭 전환을 검증했다. 두 acceptance 모두 HWUI,
   SurfaceFlinger, Metal visible-buffer 경로와 fatal-free 종료를 통과했다.
+
+- Checkpoint 932 (2026-09-10): 실제 Calendar APK에서 Spinner와
+  Day/Week/Month 메뉴 전환을 검증하고, popup 창의 ViewRoot/InputChannel/
+  SurfaceFlinger 계약을 통과했다. 동일 실행에서 Calculator popup
+  outside-dismiss/resize와 Chrome new-tab도 통과해 다중 앱 창 경로의
+  공통 lifecycle 증거를 확보했다.
