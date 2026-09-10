@@ -9075,3 +9075,8 @@ incomplete and still requires managed caller unwind validation.
 - Checkpoint 859 (2026-09-10): The post-fix four-worker aggregate reached
   1,066 completed tests. No additional failures have appeared; the two
   existing SIGILL rows remain under investigation.
+- Checkpoint 860 (2026-09-10): Final aggregate terminated at 1,074/1,076
+  passed with `127-checker-secondarydex` and `149-suspend-all-stress` SIGILL
+  failures. Isolated reruns pass, but an 8-way stress run reproduced
+  `149-suspend-all-stress` in 2/8 processes with a corrupted generated-code
+  PC followed by `SuspendAll` timeout; concurrency/frame ABI remains open.
