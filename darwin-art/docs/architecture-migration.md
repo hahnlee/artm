@@ -13765,3 +13765,6 @@ or admission exception was added.
   completed tests (292 PASS). No new failures appeared; the only non-pass
   record remains the already isolated `099-vmdebug` timeout under the shorter
   parallel-run budget.
+- Checkpoint 894 (2026-09-10): The full corpus worker advanced to 301
+  completed tests (300 PASS). No new failure or timeout appeared; the worker
+  remains active for the remaining pinned AOSP cases.
