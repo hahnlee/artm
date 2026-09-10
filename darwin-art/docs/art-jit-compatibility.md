@@ -9289,3 +9289,6 @@ incomplete and still requires managed caller unwind validation.
 - Checkpoint 897 (2026-09-10): The active full-corpus worker reached 331
   completed tests (330 PASS). No new failure or timeout appeared; the worker
   remains active across the remaining AOSP compatibility cases.
+- Checkpoint 898 (2026-09-10): The full worker advanced to 337 completed tests
+  (336 PASS). No new failure or timeout appeared; the known `099-vmdebug`
+  calibration timeout remains the only non-pass ledger entry.
