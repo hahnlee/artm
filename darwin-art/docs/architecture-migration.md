@@ -13799,3 +13799,7 @@ or admission exception was added.
   barrier`, `659-unpadded-array`); no hard failures are recorded. All timeout
   cases will be rerun in isolation with calibrated longer limits after corpus
   completion.
+- Checkpoint 904 (2026-09-10): Isolated longer-budget reruns prove
+  `2041-bad-cleaner` and `2048-bad-native-registry` pass interpreter, JIT, and
+  optimized lanes. The full worker reached 989 completed (984 PASS); five
+  short-budget timeout ledger entries remain pending classification.
