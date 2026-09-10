@@ -9713,3 +9713,8 @@ incomplete and still requires managed caller unwind validation.
 - Checkpoint 964 (2026-09-10): JIT patch의 hunk 구조를 정리해 graphics bootstrap을
   다시 PASS시켰다. Astra 검토 결과처럼 low-4GB 강제는 Darwin에서 MAP_JIT 메모리
   부족을 일으키므로 되돌렸으며, exact Mach VM allocator 없이는 JIT 완료로 보지 않는다.
+
+- Checkpoint 965 (2026-09-10): Astra 권고대로 별도 후속 패치에서 Mach exact 후보와
+  owning 전환을 시험했지만 `MemMap` source 변형별 적용/소유권 조건이 맞지 않아
+  되돌렸다. 기존 `MAP_JIT` anywhere 구현과 범위 guard를 보존하며, 다음 시도는
+  공통 `MemMap` API에 exact allocator를 추가하는 방식이어야 한다.

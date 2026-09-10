@@ -14165,3 +14165,7 @@ or admission exception was added.
 - Checkpoint 964 (2026-09-10): 패치 hunk를 정리한 뒤 graphics bootstrap이 다시 PASS했다.
   low-4GB 강제는 Darwin MAP_JIT 할당 실패를 유발해 유지하지 않으며, 다음 작업은
   기존 매핑을 덮어쓰지 않는 exact Mach VM allocator 구현이다.
+
+- Checkpoint 965 (2026-09-10): Mach exact 후보 후속 패치는 source 변형별 hunk 및
+  `MemMap` ownership 조건을 통과하지 못해 제거했다. 현재 baseline은 깨끗하며,
+  공통 libartbase API를 먼저 확장한 뒤 JIT가 이를 사용하도록 재구성해야 한다.
