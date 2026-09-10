@@ -13339,3 +13339,7 @@ or admission exception was added.
   `_build/art-upstream-corpus-fresh` after forced graphics relink. It is live
   with four workers and has completed the first 27 tests without reusing any
   prior result; aggregate classification remains pending termination.
+- Checkpoint 786 (2026-09-10): The fresh four-worker run remains live through
+  `070-nio-buffer`, with 78 completed tests and no failed rows so far. The
+  isolated ledger is still the authoritative run; no aggregate claim is made
+  until all corpus inputs finish.
