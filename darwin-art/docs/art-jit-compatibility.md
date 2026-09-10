@@ -9709,3 +9709,7 @@ incomplete and still requires managed caller unwind validation.
   실행 영역을 anywhere로 먼저 할당하도록 수정했다. graphics bootstrap/link audit는
   PASS했으나 metadata가 32-bit stack-map 범위를 벗어나 JIT audit는 아직 실패한다.
   다음 단계는 non-overwrite exact 후보를 bounded retry로 구현하는 것이다.
+
+- Checkpoint 964 (2026-09-10): JIT patch의 hunk 구조를 정리해 graphics bootstrap을
+  다시 PASS시켰다. Astra 검토 결과처럼 low-4GB 강제는 Darwin에서 MAP_JIT 메모리
+  부족을 일으키므로 되돌렸으며, exact Mach VM allocator 없이는 JIT 완료로 보지 않는다.

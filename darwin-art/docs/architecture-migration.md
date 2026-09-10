@@ -14161,3 +14161,7 @@ or admission exception was added.
 - Checkpoint 963 (2026-09-10): Astra 리뷰에 따라 Darwin JIT에서 `MAP_JIT|MAP_FIXED`를
   제거했다. bootstrap/link audit는 PASS했으나 data/code 간격이 uint32 계약을 초과해
   JIT audit는 미완료다. 다음 구현은 `mach_vm_allocate(VM_FLAGS_FIXED)` 후보 탐색이다.
+
+- Checkpoint 964 (2026-09-10): 패치 hunk를 정리한 뒤 graphics bootstrap이 다시 PASS했다.
+  low-4GB 강제는 Darwin MAP_JIT 할당 실패를 유발해 유지하지 않으며, 다음 작업은
+  기존 매핑을 덮어쓰지 않는 exact Mach VM allocator 구현이다.
