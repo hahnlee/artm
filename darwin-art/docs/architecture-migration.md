@@ -13530,3 +13530,6 @@ or admission exception was added.
 - Checkpoint 848 (2026-09-10): The post-fix four-worker aggregate reached 402
   completed tests. No additional failures have appeared; the two existing
   SIGILL rows remain under investigation.
+- Checkpoint 849 (2026-09-10): The post-fix four-worker aggregate reached 487
+  completed tests. No additional failures have appeared; the two existing
+  SIGILL rows remain under investigation.
