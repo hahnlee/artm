@@ -8986,3 +8986,5 @@ incomplete and still requires managed caller unwind validation.
   zero failures; the four-worker run remains active.
 - Checkpoint 830 (2026-09-10): Fresh corpus reached 983 completed tests with
   zero failures; the four-worker run remains active.
+- Checkpoint 831 (2026-09-10): Fresh corpus reached 995 completed tests with
+  zero failures; the four-worker run remains active.
