@@ -13691,3 +13691,8 @@ or admission exception was added.
   and the targeted stress lane still reproduced the same invalid native
   dispatch (plus a SuspendAll timeout). The speculative RenderProxy retain
   change was therefore reverted rather than left as an unbuilt fix.
+- Checkpoint 877 (2026-09-10): Re-ran `149-suspend-all-stress` after the
+  graphics audit. The lane reproduced the same invalid native dispatch and
+  also reported a `SuspendAll` timeout; no improvement is attributable to the
+  RenderProxy hypothesis. The next diagnostic boundary is a pre-signal image
+  and symbol snapshot, not another speculative ownership change.
