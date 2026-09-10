@@ -13,6 +13,7 @@ darwin_renderthread_patch="$project_root/patches/frameworks-base/0007-darwin-hwu
 darwin_angle_surface_patch="$project_root/patches/frameworks-base/0008-darwin-hwui-angle-rgba-surface.patch"
 darwin_wide_gamut_patch="$project_root/patches/frameworks-base/0009-darwin-hwui-unsupported-wide-gamut.patch"
 darwin_thread_detach_patch="$project_root/patches/frameworks-base/0010-darwin-hwui-thread-detach.patch"
+darwin_require_jni_patch="$project_root/patches/frameworks-base/0011-darwin-hwui-require-jni-env.patch"
 
 # shellcheck disable=SC1090
 source "$lock_file"
@@ -252,6 +253,7 @@ patch_identity="$(printf '%s\n%s\n%s\n%s\n%s\n%s\n' "$HWUI_SOURCE_MANIFEST_SHA25
   "$ANIMATION_PULSE_PATCH_SHA256" "$DARWIN_GPU_PATCH_SHA256" \
   "$DARWIN_RENDERTHREAD_PATCH_SHA256" "$DARWIN_ANGLE_SURFACE_PATCH_SHA256" \
   "$DARWIN_WIDE_GAMUT_PATCH_SHA256" "$DARWIN_THREAD_DETACH_PATCH_SHA256" \
+  "$DARWIN_REQUIRE_JNI_PATCH_SHA256" \
   | shasum -a 256 | awk '{print $1}')"
 if [[ ! -f "$patched_marker" || "$(<"$patched_marker")" != "$patch_identity" ]]; then
   fresh_shadow="$output_dir/patched-source.new.$$"
@@ -263,6 +265,7 @@ if [[ ! -f "$patched_marker" || "$(<"$patched_marker")" != "$patch_identity" ]];
   patch -d "$fresh_shadow" -p1 < "$darwin_angle_surface_patch"
   patch -d "$fresh_shadow" -p1 < "$darwin_wide_gamut_patch"
   patch -d "$fresh_shadow" -p1 < "$darwin_thread_detach_patch"
+  patch -d "$fresh_shadow" -p1 < "$darwin_require_jni_patch"
   printf '%s\n' "$patch_identity" > "$fresh_shadow/.darwin-art-patched-source"
   rm -rf "$patched_hwui"
   mv "$fresh_shadow" "$patched_hwui"

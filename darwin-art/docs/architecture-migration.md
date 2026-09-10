@@ -13855,3 +13855,9 @@ or admission exception was added.
   HWUI native helper on a host-created thread. Darwin lazy JNI attachment and
   TLS-owned detach were added, while preserving AOSP worker attach behavior;
   graphics closure is being rebuilt for the next acceptance run.
+- Checkpoint 914 (2026-09-10): The Chromium run still reached HWUI native
+  `getenv(JavaVM)` on an un-attached host helper and aborted before tab UI.
+  Added Darwin-only HWUI JNI fallback that attaches the current thread and a
+  TLS-owned detach path for AOSP RenderThread/worker attachments. The HWUI
+  foundation patch dry-run and archive rebuild pass; Chromium must be rerun
+  against this newly materialized foundation.
