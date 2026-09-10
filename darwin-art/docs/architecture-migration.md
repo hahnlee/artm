@@ -13617,3 +13617,12 @@ or admission exception was added.
   usable fault record. The LR instruction dump remains enabled and is limited
   to the already-proven code-address read; x23 must be inspected from a
   non-signal execution path. The concurrent JIT/GC ABI defect remains open.
+- Checkpoint 867 (2026-09-10): After relinking the runtime, the concurrent
+  test still reproduces `ldr x8,[x23] ; ldr x8,[x8,#8] ; blr x8` with x8 equal
+  to the encoded `ret`/stack-restore instruction pair. AOSP's ordinary ARM64
+  virtual/interface generators instead load compressed references with `w`
+  registers, decode them through `ReferenceCodegenARM64`, and only then read
+  native pointers. The failing sequence therefore comes from an unclassified
+  generated call path (or its post-GC state), not the already-patched standard
+  virtual/interface fast path. No speculative code change was made; the goal
+  remains open pending path identification.
