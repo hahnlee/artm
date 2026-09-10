@@ -13361,6 +13361,9 @@ or admission exception was added.
 - Checkpoint 799 (2026-09-10): Fresh corpus advanced through
   `1917-get-stack-frame`, reaching 222 completed tests with zero failures.
   Four workers remain active.
+- Checkpoint 815 (2026-09-10): Fresh corpus advanced through
+  `1984-structural-redefine-field-trace`, reaching 289 completed tests with
+  zero failures. Four workers remain active.
 - Checkpoint 814 (2026-09-10): Fresh corpus advanced through
   `1978-regular-obsolete-then-structural-obsolescence`, reaching 283
   completed tests with zero failures. Four workers remain active.
