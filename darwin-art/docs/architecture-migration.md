@@ -14108,6 +14108,12 @@ or admission exception was added.
   조건을 별도 추적해야 함을 보여준다. APK process-boundary 종료는
   `mem::forget` 후 `_exit` 순서를 보장하도록 수정했다.
 
+- Checkpoint 956 (2026-09-10): teardown 수정 이후 graphics closure를
+  단독 재감사해 registrar=51, fake-symbols=0, host dependency leakage=0,
+  exit=0을 확인했다. materialized runtime graphics dylib identity는
+  SHA-256 `bfe8751308d554f8c0038ef1e235ebcdf868e6e5a6f1d8209b703fc815a40c2c`
+  로 고정해 후속 acceptance의 stale/mixed artifact 판정 기준으로 삼는다.
+
 - Checkpoint 949 (2026-09-10): expected-address hint 실험이 일부 child의
   JIT fallback을 유발해 되돌렸다. graphics bootstrap/link audit는 PASS이며,
   AOSP stack-map 범위를 유지하려면 Darwin reservation 기반 bounded retry가

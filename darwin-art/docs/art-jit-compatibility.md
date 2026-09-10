@@ -9651,6 +9651,12 @@ incomplete and still requires managed caller unwind validation.
   모두 PASS했다. APK error shutdown guard는 `_exit` 전에 임시 guard가
   drop되지 않도록 `mem::forget`으로 보강했다.
 
+- Checkpoint 956 (2026-09-10): teardown 보강 후 `audit-runtime-graphics-link`
+  를 단독 재실행해 closure complete(`registrar=51`, `fake-symbols=0`,
+  host-icu/fmt/CoreText=0)와 exit=0을 확인했다. 현재 materialized graphics
+  dylib SHA-256은 `bfe8751308d554f8c0038ef1e235ebcdf868e6e5a6f1d8209b703fc815a40c2c`
+  이며, 변경 없는 APK acceptance와 JIT 증거의 기준 artifact로 기록한다.
+
 - Checkpoint 949 (2026-09-10): expected-address hint 실험이 일부 child의
   JIT fallback을 유발해 되돌렸다. graphics bootstrap/link audit는 PASS이며,
   reservation 기반 bounded retry 없이는 JIT 주소 배치를 완료로 간주하지 않는다.
