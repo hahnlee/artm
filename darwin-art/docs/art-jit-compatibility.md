@@ -9687,6 +9687,13 @@ incomplete and still requires managed caller unwind validation.
   두 모드의 relocatable 및 final executable closure audit가 archive-members
   `1970`으로 PASS했다.
 
+- Checkpoint 961 (2026-09-10): graphics closure 재생성 후 Android Bionic
+  pthread provider lifecycle stress를 다시 실행했다. 실제 Android arm64
+  ELF resolver에서 imports=24/24, create+join+detach owner token,
+  join-vs-detach one-winner, detached-clean 및 TLS/cond/rwlock/mutex ASan
+  stress가 모두 PASS했다. 이는 native thread ownership의 provider 경계를
+  단순 smoke가 아닌 반복 lifecycle로 확인한 증거다.
+
 - Checkpoint 949 (2026-09-10): expected-address hint 실험이 일부 child의
   JIT fallback을 유발해 되돌렸다. graphics bootstrap/link audit는 PASS이며,
   reservation 기반 bounded retry 없이는 JIT 주소 배치를 완료로 간주하지 않는다.

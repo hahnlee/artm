@@ -14140,6 +14140,13 @@ or admission exception was added.
   `audit-android16-graphics-closure.sh` 양 모드가 archive-members=1970으로
   PASS해 빌드 산출물 identity와 provider 경계를 다시 일치시켰다.
 
+- Checkpoint 961 (2026-09-10): 재현 가능한 graphics archive identity를 고정한
+  뒤 Bionic pthread provider의 실제 ELF lifecycle stress를 수행했다.
+  Android arm64 imports 24/24와 provider-owned create/join/detach token,
+  경쟁 join-vs-detach 단일 승자, TLS destructor 및 동기화 스트레스가
+  ASan clean으로 PASS했다. 다음 단계는 이 ownership 증거를 ART JavaVM
+  attachment generation 및 VM shutdown 경합까지 연결하는 것이다.
+
 - Checkpoint 949 (2026-09-10): expected-address hint 실험이 일부 child의
   JIT fallback을 유발해 되돌렸다. graphics bootstrap/link audit는 PASS이며,
   AOSP stack-map 범위를 유지하려면 Darwin reservation 기반 bounded retry가
