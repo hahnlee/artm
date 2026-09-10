@@ -30,6 +30,56 @@ def _signal_group(process: subprocess.Popen[Any], signum: int) -> None:
         process.send_signal(signum)
 
 
+def _snapshot_descendant_pids(root_pid: int) -> list[int]:
+    """Return descendants while the parent/child relationship still exists."""
+    if os.name != "posix":
+        return []
+    try:
+        listing = subprocess.check_output(
+            ["ps", "-axo", "pid=,ppid="], text=True, stderr=subprocess.DEVNULL)
+    except (OSError, subprocess.SubprocessError):
+        return []
+    children: dict[int, list[int]] = {}
+    for line in listing.splitlines():
+        fields = line.split()
+        if len(fields) != 2:
+            continue
+        try:
+            pid, parent = (int(value) for value in fields)
+        except ValueError:
+            continue
+        children.setdefault(parent, []).append(pid)
+    descendants: list[int] = []
+    pending = list(children.get(root_pid, ()))
+    while pending:
+        pid = pending.pop()
+        descendants.append(pid)
+        pending.extend(children.get(pid, ()))
+    return descendants
+
+
+def _signal_descendants(pids: list[int], signum: int) -> None:
+    """Signal descendants, including helpers that created their own session."""
+    for pid in reversed(pids):
+        try:
+            os.killpg(pid, signum)
+        except (ProcessLookupError, PermissionError):
+            pass
+        try:
+            os.kill(pid, signum)
+        except (ProcessLookupError, PermissionError):
+            pass
+
+
+def _terminate_process_tree(process: subprocess.Popen[Any]) -> list[int]:
+    # Snapshot before terminating the runner: nested helpers can call setsid,
+    # and then become PPID 1 immediately when the runner exits.
+    descendants = _snapshot_descendant_pids(process.pid)
+    _signal_group(process, signal.SIGTERM)
+    _signal_descendants(descendants, signal.SIGTERM)
+    return descendants
+
+
 def _reap_orphaned_group(process: subprocess.Popen[Any]) -> None:
     """Terminate descendants that outlived the direct child.
 
@@ -105,12 +155,13 @@ def run_process_group(
             if remaining <= 0:
                 original_timeout = subprocess.TimeoutExpired(
                     list(arguments), timeout)
-                _signal_group(process, signal.SIGTERM)
+                descendants = _terminate_process_tree(process)
                 try:
                     output, error = process.communicate(
                         timeout=TERMINATE_GRACE_SECONDS)
                 except subprocess.TimeoutExpired:
                     _signal_group(process, signal.SIGKILL)
+                    _signal_descendants(descendants, signal.SIGKILL)
                     output, error = process.communicate()
                 _reap_orphaned_group(process)
                 raise subprocess.TimeoutExpired(
@@ -128,12 +179,13 @@ def run_process_group(
                 output, error = process.communicate()
                 break
             if timeout is not None and time.monotonic() - started >= timeout:
-                _signal_group(process, signal.SIGTERM)
+                descendants = _terminate_process_tree(process)
                 try:
                     output, error = process.communicate(
                         timeout=TERMINATE_GRACE_SECONDS)
                 except subprocess.TimeoutExpired:
                     _signal_group(process, signal.SIGKILL)
+                    _signal_descendants(descendants, signal.SIGKILL)
                     output, error = process.communicate()
                 _reap_orphaned_group(process)
                 raise subprocess.TimeoutExpired(

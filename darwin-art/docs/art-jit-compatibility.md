@@ -9241,3 +9241,8 @@ incomplete and still requires managed caller unwind validation.
   165 PASS and one timeout (`099-vmdebug` at the 60-second per-test limit).
   The worker remains active; the timeout is isolated for a later 120-second
   rerun and is not being treated as an ART regression yet.
+- Checkpoint 885 (2026-09-10): Fixed `tools/process_group.py` timeout cleanup
+  to snapshot and terminate descendant PIDs as well as the original process
+  group, covering helpers that call `setsid()` and otherwise become PPID 1.
+  Both process-group unit tests pass. The live full-corpus run continues under
+  the corrected cleanup contract.
