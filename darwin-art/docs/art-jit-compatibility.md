@@ -9788,3 +9788,10 @@ incomplete and still requires managed caller unwind validation.
   root를 `CSSMERR_TP_NOT_TRUSTED`로 거부하는 환경 전제 때문에 Chromium
   `-202`에서 중단됐다. acceptance script에 사전 trust 검사를 추가했으며
   시스템 키체인 변경은 수행하지 않았다.
+
+- Checkpoint 979 (2026-09-10): 변경 없는 Blue Archive base+arm64 split 실행에서
+  Java-only native-count 경로에도 Android unwind provider를 export하도록 런처를
+  보정했다. 최초 Conscrypt `libssl.so`의 `_Unwind_RaiseException` provider 오류는
+  사라졌고 Unity/NPALogInfo 초기화까지 진행됐다. 다음 실패는 실제 SIM 근거 없이
+  합성하지 않도록 TelephonyFrameworkInitializer의 manager만 AOSP 순서로 설치한
+  뒤 재검증 중이며, subscription Binder는 아직 제공하지 않는다.

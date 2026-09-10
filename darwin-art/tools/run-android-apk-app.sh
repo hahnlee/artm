@@ -633,15 +633,19 @@ if [[ -z "${DARWIN_ART_MOLTENVK_DYLIB:-}" ]]; then
   fi
 fi
 
+# Platform Conscrypt/libssl uses the Android LIBC_R unwind contract even for
+# APKs that have no packaged native libraries. Prepare it independently of
+# the APK native-count so Java-only apps get the same provider as native APKs.
+unwind_provider="$root/_build/android-unwind-provider/libdarwin_art_android_unwind.so"
+if [[ -n "$installed_record" && ! -f "$unwind_provider" ]]; then
+  echo "installed run requires prebuilt Android unwind provider" >&2
+  exit 69
+elif [[ -z "$installed_record" ]]; then
+  "$root/tools/build-android-unwind-provider.sh" "$unwind_provider" >/dev/null
+fi
+export DARWIN_ART_ANDROID_UNWIND_PROVIDER="$unwind_provider"
+
 if [[ "$native_count" != "0" ]]; then
-  unwind_provider="$root/_build/android-unwind-provider/libdarwin_art_android_unwind.so"
-  if [[ -n "$installed_record" && ! -f "$unwind_provider" ]]; then
-    echo "installed native run requires prebuilt Android unwind provider" >&2
-    exit 69
-  elif [[ -z "$installed_record" ]]; then
-    "$root/tools/build-android-unwind-provider.sh" "$unwind_provider" >/dev/null
-  fi
-  export DARWIN_ART_ANDROID_UNWIND_PROVIDER="$unwind_provider"
   [[ "$native_root" != "none" ]] || {
     echo "APK native metadata did not select an arm64 root library" >&2
     exit 65
@@ -674,7 +678,6 @@ if [[ "$native_count" != "0" ]]; then
   esac
   export DARWIN_ART_APK_MANAGED_NATIVE_LOAD="${DARWIN_ART_APK_MANAGED_NATIVE_LOAD:-1}"
 else
-  unset DARWIN_ART_ANDROID_UNWIND_PROVIDER
   unset DARWIN_ART_APK_APP_NATIVE_PATH
   unset DARWIN_ART_APK_APP_NATIVE_DIR
   unset DARWIN_ART_APK_MANAGED_NATIVE_LOAD

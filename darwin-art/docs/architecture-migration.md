@@ -14227,3 +14227,10 @@ or admission exception was added.
   `security verify-cert`가 임시 mkcert root를 신뢰하지 않아 Chromium TLS
   `net_error -202`가 발생했다. 테스트는 시스템 변경 없이 명확한 preflight
   오류를 내도록 보강했으며, 키체인 설치 후 재실행이 남은 단계다.
+
+- Checkpoint 979 (2026-09-10): 런처가 APK native-count가 0이어도 platform
+  Conscrypt/libssl에 필요한 Android unwind provider를 준비·export하도록 수정했다.
+  Blue Archive 원본 base+arm64 split에서 해당 오류가 해소되어 Unity 부트스트랩까지
+  도달했으며, 이후 TelephonyFrameworkInitializer manager 초기화 계약을 추가했다.
+  macOS에 존재하지 않는 SIM/통신사 데이터를 합성하지 않고 AOSP의 absent-service
+  기본값 경로를 유지한다.

@@ -41,6 +41,11 @@ import java.io.File;
 
 /** Minimal in-process display service used by Choreographer on the host. */
 public final class DarwinServiceBridge {
+    static {
+        // Install modular framework singletons as soon as this bridge class is
+        // initialized, before any application code can touch TelephonyManager.
+        installTelephonyFrameworkManager();
+    }
     /**
      * ActivityThread normally installs RuntimeInit's process-wide handler
      * before an application's Activity is created.  The detached launcher
@@ -294,6 +299,12 @@ public final class DarwinServiceBridge {
 
     /** Installs the Activity already launched by the native process bootstrap. */
     static void installInitialActivity(Activity activity) {
+        // ActivityThread normally initializes the modular telephony service
+        // manager before application callbacks.  Detached ART has no
+        // system_server, but the framework facade still requires the manager
+        // object to be installed so absent modem services return defaults
+        // instead of dereferencing a null singleton.
+        installTelephonyFrameworkManager();
         if (System.getenv("DARWIN_ART_DEBUG_SECURITY") != null) {
             try {
                 String algorithm = javax.net.ssl.TrustManagerFactory.getDefaultAlgorithm();
@@ -2266,6 +2277,26 @@ public final class DarwinServiceBridge {
             fetchers.put(Context.TELEPHONY_SERVICE, telephonyFetcher);
         } catch (Throwable error) {
             Log.w("DarwinServiceBridge", "telephony wrapper unavailable: "
+                    + describeThrowable(error));
+        }
+    }
+
+    private static void installTelephonyFrameworkManager() {
+        try {
+            Log.i("DarwinServiceBridge", "initializing telephony framework manager");
+            Class<?> managerType = Class.forName("android.os.TelephonyServiceManager");
+            Class<?> initializer = Class.forName(
+                    "android.telephony.TelephonyFrameworkInitializer");
+            Method getter = initializer.getMethod("getTelephonyServiceManager");
+            if (getter.invoke(null) == null) {
+                Object manager = managerType.getDeclaredConstructor().newInstance();
+                initializer.getMethod("setTelephonyServiceManager", managerType)
+                        .invoke(null, manager);
+            }
+        } catch (ClassNotFoundException ignored) {
+            Log.i("DarwinServiceBridge", "telephony framework initializer unavailable");
+        } catch (Throwable error) {
+            Log.w("DarwinServiceBridge", "telephony framework manager unavailable: "
                     + describeThrowable(error));
         }
     }
