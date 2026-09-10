@@ -9161,3 +9161,10 @@ incomplete and still requires managed caller unwind validation.
   mapping initialized before the hook. The source tree is clean; the next
   probe will snapshot loaded executable maps and registered ranges at normal
   runtime startup, outside the signal path.
+- Checkpoint 871 (2026-09-10): Ran `149-suspend-all-stress` in a live,
+  single-process session after the clean relink; its interpreter, JIT, and
+  unmodified interpreter+optimized lanes all passed. This confirms the
+  corruption is intermittent and concurrency-sensitive rather than a
+  deterministic bad code sequence. The live run ended before an attachable
+  process snapshot was possible, so no ownership claim was made and the
+  concurrent JIT/AOT ABI issue remains open.
