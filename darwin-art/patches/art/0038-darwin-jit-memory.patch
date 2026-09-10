@@ -94,7 +94,7 @@ diff --git a/runtime/jit/jit_memory_region.cc b/runtime/jit/jit_memory_region.cc
  using android::base::unique_fd;
  
  namespace art HIDDEN {
-@@ -72,6 +77,70 @@
+@@ -72,6 +77,55 @@
    MemMap non_exec_pages;
    MemMap writable_data_pages;
  
@@ -129,31 +129,16 @@ diff --git a/runtime/jit/jit_memory_region.cc b/runtime/jit/jit_memory_region.cc
 +      return false;
 +    }
 +    std::string name = exec_cache_name + "-rwx";
-+    // ART stores stack-map metadata as a uint32 code-relative offset. Request
-+    // the MAP_JIT view immediately after the data view so that this AOSP
-+    // contract remains valid on Darwin even though the mappings are distinct.
-+    exec_pages = MemMap::MapFileAtAddress(data_pages.End(),
-+                                          exec_capacity,
-+                                          kProtRWX,
-+                                          MAP_PRIVATE | MAP_ANON | MAP_JIT,
-+                                          -1,
-+                                          /* start= */ 0,
-+                                          /* low_4gb= */ false,
-+                                          name.c_str(),
-+                                          /* reuse= */ false,
-+                                          /* reservation= */ nullptr,
-+                                          &error_str);
++    exec_pages = MemMap::MapFile(exec_capacity,
++                                 kProtRWX,
++                                 MAP_PRIVATE | MAP_ANON | MAP_JIT,
++                                 -1,
++                                 /* start= */ 0,
++                                 /* low_4gb= */ false,
++                                 name.c_str(),
++                                 &error_str);
 +    if (!exec_pages.IsValid()) {
 +      *error_msg = "Failed to create Darwin MAP_JIT code cache: " + error_str;
-+      return false;
-+    }
-+
-+    const uintptr_t data_begin = reinterpret_cast<uintptr_t>(data_pages.Begin());
-+    const uintptr_t data_end = reinterpret_cast<uintptr_t>(data_pages.End());
-+    const uintptr_t exec_begin = reinterpret_cast<uintptr_t>(exec_pages.Begin());
-+    const uintptr_t exec_end = reinterpret_cast<uintptr_t>(exec_pages.End());
-+    if (data_end > exec_begin || exec_end - data_begin > std::numeric_limits<uint32_t>::max()) {
-+      *error_msg = "Darwin JIT data/code mappings exceed uint32 stack-map offset range";
 +      return false;
 +    }
 +

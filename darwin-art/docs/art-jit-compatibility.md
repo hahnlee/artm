@@ -9611,3 +9611,7 @@ incomplete and still requires managed caller unwind validation.
   통일했다. Chrome window-menu acceptance는 실제 popup과 `new_tab_menu_id`
   입력을 PASS했고 SIGABRT는 재현되지 않았다. 다만 일부 child는 expected
   MAP_JIT 주소 거부로 JIT fallback이 남아 있어 JIT 활성화는 미완료다.
+
+- Checkpoint 949 (2026-09-10): expected-address hint 실험이 일부 child의
+  JIT fallback을 유발해 되돌렸다. graphics bootstrap/link audit는 PASS이며,
+  reservation 기반 bounded retry 없이는 JIT 주소 배치를 완료로 간주하지 않는다.

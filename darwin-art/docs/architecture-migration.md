@@ -14073,3 +14073,8 @@ or admission exception was added.
   최신 window-menu acceptance에서 560x1233 popup과 `new_tab_menu_id`를
   확인했고 SIGABRT는 사라졌다. 일부 child의 MAP_JIT expected-address
   거부와 JIT fallback은 후속 bounded retry 과제로 남아 있다.
+
+- Checkpoint 949 (2026-09-10): expected-address hint 실험이 일부 child의
+  JIT fallback을 유발해 되돌렸다. graphics bootstrap/link audit는 PASS이며,
+  AOSP stack-map 범위를 유지하려면 Darwin reservation 기반 bounded retry가
+  추가로 필요하다.
