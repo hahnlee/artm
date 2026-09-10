@@ -9332,3 +9332,8 @@ incomplete and still requires managed caller unwind validation.
   `2041-bad-cleaner`, `2048-bad-native-registry`, `658-fp-read-barrier`,
   `659-unpadded-array`, `916-obsolete-jit`, and `924-threads`; the short
   timeout ledger is therefore classified as calibration, not runtime failure.
+- Checkpoint 909 (2026-09-10): Reconfirmed the terminal corpus state and
+  timeout isolation: all seven timeout cases pass interpreter, JIT, and
+  optimized lanes when run independently with sufficient time. No corpus
+  hard failures remain; real-app/Blue Archive acceptance and the complete
+  feature audit are still open requirements.
