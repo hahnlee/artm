@@ -9177,3 +9177,11 @@ incomplete and still requires managed caller unwind validation.
   investigation to native-object/vtable corruption during `SuspendAll`, while
   retaining the JIT/AOT stress reproducer; no unsafe signal-path probe or
   speculative fix was added.
+- Checkpoint 873 (2026-09-10): Correlated the same instruction shape with the
+  linked runtime's native ARM64 text and confirmed it is the compiler's
+  standard C++ virtual-dispatch sequence (`ldr` vtable, `ldr` slot, `blr`).
+  The failing x23 values are host-sized (not compressed managed references),
+  so treating this as a Java virtual-call offset bug would be incorrect. The
+  remaining reproducible condition is native-object/vtable state during
+  concurrent `SuspendAll`; the runtime source remains unchanged while the
+  next step moves ownership capture to a pre-signal execution hook.
