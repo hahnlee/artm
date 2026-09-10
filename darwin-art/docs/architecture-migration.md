@@ -14178,3 +14178,7 @@ or admission exception was added.
   mapping이 성립하지 않았다. source 계층별 patch mismatch가 아니라 foundation
   `MemMap` ownership/API 부재가 원인으로 확정됐고, 다음 구현은 foundation API 확장 후
   runtime 소비 패치로 분리한다.
+
+- Checkpoint 968 (2026-09-10): exact allocator와 runtime 소비 패치를 staged
+  source→object→link로 재생성했다. PAGEZERO 밖까지 도달하지만 고정 주소가 기존
+  mapping과 충돌하므로 다음 단계는 Mach VM free-region 기반 비파괴 배치다.

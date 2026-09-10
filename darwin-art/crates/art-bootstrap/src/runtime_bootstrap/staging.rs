@@ -38,7 +38,9 @@ pub(crate) fn prepare(root: &Path, flavor: RuntimeFlavor) -> Result<RuntimeBoots
     build_elf_loader(root)?;
 
     let artbase = root.join("_aosp/art/libartbase");
+    let artbase_base = artbase.join("base");
     let patched_artbase = root.join("_build/foundation/patched-source/libartbase");
+    let patched_artbase_base = patched_artbase.join("base");
     let cmdline = root.join("_aosp/art/cmdline");
     let libdexfile = root.join("_aosp/art/libdexfile");
     let libelffile = root.join("_aosp/art/libelffile");
@@ -152,7 +154,9 @@ pub(crate) fn prepare(root: &Path, flavor: RuntimeFlavor) -> Result<RuntimeBoots
         generator,
         patched_runtime.clone(),
         patched_artbase,
+        patched_artbase_base,
         artbase.clone(),
+        artbase_base,
         cmdline,
         libdexfile,
         libelffile,

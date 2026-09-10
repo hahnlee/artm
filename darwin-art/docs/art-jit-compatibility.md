@@ -9729,3 +9729,8 @@ incomplete and still requires managed caller unwind validation.
   계층이 아니라 foundation `libartbase MemMap` API에 exact allocator가 없는 구조적
   한계로 확정했다. 다음 작업은 foundation patch와 runtime patch를 분리해 API 계약을
   먼저 추가하는 것이다.
+
+- Checkpoint 968 (2026-09-10): standalone OpenJDK 빌더 include 경로와 foundation
+  `MapAnonymousExact` 직접 소유 MemMap을 교정했다. runtime v34 staging/link 재생성 후
+  PAGEZERO guard 반영을 확인했으며 graphics/link는 PASS다. JIT exact 후보는 기존
+  Mach mapping과 충돌해 아직 실패하며, 다음은 `mach_vm_region` free-gap 탐색이다.

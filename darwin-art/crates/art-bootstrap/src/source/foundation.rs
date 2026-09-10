@@ -23,6 +23,7 @@ pub(crate) fn build_foundation(root: &Path) -> Result<()> {
         "patches/art/0094-darwin-thread-cpu-nanotime.patch",
         "patches/art/0102-darwin-logical-pthread-names.patch",
         "patches/art/0112-darwin-artbase-private-paths.patch",
+        "patches/art/0039-darwin-memmap-exact-anonymous.patch",
     ];
     let shadow_identity = foundation_shadow_identity(root, &artbase, &foundation_patches)?;
     let shadow_identity_path = patched_source_dir.join(".darwin-art-shadow-identity");
@@ -30,6 +31,10 @@ pub(crate) fn build_foundation(root: &Path) -> Result<()> {
         .is_ok_and(|cached| cached.trim() == shadow_identity)
         && [
             "globals.h",
+            "bit_utils.h",
+            "macros.h",
+            "stl_util_identity.h",
+            "mem_map.h",
             "mem_map.cc",
             "mem_map_unix.cc",
             "os_linux.cc",
@@ -49,6 +54,10 @@ pub(crate) fn build_foundation(root: &Path) -> Result<()> {
         fs::create_dir_all(&candidate_artbase)?;
         for source in [
             "globals.h",
+            "bit_utils.h",
+            "macros.h",
+            "stl_util_identity.h",
+            "mem_map.h",
             "mem_map.cc",
             "mem_map_unix.cc",
             "os_linux.cc",
@@ -71,6 +80,10 @@ pub(crate) fn build_foundation(root: &Path) -> Result<()> {
         }
         for source in [
             "globals.h",
+            "bit_utils.h",
+            "macros.h",
+            "stl_util_identity.h",
+            "mem_map.h",
             "mem_map.cc",
             "mem_map_unix.cc",
             "os_linux.cc",
@@ -84,7 +97,7 @@ pub(crate) fn build_foundation(root: &Path) -> Result<()> {
             )?;
         }
         fs::remove_dir_all(candidate_dir)?;
-        for stale in ["mem_map.h", "utils.h"] {
+        for stale in ["utils.h"] {
             let overlay = patched_artbase.join("base").join(stale);
             if overlay.exists() {
                 fs::remove_file(overlay)?;

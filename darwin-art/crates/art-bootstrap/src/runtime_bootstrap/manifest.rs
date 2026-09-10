@@ -4,7 +4,7 @@
 //! compiler orchestration cannot silently change which upstream files are
 //! copied or patched.
 
-pub(super) const RUNTIME_SHADOW_IDENTITY_VERSION: &str = "runtime-shadow-v32";
+pub(super) const RUNTIME_SHADOW_IDENTITY_VERSION: &str = "runtime-shadow-v34";
 
 pub(super) const PATCHED_RUNTIME_SOURCES: &[&str] = &[
     "runtime.cc",
@@ -109,6 +109,7 @@ pub(super) const PATCHED_RUNTIME_PATCHES: &[&str] = &[
     "patches/art/0034-darwin-fragmented-oom-hspace-retry.patch",
     "patches/art/0035-darwin-rosalloc-clear-tail-protection.patch",
     "patches/art/0038-darwin-jit-memory.patch",
+    "patches/art/0040-darwin-jit-exact-data-api.patch",
     "patches/art/0067-homogeneous-compaction-jit-roots.patch",
     "patches/art/0070-darwin-imt-conflict-receiver.patch",
     "patches/art/0072-darwin-polymorphic-runtime-boundary.patch",
@@ -187,6 +188,7 @@ mod tests {
                 .contains(&"patches/art/0030-darwin-large-object-bitmap-window.patch")
         );
         assert!(PATCHED_RUNTIME_PATCHES.contains(&"patches/art/0038-darwin-jit-memory.patch"));
+        assert!(PATCHED_RUNTIME_PATCHES.contains(&"patches/art/0040-darwin-jit-exact-data-api.patch"));
         assert!(!PATCHED_RUNTIME_PATCHES.contains(&"patches/art/0017-darwin-disable-nterp.patch"));
         assert!(
             !PATCHED_RUNTIME_PATCHES
