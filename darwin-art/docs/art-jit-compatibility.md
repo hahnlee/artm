@@ -8870,3 +8870,6 @@ incomplete and still requires managed caller unwind validation.
 - Checkpoint 791 (2026-09-10): Fresh corpus advanced through
   `140-field-packing`, reaching 160 completed tests with zero failures. The
   four-worker process remains active.
+- Checkpoint 792 (2026-09-10): Fresh corpus advanced through
+  `153-reference-stress`, reaching 174 completed tests with zero failures.
+  Four workers remain active; no completion claim yet.
