@@ -13771,3 +13771,6 @@ or admission exception was added.
 - Checkpoint 895 (2026-09-10): The live corpus worker reached 308 completed
   tests (307 PASS). No new failures or timeouts appeared; the known
   `099-vmdebug` calibration timeout remains the only non-pass ledger entry.
+- Checkpoint 896 (2026-09-10): The live full-corpus worker reached 315
+  completed tests (314 PASS). No new failure or timeout appeared; execution is
+  continuing through the remaining pinned AOSP tests.
