@@ -12,6 +12,7 @@ lock_file="$project_root/upstream/android16-android-graphics-jni.lock"
 gpu_lock_file="$project_root/upstream/android16-hwui-gpu.lock"
 critical_patch="$project_root/patches/frameworks-base/0001-darwin-android-critical-jni-abi.patch"
 lazy_native_window_patch="$project_root/patches/frameworks-base/0002-darwin-lazy-native-window-jni.patch"
+require_jni_env_patch="$project_root/patches/frameworks-base/0011-darwin-hwui-require-jni-env.patch"
 hwui_gpu_patch="$project_root/patches/frameworks-base/0003-darwin-hwui-gpu-layoutlib.patch"
 mode=full
 cpu_diagnostic=0
@@ -194,6 +195,7 @@ fi
 cp -R "$source_hwui" "$patched_hwui"
 patch -s -d "$patched_hwui" -p1 < "$critical_patch"
 patch -s -d "$patched_hwui" -p1 < "$lazy_native_window_patch"
+patch -s -d "$patched_hwui" -p1 < "$require_jni_env_patch"
 gpu_mode=1
 if [[ "$cpu_diagnostic" == 1 ]]; then
   gpu_mode=0

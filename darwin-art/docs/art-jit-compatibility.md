@@ -9373,3 +9373,9 @@ incomplete and still requires managed caller unwind validation.
   TLS-owned detach path for AOSP RenderThread/worker attachments. The HWUI
   foundation patch dry-run and archive rebuild pass; Chromium must be rerun
   against this newly materialized foundation.
+- Checkpoint 915 (2026-09-10): Applied the JNI fallback to the actual
+  graphics-JNI archive build (not only the static foundation) and rebuilt the
+  graphics closure successfully. Chromium still reports `Failed to get JNIEnv`
+  from another HWUI helper path, so the remaining work is to route all AOSP
+  HWUI JNI helper accessors through the same attach contract before tab
+  acceptance can pass.
