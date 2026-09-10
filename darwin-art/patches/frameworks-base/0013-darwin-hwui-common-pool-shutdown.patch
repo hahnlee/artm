@@ -54,9 +54,14 @@
  CommonPool& CommonPool::instance() {
      static CommonPool pool;
      return pool;
-@@ -68,6 +76,7 @@
+@@ -68,6 +80,12 @@
  void CommonPool::enqueue(Task&& task) {
      std::unique_lock lock(mLock);
++    if (mIsStopping) {
++        lock.unlock();
++        task();
++        return;
++    }
      while (!mWorkQueue.hasSpace()) {
 +        if (mIsStopping) return;
          lock.unlock();

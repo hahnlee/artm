@@ -9862,3 +9862,8 @@ incomplete and still requires managed caller unwind validation.
   뒤 join하도록 staged shadow에 적용되며, patch 적용 자체와 HWUI static
   foundation 재빌드가 PASS했다. 최신 graphics link closure와 Calculator/
   DeskClock GPU acceptance도 PASS했으며, Chromium HTTPS trust 전제는 남아 있다.
+
+- Checkpoint 992 (2026-09-10): CommonPool patch `0013`에 stop 중 제출되는
+  `runSync` 작업을 inline 실행해 future 영구 대기를 막는 계약을 추가했다.
+  patch 적용 검증, 88-object HWUI foundation 재빌드, graphics link closure
+  (`undefined=0`)를 모두 PASS했다.

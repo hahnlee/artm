@@ -14298,3 +14298,8 @@ or admission exception was added.
   graphics link closure 및 Calculator/DeskClock HWUI acceptance를 동일
   artifact 계열에서 재검증했다. Chromium page-side TLS trust는 외부 전제로
   계속 분리해 기록한다.
+
+- Checkpoint 992 (2026-09-10): CommonPool 종료 중 `runSync`가 future를 영원히
+  기다리지 않도록 stop 상태의 작업을 호출자에서 즉시 실행하도록 보강했다.
+  tracked patch 적용과 HWUI static foundation 재빌드, graphics closure audit를
+  최신 artifact에서 재검증했다.
