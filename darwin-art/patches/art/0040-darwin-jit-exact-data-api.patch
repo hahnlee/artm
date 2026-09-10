@@ -11,7 +11,7 @@ diff --git a/runtime/jit/jit_memory_region.cc b/runtime/jit/jit_memory_region.cc
  #endif
  #include <android-base/unique_fd.h>
  #include <log/log.h>
-@@ -122,10 +123,65 @@
+@@ -122,10 +123,87 @@
      if (!exec_pages.IsValid()) {
        *error_msg = "Failed to create Darwin MAP_JIT code cache: " + error_str;
        return false;
@@ -76,6 +76,28 @@ diff --git a/runtime/jit/jit_memory_region.cc b/runtime/jit/jit_memory_region.cc
 +        break;
 +      }
 +      cursor = RoundUp(region + region_size, MemMap::GetPageSize());
++    }
++    if (!data_pages.IsValid()) {
++      // Metadata-first fallback for fragmented Mach maps; MAP_JIT receives a
++      // hint and the actual addresses are checked by the existing guard.
++      exec_pages.Reset();
++      data_pages = MemMap::MapAnonymous(data_cache_name.c_str(), nullptr,
++                                        data_capacity, kProtRW, false, false,
++                                        nullptr, &error_str);
++      if (data_pages.IsValid()) {
++        const uintptr_t hint = reinterpret_cast<uintptr_t>(data_pages.End());
++        exec_pages = MemMap::MapFileAtAddress(
++            reinterpret_cast<uint8_t*>(hint), exec_capacity, kProtRWX,
++            MAP_PRIVATE | MAP_ANON | MAP_JIT, -1, /* start= */ hint,
++            /* low_4gb= */ false, name.c_str(), /* reuse= */ false, nullptr,
++            &error_str);
++      }
++    }
++    if (!data_pages.IsValid() || !exec_pages.IsValid()) {
++      exec_pages.Reset();
++      data_pages.Reset();
++      *error_msg = "Failed to map Darwin JIT data cache: " + error_str;
++      return false;
 +    }
      if (!data_pages.IsValid()) {
        exec_pages.Reset();

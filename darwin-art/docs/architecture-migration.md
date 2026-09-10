@@ -14198,3 +14198,7 @@ or admission exception was added.
 - Checkpoint 972 (2026-09-10): Astra 검토에 따라 submap 내부 hole을 allocator gap으로
   사용하지 않는다. 현재 실패는 선택된 exec 위치에 연속 metadata gap이 없는 정상
   결과이며, 다음은 metadata-first 후 MAP_JIT hint 전략을 독립 smoke로 검증한다.
+
+- Checkpoint 973 (2026-09-10): metadata-first 배치 smoke로 실제 주소와
+  ordering/span을 검증했고, runtime fallback 반영 후 최종 JIT acceptance가 PASS했다.
+  다음은 이 smoke를 재현 가능한 build graph gate로 편입하는 것이다.

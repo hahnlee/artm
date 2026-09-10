@@ -9753,3 +9753,8 @@ incomplete and still requires managed caller unwind validation.
   `mach_vm_region`만 사용하도록 유지했다. 최신 audit은 `no fitting Darwin JIT
   metadata gap`을 재현했으며, 다음은 metadata-first allocation smoke를 별도로
   검증해 실행 영역 배치 정책을 바꾸는 단계다.
+
+- Checkpoint 973 (2026-09-10): 독립 metadata-first → MAP_JIT hint smoke가 32MiB
+  pair의 ordering와 uint32 span 모두 PASS했다. runtime fallback 반영 후 최신
+  `audit-art-jit.sh`에서 JIT eligibility, compiled arithmetic, post-GC, JNI,
+  exception, field/string/exit-hook acceptance가 모두 PASS했다.
