@@ -8873,6 +8873,9 @@ incomplete and still requires managed caller unwind validation.
 - Checkpoint 799 (2026-09-10): Fresh corpus advanced through
   `1917-get-stack-frame`, reaching 222 completed tests with zero failures.
   Four workers remain active.
+- Checkpoint 822 (2026-09-10): Fresh corpus advanced through
+  `2239-varhandle-perf-vh-cas`, reaching 361 completed tests with zero
+  failures. Four workers remain active.
 - Checkpoint 821 (2026-09-10): Fresh corpus advanced through
   `2234-checker-remove-entry-suspendcheck`, reaching 354 completed tests with
   zero failures. Four workers remain active.
