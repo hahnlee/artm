@@ -9874,3 +9874,9 @@ incomplete and still requires managed caller unwind validation.
   foundation 재빌드 및 graphics closure audit를 PASS했다. 명시적 VM-shutdown
   호출 경계와 worker JNI-detach-before-VM 증거는 아직 별도 acceptance로 남아
   있으며 이를 완료로 주장하지 않는다.
+
+- Checkpoint 994 (2026-09-10): Astra의 추가 경합 지적에 따라 CommonPool
+  enqueue를 `!stopping && !hasSpace` 단일 predicate로 바꾸고, stop 직후
+  호출자 실행 fallback을 push 전에 적용했다. patch 적용 검증과 foundation/link
+  audit는 PASS했다. 다만 명시적 VM shutdown API에서 pool을 호출하는 경계와
+  worker JNI-detach 순서 증거는 아직 남아 있다.

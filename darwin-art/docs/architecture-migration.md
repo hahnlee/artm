@@ -14309,3 +14309,9 @@ or admission exception was added.
   단일화했다. patch 적용과 static foundation/link audit는 PASS했지만, 실제
   VM shutdown API에서 pool을 명시적으로 drain/join하는 호출 경계와 JNI
   detach 순서 증거는 아직 남은 작업으로 기록한다.
+
+- Checkpoint 994 (2026-09-10): CommonPool queue-full/stop 경합을 단일
+  predicate와 push 직전 stop 검사로 정리하고, 적용 가능한 tracked patch와
+  foundation/link 재검증을 완료했다. 실제 `darwin_art_shutdown_process`가
+  VM 생존 중 pool drain/join을 명시 호출하는 acceptance는 다음 단계로
+  남겨 두었다.
