@@ -14269,3 +14269,8 @@ or admission exception was added.
   JIT·native graph·APK fixture 및 window-menu acceptance 결과를 최신 상태로
   재확인했다. Chromium page-side TLS acceptance는 macOS 키체인에 생성된
   mkcert root를 신뢰하도록 사용자가 설정해야 하는 외부 전제만 남아 있다.
+
+- Checkpoint 987 (2026-09-10): 최신 source에서 android-apk-app-runtime audit를
+  재검증해 fixture APK의 real-binary manifest, multidex, native-so, JNI launcher
+  계약을 모두 PASS했다. support DEX identity는 `classes=48 methods=482`로
+  유지된다.

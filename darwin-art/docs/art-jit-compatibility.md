@@ -9834,3 +9834,7 @@ incomplete and still requires managed caller unwind validation.
   단독 테스트를 Astra와 재검증해 28/28 및 doc-tests PASS를 확인했다. window-menu
   전체 acceptance도 run-isolated 로그에서 PASS했고, Chromium page-side HTTPS만
   macOS mkcert root trust 설정이 없는 환경 전제로 보류되어 있다.
+
+- Checkpoint 987 (2026-09-10): 최신 graphics/surface 변경 후 APK runtime fixture
+  audit를 재실행했다. native/multidex/JNI manifest 계약과 변경 없는 APK 검사 모두
+  PASS했으며, DEX contract는 `version=35 classes=48 methods=482`로 고정됐다.
