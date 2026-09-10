@@ -9586,3 +9586,9 @@ incomplete and still requires managed caller unwind validation.
   실제 TabSwitcherButtonView·TabGridView, MotionEvent, child SurfaceControl
   및 GLES/ANGLE/Graphite/Dawn/MoltenVK/SurfaceFlinger/Metal 경로를
   `target-states=10`으로 PASS했다.
+
+- Checkpoint 945 (2026-09-10): Chromium 환경 수정 후 최신 runtime에서
+  전체 `tools/audit-art-jit.sh`를 재실행했다. Nterp/JIT eligibility,
+  compiled arithmetic·JNI·OSR/deopt·moving GC·exception·field/array 및
+  native exit hook/Surface/MediaCodec 항목이 모두 출력됐고, ART shutdown
+  단계도 `destroy-vm complete`까지 도달했다.

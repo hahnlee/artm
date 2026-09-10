@@ -14049,3 +14049,9 @@ or admission exception was added.
   전달되도록 복구했다. 재실행 결과 실제 탭 버튼/그리드 전환과 물리
   MotionEvent, child SurfaceControl 및 전체 GPU closure가 `target-states=10`
   으로 PASS했으며 이전 mutex abort는 재현되지 않았다.
+
+- Checkpoint 945 (2026-09-10): 동일 artifact identity에서 전체 JIT audit를
+  반복해 compiled execution, OSR/deopt, moving-GC, JNI reference, exception,
+  graphics 및 native exit hook 증거를 갱신했다. 종료 로그는 callback drain,
+  thread stop, ELF unload, detach, `destroy-vm complete` 순서를 모두
+  통과했다.
