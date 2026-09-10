@@ -13568,3 +13568,11 @@ or admission exception was added.
   failures. Isolated reruns pass, but an 8-way stress run reproduced
   `149-suspend-all-stress` in 2/8 processes with a corrupted generated-code
   PC followed by `SuspendAll` timeout; concurrency/frame ABI remains open.
+- Checkpoint 861 (2026-09-10): Rebuilt the graphics-link runtime with
+  async-signal-safe raw Mach PC/LR diagnostics and reran eight concurrent
+  `149-suspend-all-stress` processes. Four of eight failed. In each captured
+  failure the raw and authenticated PC were the same non-mapped value
+  `0xd65f03c09100c3ff`, while raw/authenticated LR remained a valid host/JIT
+  address; this rules out a simple PAC accessor mismatch and narrows the
+  defect to JIT indirect-branch or compiled-frame/entrypoint ABI corruption.
+  The full corpus remains 1,074/1,076 and the concurrency defect is open.
