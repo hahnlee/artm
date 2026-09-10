@@ -13965,3 +13965,8 @@ or admission exception was added.
   뒤 live native graph를 유지한 채 `_exit`했고, 이전 shutdown SIGABRT는
   재현되지 않았다. 임베디드/fixture의 명시적 teardown 계약은 별도로
   유지한다.
+
+- Checkpoint 931 (2026-09-10): 실제 변경 없는 AOSP Calculator/DeskClock
+  APK를 공통 호환성 계층에서 실행해 Calculator `2+3=5` 연산 결과와
+  DeskClock Timer 탭 전환을 검증했다. 두 acceptance 모두 HWUI,
+  SurfaceFlinger, Metal visible-buffer 경로와 fatal-free 종료를 통과했다.

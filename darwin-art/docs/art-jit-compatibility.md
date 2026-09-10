@@ -9492,3 +9492,9 @@ incomplete and still requires managed caller unwind validation.
   SurfaceFlinger+Metal` 경로가 통과했고, APK process-exit는 ELF unload
   없이 `_exit`해 이전 SIGABRT 없이 종료됐다. 산출물은
   `_build/chromium-tab-graphics-acceptance/run.PPgNWK`에 보존됐다.
+
+- Checkpoint 931 (2026-09-10): 변경 없는 AOSP Calculator와 DeskClock
+  acceptance를 실제 APK로 실행했다. Calculator는 물리 입력으로
+  `2+3=5` 결과까지 확인했고, DeskClock은 Material 탭을 눌러 Timer 페이지로
+  전환했다. 두 앱 모두 HWUI+SurfaceFlinger+Metal visible buffer를
+  게시했고 crash/fatal 없이 공통 경로 PASS를 기록했다.
