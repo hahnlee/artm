@@ -9763,3 +9763,8 @@ incomplete and still requires managed caller unwind validation.
   `graphics-audit` phony target dependency로 연결했다. graph inputs에 smoke source와
   script를 포함했으며 생성된 graph에서 gate edge를 확인했다. native-graph 전체 audit은
   기존 ICU cache incomplete(0/458 TUs)에서 중단되어 전체 graph 실행은 별도 작업이다.
+
+- Checkpoint 975 (2026-09-10): 생성된 native graph에서 `jit-layout-audit`를 직접
+  실행했다. Ninja [1/1] gate가 metadata/code hint 동일 주소, page=16384,
+  ordered=pass, span=pass를 보고했고 `-t query`에서 smoke 입력 2개와
+  graphics-audit consumer를 확인했다.

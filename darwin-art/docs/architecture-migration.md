@@ -14206,3 +14206,7 @@ or admission exception was added.
 - Checkpoint 974 (2026-09-10): metadata-first smoke를 Ninja `jit-layout-audit` rule로
   편입하고 graphics-audit 의존성으로 고정했다. graph 생성 결과는 gate edge를 포함하며,
   전체 graph audit은 기존 ICU cache 미완성 상태에서 선행 검증에 의해 중단됐다.
+
+- Checkpoint 975 (2026-09-10): native graph의 JIT layout gate를 독립 실행해 [1/1]
+  PASS를 확인했다. gate는 ICU rebuild 없이 실행되며 smoke script/source만 입력으로
+  갖고 graphics-audit에 연결된다.
