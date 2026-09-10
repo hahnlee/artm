@@ -14210,3 +14210,8 @@ or admission exception was added.
 - Checkpoint 975 (2026-09-10): native graph의 JIT layout gate를 독립 실행해 [1/1]
   PASS를 확인했다. gate는 ICU rebuild 없이 실행되며 smoke script/source만 입력으로
   갖고 graphics-audit에 연결된다.
+
+- Checkpoint 976 (2026-09-10): graph audit이 promoted cache rule을 세지 못하던
+  정규식 false negative를 수정했다. `native_cached_cpp(_(legacy|promoted))?`
+  와 `build`/`.o:` 앵커를 사용해 실제 edge만 집계하며, 전체 graph audit에서
+  ICU 458, runtime 258, GraphicsJNI 63, 총 809 TU와 warm/no-op 검증이 PASS했다.

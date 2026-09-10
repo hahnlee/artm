@@ -9768,3 +9768,9 @@ incomplete and still requires managed caller unwind validation.
   실행했다. Ninja [1/1] gate가 metadata/code hint 동일 주소, page=16384,
   ordered=pass, span=pass를 보고했고 `-t query`에서 smoke 입력 2개와
   graphics-audit consumer를 확인했다.
+
+- Checkpoint 976 (2026-09-10): native graph audit의 TU count 정규식을
+  `native_cached_cpp_promoted`까지 포함하도록 보정하고 `build`/`.o:` 경계를
+  앵커링했다. canonical ICU builder cache-hit 및 ICU smoke 후 전체 audit이
+  ICU=458, runtime=258, GraphicsJNI=63, cached-tu=809로 PASS했으며 warm
+  no-op·depfile·직접 source invalidation도 통과했다.

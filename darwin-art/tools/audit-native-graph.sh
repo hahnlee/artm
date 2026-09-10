@@ -16,11 +16,11 @@ fi
 
 (cd "$root" && cargo run -q -p darwin-art-xtask -- native-graph --out "$graph")
 
-cached_cpp="$(grep -Ec ': native_cached_cpp(_legacy)? ' "$graph" || true)"
+cached_cpp="$(grep -Ec '^build [^:]+[.]o: native_cached_cpp(_(legacy|promoted))? ' "$graph" || true)"
 cached_archives="$(grep -c ': native_cached_archive ' "$graph" || true)"
-icu_cpp="$(grep -Ec '_build/icu-foundation/objects/.*: native_cached_cpp(_legacy)? ' "$graph" || true)"
-runtime_cpp="$(grep -Ec '_build/runtime-(common|bootstrap)/objects/.*: native_cached_cpp(_legacy)? ' "$graph" || true)"
-graphics_cpp="$(grep -Ec '_build/android-graphics-jni/objects/.*: native_cached_cpp(_legacy)? ' "$graph" || true)"
+icu_cpp="$(grep -Ec '^build .*/_build/icu-foundation/objects/[^:]+[.]o: native_cached_cpp(_(legacy|promoted))? ' "$graph" || true)"
+runtime_cpp="$(grep -Ec '^build .*/_build/runtime-(common|bootstrap)/objects/[^:]+[.]o: native_cached_cpp(_(legacy|promoted))? ' "$graph" || true)"
+graphics_cpp="$(grep -Ec '^build .*/_build/android-graphics-jni/objects/[^:]+[.]o: native_cached_cpp(_(legacy|promoted))? ' "$graph" || true)"
 
 (( icu_cpp >= 458 )) || {
   echo "native-graph: ICU cache incomplete ($icu_cpp/458 TUs)" >&2
