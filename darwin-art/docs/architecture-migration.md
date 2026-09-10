@@ -14360,3 +14360,10 @@ or admission exception was added.
   재검증했다. Chrome child services가 모두 reap되고 실제 MotionEvent·Surface
   경로가 PASS했으며 Blue Archive는 Unity/IL2CPP 초기화와 `rc=0`을 기록했다.
   HTTPS 통합 acceptance만 시스템 CA 신뢰 설정 대기 상태다.
+
+- Checkpoint 1003 (2026-09-10): AOSP `attachRenderThreadToJvm` 소유권 계약은
+  유지하고 Apple 전용 debug 계측만 추가했다. detached worker는 daemon attach 후
+  pthread TLS destructor가 소유 detach하도록 재빌드했으며, graphics dylib SHA-256은
+  `d1d6843882bba3f1c4d686256fa04904c1268be2bc1d61c8a31af2321c0e8602`다. Chrome
+  acceptance에서 세 worker attach와 key-create 성공을 확인했고, detach/join은
+  Chrome `_exit` 특성상 embedded fixture에서 검증 대상으로 남겼다.

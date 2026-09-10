@@ -9927,3 +9927,11 @@ incomplete and still requires managed caller unwind validation.
   window-menu acceptance를 통과했다. 변경 없는 Blue Archive installed-record
   base+arm64 split도 10초 실행 `rc=0`으로 Unity/IL2CPP 초기화까지 도달했다.
   full HTTPS Chromium gate는 macOS trust prerequisite 미충족으로 보류한다.
+
+- Checkpoint 1003 (2026-09-10): Apple-only HWUI JNI attach 계측을 추가하고
+  JNI/HWUI archive 및 graphics dylib를 재빌드했다. 최종 dylib SHA-256은
+  `d1d6843882bba3f1c4d686256fa04904c1268be2bc1d61c8a31af2321c0e8602`다.
+  Chrome tab/grid acceptance는 PASS했고 RenderThread와 hwuiTask0/1의 daemon
+  attach 및 TLS 성공 로그를 확인했다. Chrome은 `_exit` 경로라 detach 로그는
+  embedded shutdown fixture에서 별도 수집한다. full HTTPS gate는 macOS trust
+  prerequisite 미충족으로 계속 보류한다.

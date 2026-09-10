@@ -1,36 +1,49 @@
 diff --git a/jni/android_graphics_HardwareRenderer.cpp b/jni/android_graphics_HardwareRenderer.cpp
 --- a/jni/android_graphics_HardwareRenderer.cpp
 +++ b/jni/android_graphics_HardwareRenderer.cpp
-@@ -42,6 +42,9 @@
+@@ -42,6 +42,11 @@
  #include <media/NdkImage.h>
  #include <media/NdkImageReader.h>
  #include <nativehelper/JNIPlatformHelp.h>
 +#if defined(__APPLE__)
 +#include <pthread.h>
++#include <cstdio>
++#include <cstdlib>
 +#endif
  #ifdef __ANDROID__
  #include <pipeline/skia/ShaderCache.h>
  #include <private/EGL/cache.h>
-@@ -1076,6 +1079,18 @@
+@@ -1076,5 +1079,29 @@
  };
-
++
  static JavaVM* mJvm = nullptr;
 +#if defined(__APPLE__)
 +static pthread_key_t gArtThreadKey;
 +static pthread_once_t gArtThreadKeyOnce = PTHREAD_ONCE_INIT;
++static bool debugJniAttach() {
++    return std::getenv("DARWIN_ART_DEBUG_JNI_ATTACH") != nullptr;
++}
 +static void detachArtThread(void*) {
 +    if (mJvm != nullptr) {
-+        (void)mJvm->DetachCurrentThread();
++        const jint result = mJvm->DetachCurrentThread();
++        if (debugJniAttach()) {
++            std::fprintf(stderr, "ART HWUI JNI detach tid=%p result=%d owned=1\n",
++                         reinterpret_cast<void*>(pthread_self()), result);
++        }
 +    }
 +}
 +static void initArtThreadKey() {
-+    pthread_key_create(&gArtThreadKey, &detachArtThread);
++    const int result = pthread_key_create(&gArtThreadKey, &detachArtThread);
++    if (debugJniAttach()) {
++        std::fprintf(stderr, "ART HWUI JNI key-create tid=%p result=%d\n",
++                     reinterpret_cast<void*>(pthread_self()), result);
++    }
 +}
 +#endif
  
  static void attachRenderThreadToJvm(const char* name) {
      LOG_ALWAYS_FATAL_IF(!mJvm, "No jvm but we set the hook??");
-@@ -1085,7 +1100,18 @@
+@@ -1085,5 +1100,28 @@
      args.name = name;
      args.group = NULL;
      JNIEnv* env;
@@ -40,11 +53,23 @@ diff --git a/jni/android_graphics_HardwareRenderer.cpp b/jni/android_graphics_Ha
 +#endif
 +    JNIEnv* existing = nullptr;
 +    const jint state = mJvm->GetEnv(reinterpret_cast<void**>(&existing), JNI_VERSION_1_6);
-+    if (state == JNI_OK) return;
++    if (state == JNI_OK) {
++#if defined(__APPLE__)
++        if (debugJniAttach()) {
++            std::fprintf(stderr, "ART HWUI JNI attach name=%s tid=%p owned=0 state=JNI_OK\n",
++                         name, reinterpret_cast<void*>(pthread_self()));
++        }
++#endif
++        return;
++    }
 +    LOG_ALWAYS_FATAL_IF(state != JNI_EDETACHED, "Unexpected JavaVM GetEnv result: %d", state);
 +    LOG_ALWAYS_FATAL_IF(mJvm->AttachCurrentThreadAsDaemon(&env, (void*) &args) != JNI_OK,
 +                       "Failed to attach HWUI render thread");
 +#if defined(__APPLE__)
-+    pthread_setspecific(gArtThreadKey, reinterpret_cast<void*>(1));
++    const int tls_result = pthread_setspecific(gArtThreadKey, reinterpret_cast<void*>(1));
++    if (debugJniAttach()) {
++        std::fprintf(stderr, "ART HWUI JNI attach name=%s tid=%p owned=1 state=JNI_EDETACHED attach=JNI_OK tls=%d\n",
++                     name, reinterpret_cast<void*>(pthread_self()), tls_result);
++    }
 +#endif
  }
