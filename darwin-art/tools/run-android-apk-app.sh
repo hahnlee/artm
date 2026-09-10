@@ -154,6 +154,7 @@ descriptor="$(sed -n 's/^apk-app-runtime: .* descriptor=\([^ ]*\) .*/\1/p' <<<"$
 activities="$(sed -n 's/^apk-app-runtime: .* activities=\([^ ]*\) .*/\1/p' <<<"$metadata")"
 activity_aliases="$(sed -n 's/^apk-app-runtime: .* activity_aliases=\([^ ]*\) .*/\1/p' <<<"$metadata")"
 services="$(sed -n 's/^apk-app-runtime: .* services=\([^ ]*\) .*/\1/p' <<<"$metadata")"
+receivers="$(sed -n 's/^apk-app-runtime: .* receivers=\([^ ]*\) .*/\1/p' <<<"$metadata")"
 service_metadata="$(sed -n 's/^apk-app-runtime: .* service_metadata=\([^ ]*\) .*/\1/p' <<<"$metadata")"
 application_metadata="$(sed -n 's/^apk-app-runtime: .* application_metadata=\([^ ]*\) .*/\1/p' <<<"$metadata")"
 providers="$(sed -n 's/^apk-app-runtime: .* providers=\([^ ]*\) application_metadata=.*/\1/p' <<<"$metadata")"
@@ -170,7 +171,7 @@ application_icon_res="$(sed -n 's/^apk-app-runtime-application-icon: res=\([^ ]*
 icon="$(sed -n 's/^apk-app-runtime: .* icon=\([^ ]*\) .*/\1/p' <<<"$metadata")"
 native_count="$(sed -n 's/^apk-app-runtime: .* native=\([^ ]*\) .*/\1/p' <<<"$metadata")"
 native_root="$(sed -n 's/^apk-app-runtime: .* native_root=\([^ ]*\)$/\1/p' <<<"$metadata")"
-[[ -n "$package" && -n "$application" && -n "$activity" && -n "$launch_component" && -n "$screen_orientation" && -n "$descriptor" && -n "$activities" && -n "$activity_aliases" && -n "$services" && -n "$service_metadata" && -n "$application_metadata" && -n "$version_code" && -n "$theme" && -n "$target_sdk" && -n "$debuggable" && -n "$label" && -n "$label_res" && -n "$icon" && -n "$native_count" && -n "$native_root" ]] || {
+[[ -n "$package" && -n "$application" && -n "$activity" && -n "$launch_component" && -n "$screen_orientation" && -n "$descriptor" && -n "$activities" && -n "$activity_aliases" && -n "$services" && -n "$receivers" && -n "$service_metadata" && -n "$application_metadata" && -n "$version_code" && -n "$theme" && -n "$target_sdk" && -n "$debuggable" && -n "$label" && -n "$label_res" && -n "$icon" && -n "$native_count" && -n "$native_root" ]] || {
   echo "could not decode inspected APK metadata" >&2
   exit 65
 }
@@ -455,6 +456,7 @@ export DARWIN_ART_APK_APP_DESCRIPTOR="$descriptor"
 export DARWIN_ART_APK_APP_ACTIVITIES="$activities"
 export DARWIN_ART_APK_APP_ACTIVITY_ALIASES="$activity_aliases"
 export DARWIN_ART_APK_APP_SERVICES="$services"
+export DARWIN_ART_APK_APP_RECEIVERS="$receivers"
 export DARWIN_ART_APK_APP_SERVICE_METADATA="$service_metadata"
 export DARWIN_ART_APK_APP_PROVIDERS="$providers"
 export DARWIN_ART_APK_APP_METADATA="$application_metadata"

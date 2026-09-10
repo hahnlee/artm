@@ -96,7 +96,7 @@ expected_dex='AOSP DEX: verified=yes version=35 classes=24 methods=275 class[0]=
   exit 1
 }
 
-expected='apk-app-runtime: package=dev.darwinart.simple application=android.app.Application activity=dev.darwinart.simple.MainActivity launch_component=dev.darwinart.simple.MainActivity screen_orientation=-1 descriptor=Ldev/darwinart/simple/MainActivity; activities=dev.darwinart.simple.MainActivity=0x1030241 activity_aliases=none services=dev.darwinart.simple.ImageService>dev.darwinart.simple service_metadata=none providers=none application_metadata=none version_code=0 version_name= theme=0x1030241 target_sdk=35 debuggable=0 label=Darwin ART APK label_res=0x0 icon=none dex=apk-1 native=0 native_root=none'
+expected='apk-app-runtime: package=dev.darwinart.simple application=android.app.Application activity=dev.darwinart.simple.MainActivity launch_component=dev.darwinart.simple.MainActivity screen_orientation=-1 descriptor=Ldev/darwinart/simple/MainActivity; activities=dev.darwinart.simple.MainActivity=0x1030241 activity_aliases=none services=dev.darwinart.simple.ImageService>dev.darwinart.simple receivers=none service_metadata=none providers=none application_metadata=none version_code=0 version_name= theme=0x1030241 target_sdk=35 debuggable=0 label=Darwin ART APK label_res=0x0 icon=none dex=apk-1 native=0 native_root=none'
 actual="$(cargo run -q --manifest-path "$module/Cargo.toml" -- "$apk")"
 [[ "$actual" == "$expected" ]] || {
   printf 'unexpected inspector output:\n%s\n' "$actual" >&2

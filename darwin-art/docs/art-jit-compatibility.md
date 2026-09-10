@@ -9657,6 +9657,14 @@ incomplete and still requires managed caller unwind validation.
   dylib SHA-256은 `bfe8751308d554f8c0038ef1e235ebcdf868e6e5a6f1d8209b703fc815a40c2c`
   이며, 변경 없는 APK acceptance와 JIT 증거의 기준 artifact로 기록한다.
 
+- Checkpoint 957 (2026-09-10): 변경 없는 Blue Archive 실행에서 manifest
+  receiver metadata를 전달하고 `PackageManager.isInstantApp()` 및
+  `getReceiverInfo()`를 AOSP 계약으로 구현했다. `ACCESS_NETWORK_STATE`를
+  위치 권한과 분리해 허용한 뒤 30초 실행이 Unity·CoreAudio·exit=0에
+  도달했고 `Stub!`, measurement 초기화, ACCESS_NETWORK_STATE 오류가
+  사라졌다. metadata release inspector와 support DEX를 재생성했으며
+  android-apk-app-runtime audit도 PASS했다.
+
 - Checkpoint 949 (2026-09-10): expected-address hint 실험이 일부 child의
   JIT fallback을 유발해 되돌렸다. graphics bootstrap/link audit는 PASS이며,
   reservation 기반 bounded retry 없이는 JIT 주소 배치를 완료로 간주하지 않는다.

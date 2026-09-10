@@ -1043,7 +1043,10 @@ public final class ProbeContext extends ContextWrapper {
         // denied until their permission controller is connected.
         if ("android.permission.CAMERA".equals(permission)
                 || "android.permission.RECORD_AUDIO".equals(permission)
-                || permission.startsWith("android.permission.ACCESS_")) {
+                || "android.permission.ACCESS_FINE_LOCATION".equals(permission)
+                || "android.permission.ACCESS_COARSE_LOCATION".equals(permission)
+                || "android.permission.ACCESS_BACKGROUND_LOCATION".equals(permission)
+                || "android.permission.ACCESS_MEDIA_LOCATION".equals(permission)) {
             return PackageManager.PERMISSION_DENIED;
         }
         return PackageManager.PERMISSION_GRANTED;

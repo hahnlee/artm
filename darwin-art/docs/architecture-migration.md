@@ -14114,6 +14114,13 @@ or admission exception was added.
   SHA-256 `bfe8751308d554f8c0038ef1e235ebcdf868e6e5a6f1d8209b703fc815a40c2c`
   로 고정해 후속 acceptance의 stale/mixed artifact 판정 기준으로 삼는다.
 
+- Checkpoint 957 (2026-09-10): PackageManager receiver/instant-app 계약과
+  정상 network-state permission 경계를 manifest 기반으로 추가했다. 새
+  release metadata와 support DEX를 사용한 무변경 Blue Archive 실행은
+  GMS `Stub!` 및 `Component not initialized` 없이 Unity/Audio를 초기화하고
+  exit=0으로 종료했다. metadata inspector unit/audit gate도 PASS했으며,
+  로그인·전투 화면 전환은 여전히 별도 acceptance로 남긴다.
+
 - Checkpoint 949 (2026-09-10): expected-address hint 실험이 일부 child의
   JIT fallback을 유발해 되돌렸다. graphics bootstrap/link audit는 PASS이며,
   AOSP stack-map 범위를 유지하려면 Darwin reservation 기반 bounded retry가

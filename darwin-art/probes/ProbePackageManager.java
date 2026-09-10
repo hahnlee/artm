@@ -587,6 +587,38 @@ public final class ProbePackageManager extends MockPackageManager {
     }
 
     @Override
+    public ActivityInfo getReceiverInfo(ComponentName component, int flags)
+            throws PackageManager.NameNotFoundException {
+        if (component == null) {
+            throw new PackageManager.NameNotFoundException("null");
+        }
+        String record = nativeResolveInstalledPackage(component.getPackageName());
+        String encoded = System.getenv("DARWIN_ART_APK_APP_RECEIVERS");
+        if (encoded != null && !encoded.isEmpty() && !"none".equals(encoded)) {
+            for (String entry : encoded.split(",")) {
+                String[] fields = entry.split(">", -1);
+                if (fields.length < 4 || !component.getClassName().equals(fields[0])) continue;
+                ActivityInfo info = new ActivityInfo();
+                info.packageName = component.getPackageName();
+                info.name = fields[0];
+                info.processName = fields[1];
+                info.enabled = Boolean.parseBoolean(fields[2]);
+                info.exported = Boolean.parseBoolean(fields[3]);
+                info.applicationInfo = installedApplicationInfo(info.packageName, record);
+                return info;
+            }
+        }
+        throw new PackageManager.NameNotFoundException(String.valueOf(component));
+    }
+
+    @Override
+    public ActivityInfo getReceiverInfo(ComponentName component,
+            PackageManager.ComponentInfoFlags flags)
+            throws PackageManager.NameNotFoundException {
+        return getReceiverInfo(component, (int) flags.getValue());
+    }
+
+    @Override
     public ApplicationInfo getApplicationInfo(String requestedPackage, int flags)
             throws PackageManager.NameNotFoundException {
         if (packageName != null && packageName.equals(requestedPackage)) {
@@ -860,6 +892,22 @@ public final class ProbePackageManager extends MockPackageManager {
         FeatureInfo touchscreen = new FeatureInfo();
         touchscreen.name = PackageManager.FEATURE_TOUCHSCREEN;
         return new FeatureInfo[] {touchscreen};
+    }
+
+    /**
+     * Match the framework PackageManager contract for a normally installed
+     * APK.  MockPackageManager's default implementation throws "Stub!", but
+     * Android libraries (including Play services) use this API as a feature
+     * gate during startup.  Profile-installed packages are not instant apps.
+     */
+    @Override
+    public boolean isInstantApp() {
+        return false;
+    }
+
+    @Override
+    public boolean isInstantApp(String requestedPackage) {
+        return false;
     }
 
     @Override

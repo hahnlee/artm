@@ -70,6 +70,15 @@ struct ServiceCandidate {
 }
 
 #[derive(Clone)]
+struct ReceiverCandidate {
+    depth: usize,
+    name: String,
+    process: Option<String>,
+    enabled: bool,
+    exported: bool,
+}
+
+#[derive(Clone)]
 struct ProviderCandidate {
     depth: usize,
     name: String,
@@ -100,6 +109,7 @@ struct ManifestInfo {
     activity_themes: Vec<(String, u32)>,
     activity_aliases: Vec<(String, String)>,
     services: Vec<(String, String)>,
+    receivers: Vec<(String, String, bool, bool)>,
     service_metadata: Vec<(String, Vec<ManifestMetadata>)>,
     providers: Vec<(String, String, u32, Vec<ManifestMetadata>)>,
     application_metadata: Vec<ManifestMetadata>,
@@ -652,6 +662,8 @@ fn parse_manifest(input: &[u8]) -> Result<ManifestInfo> {
     let mut activity_aliases = Vec::new();
     let mut service_names = Vec::new();
     let mut current_service: Option<ServiceCandidate> = None;
+    let mut receiver_names = Vec::new();
+    let mut current_receiver: Option<ReceiverCandidate> = None;
     let mut current_provider: Option<ProviderCandidate> = None;
     let mut providers = Vec::new();
     let mut application_depth = None;
@@ -859,6 +871,34 @@ fn parse_manifest(input: &[u8]) -> Result<ManifestInfo> {
                         });
                     }
                 }
+                "receiver" => {
+                    if current_receiver.is_some() {
+                        return Err("nested receiver declarations are invalid".to_owned());
+                    }
+                    let enabled = find_boolean_attribute(
+                        input, strings, attrs, attr_count, attr_size, "enabled",
+                    )?
+                    .unwrap_or(true);
+                    let exported = find_boolean_attribute(
+                        input, strings, attrs, attr_count, attr_size, "exported",
+                    )?
+                    .unwrap_or(false);
+                    if enabled {
+                        let name =
+                            find_attribute(input, strings, attrs, attr_count, attr_size, "name")?
+                                .ok_or_else(|| "receiver is missing android:name".to_owned())?;
+                        let process = find_attribute(
+                            input, strings, attrs, attr_count, attr_size, "process",
+                        )?;
+                        current_receiver = Some(ReceiverCandidate {
+                            depth,
+                            name,
+                            process,
+                            enabled,
+                            exported,
+                        });
+                    }
+                }
                 "provider" => {
                     if current_provider.is_some() {
                         return Err("nested provider declarations are invalid".to_owned());
@@ -942,6 +982,13 @@ fn parse_manifest(input: &[u8]) -> Result<ManifestInfo> {
                         return Err("service element depth mismatch".to_owned());
                     }
                     service_names.push(service);
+                }
+            } else if tag == "receiver" {
+                if let Some(receiver) = current_receiver.take() {
+                    if receiver.depth != depth {
+                        return Err("receiver element depth mismatch".to_owned());
+                    }
+                    receiver_names.push(receiver);
                 }
             } else if tag == "provider" {
                 if let Some(provider) = current_provider.take() {
@@ -1029,6 +1076,23 @@ fn parse_manifest(input: &[u8]) -> Result<ManifestInfo> {
             Ok((name, process))
         })
         .collect::<Result<Vec<_>>>()?;
+    let receivers = receiver_names
+        .into_iter()
+        .map(|receiver| {
+            let name = normalize_activity(&package, &receiver.name)?;
+            let declared = receiver
+                .process
+                .as_deref()
+                .or(application_process.as_deref())
+                .unwrap_or(&package);
+            let process = if let Some(suffix) = declared.strip_prefix(':') {
+                format!("{package}:{suffix}")
+            } else {
+                declared.to_owned()
+            };
+            Ok((name, process, receiver.enabled, receiver.exported))
+        })
+        .collect::<Result<Vec<_>>>()?;
     // The MAIN/LAUNCHER declaration can be an alias (or a second manifest
     // occurrence) without its own theme. Android resolves the effective
     // ActivityInfo for the target activity, including the theme declared on
@@ -1060,6 +1124,7 @@ fn parse_manifest(input: &[u8]) -> Result<ManifestInfo> {
         activity_themes,
         activity_aliases,
         services,
+        receivers,
         service_metadata,
         providers,
         application_metadata,
@@ -1586,7 +1651,7 @@ fn run() -> Result<()> {
     let (info, dex_source, dex_count, native_libraries, native_root) =
         inspect(Path::new(&path), external_dex.as_deref(), &split_paths)?;
     println!(
-        "apk-app-runtime: package={} application={} activity={} launch_component={} screen_orientation={} descriptor={} activities={} activity_aliases={} services={} service_metadata={} providers={} application_metadata={} version_code={} version_name={} theme={:#x} target_sdk={} debuggable={} label={} label_res={:#x} icon={} dex={}-{} native={} native_root={}",
+        "apk-app-runtime: package={} application={} activity={} launch_component={} screen_orientation={} descriptor={} activities={} activity_aliases={} services={} receivers={} service_metadata={} providers={} application_metadata={} version_code={} version_name={} theme={:#x} target_sdk={} debuggable={} label={} label_res={:#x} icon={} dex={}-{} native={} native_root={}",
         info.package,
         info.application,
         info.activity,
@@ -1613,6 +1678,17 @@ fn run() -> Result<()> {
             info.services
                 .iter()
                 .map(|(name, process)| format!("{name}>{process}"))
+                .collect::<Vec<_>>()
+                .join(",")
+        },
+        if info.receivers.is_empty() {
+            "none".to_owned()
+        } else {
+            info.receivers
+                .iter()
+                .map(|(name, process, enabled, exported)| {
+                    format!("{name}>{process}>{enabled}>{exported}")
+                })
                 .collect::<Vec<_>>()
                 .join(",")
         },
