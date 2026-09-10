@@ -13848,3 +13848,10 @@ or admission exception was added.
   `android.os.Process.sendSignal(int,int)`, while starting Chromium's
   sandboxed child service; a kill-based Darwin implementation was added for
   the next rebuild. Graphics closure audit remains passing.
+- Checkpoint 913 (2026-09-10): Rebuilt the unchanged Chromium APK after
+  registering `Process.sendSignal`; the child service now loads `libchrome.so`,
+  publishes SurfaceControl/ANGLE/Vulkan state, and reaches native compositor
+  startup. A remaining failure is `Failed to get JNIEnv for JavaVM` from an
+  HWUI native helper on a host-created thread. Darwin lazy JNI attachment and
+  TLS-owned detach were added, while preserving AOSP worker attach behavior;
+  graphics closure is being rebuilt for the next acceptance run.

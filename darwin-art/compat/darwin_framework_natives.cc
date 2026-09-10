@@ -76,6 +76,9 @@ jint ProcessGetThreadPriority(JNIEnv*, jclass, jint) {
   // guest thread therefore reports Android's default nice value.
   return 0;
 }
+void ProcessSendSignal(JNIEnv*, jclass, jint pid, jint signal) {
+  if (pid > 0) (void)::kill(static_cast<pid_t>(pid), signal);
+}
 
 void SurfaceControlFinalizer(void* control) {
   ASurfaceControl_release(reinterpret_cast<ASurfaceControl*>(control));
@@ -2885,6 +2888,8 @@ bool RegisterFrameworkNatives(JNIEnv* env) {
        reinterpret_cast<void*>(&ProcessGetThreadPriority)},
       {const_cast<char*>("getElapsedCpuTime"), const_cast<char*>("()J"),
        reinterpret_cast<void*>(&process_get_elapsed_cpu_time)},
+      {const_cast<char*>("sendSignal"), const_cast<char*>("(II)V"),
+       reinterpret_cast<void*>(&ProcessSendSignal)},
   };
   if (!Register(env, "android/os/Process", process_methods,
                 static_cast<jint>(std::size(process_methods)))) {

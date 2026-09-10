@@ -4,13 +4,40 @@
 
 #include "darwin_jni_shorty.h"
 #include "jni/jni_env_ext.h"
+#include "jni/java_vm_ext.h"
+#include "runtime.h"
 #include "thread.h"
 
 namespace android {
 
+namespace {
+struct LazyAttachment {
+  art::JavaVMExt* vm = nullptr;
+  ~LazyAttachment() {
+    if (vm != nullptr) {
+      (void)vm->DetachCurrentThread();
+    }
+  }
+};
+thread_local LazyAttachment g_lazy_attachment;
+}  // namespace
+
 JNIEnv* CurrentArtEnv() {
   art::Thread* self = art::Thread::Current();
-  return self == nullptr ? nullptr : static_cast<JNIEnv*>(self->GetJniEnv());
+  if (self == nullptr) return nullptr;
+  JNIEnv* env = static_cast<JNIEnv*>(self->GetJniEnv());
+  if (env != nullptr) return env;
+  // Native Chromium worker entry points can reach the JNI proxy before their
+  // Android pthread wrapper runs. Attach them lazily to the same ART VM, then
+  // let ART's thread lifecycle own the resulting JNIEnv.
+  art::Runtime* runtime = art::Runtime::Current();
+  if (runtime == nullptr || runtime->GetJavaVM() == nullptr) return nullptr;
+  JNIEnv* attached = nullptr;
+  if (runtime->GetJavaVM()->AttachCurrentThreadAsDaemon(&attached, nullptr) != JNI_OK) {
+    return nullptr;
+  }
+  g_lazy_attachment.vm = runtime->GetJavaVM();
+  return attached;
 }
 
 bool CurrentGenericJniFrame(uint64_t* managed_sp) {
