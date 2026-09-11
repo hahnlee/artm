@@ -10945,3 +10945,8 @@ incomplete and still requires managed caller unwind validation.
   기존 exact allocator의 `KERN_INVALID_ADDRESS`로 회귀했고, false로 두면
   예약 주소가 executable과 uint32 범위를 만족하지 못했다. low_4gb 경로와
   일반 VM 배치 사이의 명시적 주소 다양화가 필요하다.
+- Checkpoint 1180 (2026-09-11): graphics link artifact를 먼저 재생성한 뒤
+  `tools/audit-art-jit.sh`를 실행했다. 최신 reservation runtime에서 JIT Code
+  Cache 생성 경고와 fixture 미실행이 사라졌고, empty-checkpoint contention,
+  monitor/JIT 기능별 acceptance가 PASS했다. 이전 실패는 stale graphics-link
+  dylib identity를 사용한 검증이었다.

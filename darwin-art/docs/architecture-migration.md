@@ -15305,3 +15305,7 @@ or admission exception was added.
   `KERN_INVALID_ADDRESS`를 재현했고, 일반 배치는 uint32 pair 조건을
   충족하지 못했다. 다음은 low4g allocator를 우회하지 않으면서 유효한
   reservation 주소를 반복 확보하는 구현이다.
+- Checkpoint 1180 (2026-09-11): `audit-runtime-graphics-link-incremental`로
+  link 산출물을 갱신한 후 JIT audit를 재실행했다. 최신 dylib에서 JIT Code
+  Cache와 empty-checkpoint contention fixture가 정상 실행되어 PASS했으며,
+  stale artifact identity 문제가 확인·해결됐다.
