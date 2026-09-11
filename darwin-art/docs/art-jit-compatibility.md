@@ -9548,6 +9548,12 @@ incomplete and still requires managed caller unwind validation.
   본문 DOM 렌더링 완료의 독립 증거는 없어 full HTTPS E2E로 승격하지 않는다.
   HTTPS/WebGL acceptance는 macOS mkcert trust 설치 후 재실행해야 한다.
 
+- Checkpoint 1072 (2026-09-11): 외부 `https://example.com`을 변경 없는
+  Chromium APK의 VIEW 인텐트로 35초 실행해 `RC=0` 및 Chromium 창을
+  확인했다. 캡처에는 브라우저 셸과 하단 Android UI가 보였지만 본문은
+  빈 영역으로 남았고 `Example Domain`/navigation commit 로그도 없어,
+  네트워크 페이지 렌더링은 아직 미검증으로 기록한다.
+
 - Checkpoint 938 (2026-09-10): 변경 없는 Blue Archive 1.93.454564를
   최신 runtime으로 15초 실행했다. `libmain.so`·`libil2cpp.so` graph
   로드, Unity RegisterNatives 309건 및 후속 등록 세트, Unity 초기화와
