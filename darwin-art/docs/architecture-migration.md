@@ -14477,3 +14477,9 @@ or admission exception was added.
   callback 교착을 유발해 제거했다. release의 map 제거부터 child wait까지 Mutex를
   유지해 shutdown과 회수를 직렬화했으며 host 테스트 8개가 통과했다. 반복
   acceptance는 정리된 프로세스 상태에서 재실행한다.
+
+- Checkpoint 1023 (2026-09-11): 직렬화 후 공식 반복 실행에서 1회차 종료는
+  정상화됐지만 2회차 host가 child 초기화 중 CPU 100%로 42초 이상 정체됐다.
+  macOS `sample`은 권한 제한으로 실패했고, 해당 실행 트리만 강제 종료했다.
+  반복 acceptance 완료 전 2회차 초기화/프로파일 재사용 경로를 Astra와 계속
+  분리 진단한다.

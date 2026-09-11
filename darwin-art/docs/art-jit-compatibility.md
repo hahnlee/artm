@@ -10054,3 +10054,8 @@ incomplete and still requires managed caller unwind validation.
   callback 교착을 일으켜 제거했다. release가 child를 제거·wait하는 동안 동일
   Mutex를 유지해 shutdown과 회수를 직렬화했다. `cargo test -p darwin-art-host`
   8개 테스트가 모두 통과했으며 잔여 child를 정리했다.
+
+- Checkpoint 1023 (2026-09-11): 직렬화 수정 후 공식 2회 acceptance에서 1회차
+  host는 window remove 뒤 종료했고 fence 거부가 관찰됐다. 2회차 host는 약
+  42초 동안 CPU 100%로 유지되어 child 초기화 중 정체됐고, sample은 macOS 권한
+  제한으로 산출되지 않았다. 테스트 host/child만 종료했으며 반복 PASS는 보류한다.
