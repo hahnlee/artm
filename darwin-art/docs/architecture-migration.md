@@ -15443,3 +15443,8 @@ or admission exception was added.
   실행들은 같은 구간에 child surface를 갖고 있었다. 다음은 host가
   실제 renderer-surface readiness를 관측한 후 입력을 시작하도록 하는
   Android식 startup/lifecycle 계약 검토이며, JIT 예외 처리는 하지 않는다.
+- Checkpoint 1211 (2026-09-11): 변경 없는 Chromium APK를 재실행해
+  실제 TabSwitcher→TabGrid→card 입력과 child Surface 게시를 PASS했다
+  (`run.lqWOa3`, target-states=10). 입력 계약은 renderer surface와
+  독립적으로 유지하고, 간헐적인 child-surface 미게시만 host readiness
+  사전조건으로 관측하는 방향을 유지한다.

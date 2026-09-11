@@ -11103,3 +11103,9 @@ incomplete and still requires managed caller unwind validation.
   시점에 child surface를 게시했다. 따라서 두 번째 좌표/hold 문제가
   아니라 renderer child-surface readiness race로 범위를 좁혔다. 임의의
   JIT 우회나 강제 performClick은 추가하지 않는다.
+- Checkpoint 1211 (2026-09-11): 변경 없는 Chromium APK acceptance를
+  재실행했다(`_build/chromium-tab-graphics-acceptance/run.lqWOa3`).
+  JIT 포함 탭 버튼·탭 그리드·카드 선택이 `target-states=10`으로 PASS했고,
+  GLES+ANGLE+Graphite+Dawn+MoltenVK+AHB+SurfaceFlinger+Metal 경로와
+  child Surface 게시도 통과했다. 1210의 readiness 경계는 여전히 간헐적
+  실패를 숨기지 않는 별도 gate 후보로 남긴다.
