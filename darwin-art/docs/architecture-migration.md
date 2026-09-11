@@ -15471,3 +15471,9 @@ or admission exception was added.
   `8ac19af9…4ac18e109`가 유지되고 후속 실행은 `no work to do`였다.
   따라서 현재 graph 입력에 대한 최종 dylib byte identity가 재현됨을
   확인했다.
+- Checkpoint 1217 (2026-09-11): ART JIT 전체 감사와 AOSP core-apps
+  graphics acceptance를 현재 산출물에서 재실행했다. JIT 기능별 실행 및
+  reverse shutdown이 PASS했고, Calculator `2+3=5`, DeskClock Timer,
+  HWUI·SurfaceFlinger·Metal 표시도 PASS했다. 남은 acceptance 범위는
+  Calendar/Blue Archive의 변경 없는 실제 상호작용과 Chromium readiness
+  안정성이다.

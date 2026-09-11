@@ -11133,3 +11133,9 @@ incomplete and still requires managed caller unwind validation.
   libdarwin_art_runtime_graphics.dylib` SHA-256이 전후 동일한
   `8ac19af9…4ac18e109`였고, 두 번째 Ninja 질의는 `no work to do`였다.
   현재 입력에서 최종 산출물 byte identity와 warm 재현을 함께 확인했다.
+- Checkpoint 1217 (2026-09-11): `bash tools/audit-art-jit.sh`를 재실행해
+  AOSP JIT intrinsic, compiled arithmetic, JNI/native boundary, GC,
+  OSR/deopt, fields/classes, strings/roots, monitor/exception, native exit
+  hooks 및 reverse shutdown 단계를 모두 PASS했다. 같은 턴의
+  `tools/aosp-core-apps-graphics-acceptance.sh`도 Calculator `2+3=5`,
+  DeskClock Timer, HWUI+SurfaceFlinger+Metal 공통 경로로 PASS했다.
