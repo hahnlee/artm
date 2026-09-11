@@ -694,19 +694,26 @@ if [[ -n "${DARWIN_ART_DEBUG_HOST:-}" ]]; then
   [[ -x "$DARWIN_ART_DEBUG_HOST" ]] || { echo "debug host is not executable" >&2; exit 2; }
   host="$DARWIN_ART_DEBUG_HOST"
 fi
+# Keep the launcher shell alive for debugger modes as well. An exec'd lldb
+# would bypass cleanup_system_root just like an exec'd app host.
+run_lldb() {
+  lldb "$@"
+  local status=$?
+  exit "$status"
+}
 if [[ -n "${DARWIN_ART_LLDB_COMMAND_FILE:-}" ]]; then
   [[ -f "$DARWIN_ART_LLDB_COMMAND_FILE" ]] || { echo "debugger command file is missing" >&2; exit 2; }
-  exec lldb --source "$DARWIN_ART_LLDB_COMMAND_FILE" -- "$host" --window-seconds "$seconds" \
+  run_lldb --source "$DARWIN_ART_LLDB_COMMAND_FILE" -- "$host" --window-seconds "$seconds" \
     "$runtime" "$core_oj" "$core_libart" "$framework" "$boot_tail" "$app_dex"
 fi
 if [[ "${DARWIN_ART_LLDB:-0}" == "1" ]]; then
-  exec lldb --batch \
+  run_lldb --batch \
     -o 'process handle SIGINFO --stop false --notify false --pass false' \
     -o run -k 'thread backtrace all -c 40' -k 'register read' -- "$host" --window-seconds "$seconds" \
     "$runtime" "$core_oj" "$core_libart" "$framework" "$boot_tail" "$app_dex"
 fi
 if [[ "${DARWIN_ART_LLDB:-0}" == "exit" ]]; then
-  exec lldb --batch \
+  run_lldb --batch \
     -o 'breakpoint set -n exit' -o 'breakpoint set -n _exit' \
     -o 'breakpoint set -n pthread_exit' \
     -o 'breakpoint set -n darwin_art_bionic_exit' \
@@ -715,21 +722,21 @@ if [[ "${DARWIN_ART_LLDB:-0}" == "exit" ]]; then
     "$runtime" "$core_oj" "$core_libart" "$framework" "$boot_tail" "$app_dex"
 fi
 if [[ "${DARWIN_ART_LLDB:-0}" == "dex" ]]; then
-  exec lldb --batch \
+  run_lldb --batch \
     -o 'breakpoint set -n _ZN3artL25DexFile_defineClassNativeEP7_JNIEnvP7_jclassP8_jstringP8_jobjectS7_S7_' \
     -o run -o 'register read x0 x1 x2 x3 x4 x5' \
     -o 'thread backtrace -c 30' -- "$host" --window-seconds "$seconds" \
     "$runtime" "$core_oj" "$core_libart" "$framework" "$boot_tail" "$app_dex"
 fi
 if [[ "${DARWIN_ART_LLDB:-0}" == "syscall-240" ]]; then
-  exec lldb --batch \
+  run_lldb --batch \
     -o 'breakpoint set -n darwin_art_bionic_syscall_captured -c "*(unsigned long long*)$x0 == 240"' \
     -o run -o 'memory read -fx -s8 -c6 $x0' \
     -o 'thread backtrace -c 20' -- "$host" --window-seconds "$seconds" \
     "$runtime" "$core_oj" "$core_libart" "$framework" "$boot_tail" "$app_dex"
 fi
 if [[ "${DARWIN_ART_LLDB:-0}" == "fs-stat" ]]; then
-  exec lldb --batch \
+  run_lldb --batch \
     -o 'breakpoint set -n darwin_art_libcore_stat -c "(int)strncmp((char*)$x0, \"/data/local\", 11) == 0"' \
     -o run -o 'memory read -s1 -c128 $x0' \
     -o 'thread backtrace -c 24' -- "$host" --window-seconds "$seconds" \
@@ -806,6 +813,13 @@ if [[ -n "$profile_mount" ]]; then
       exit 70
     }
   fi
-  exec "$profile_ctl" exec "$package" "${host_command[@]}"
+  # Wait for the app host instead of replacing this shell. Replacing it with
+  # exec would skip cleanup_system_root's EXIT trap and leak a sealed ~38 MiB
+  # system tree on every normal launch.
+  "$profile_ctl" exec "$package" "${host_command[@]}"
+  status=$?
+  exit "$status"
 fi
-exec "${host_command[@]}"
+"${host_command[@]}"
+status=$?
+exit "$status"

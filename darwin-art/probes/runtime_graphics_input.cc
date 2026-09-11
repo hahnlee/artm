@@ -75,6 +75,12 @@ uint64_t CurrentThreadId() {
 bool DispatchDueMainMessages(GraphicsState* state, JNIEnv* env,
                              size_t limit = 64) {
   if (state == nullptr || env == nullptr) return false;
+  const bool trace_main_queue =
+      std::getenv("DARWIN_ART_DEBUG_MAIN_QUEUE_TRACE") != nullptr;
+  if (trace_main_queue) {
+    std::cerr << "ART Android Looper trace: dispatch-due enter tid="
+              << CurrentThreadId() << " limit=" << limit << "\n";
+  }
   static bool logged_sync_barrier = false;
   static bool logged_native_poll_error = false;
   static bool initialized_debug_budget = false;
@@ -284,7 +290,15 @@ bool DispatchDueMainMessages(GraphicsState* state, JNIEnv* env,
     env->DeleteLocalRef(head);
     if (!selectable || env->ExceptionCheck()) break;
 
+    if (trace_main_queue) {
+      std::cerr << "ART Android Looper trace: queue-next enter tid="
+                << CurrentThreadId() << "\n";
+    }
     jobject message = env->CallObjectMethod(queue, queue_next);
+    if (trace_main_queue) {
+      std::cerr << "ART Android Looper trace: queue-next exit tid="
+                << CurrentThreadId() << " message=" << message << "\n";
+    }
     if (message == nullptr || env->ExceptionCheck()) {
       if (message != nullptr) env->DeleteLocalRef(message);
       ok = false;
@@ -299,7 +313,16 @@ bool DispatchDueMainMessages(GraphicsState* state, JNIEnv* env,
     }
     const int32_t dispatched_what = env->GetIntField(message, message_what);
     const auto message_started = std::chrono::steady_clock::now();
+    if (trace_main_queue) {
+      std::cerr << "ART Android Looper trace: dispatch enter tid="
+                << CurrentThreadId() << " what=" << dispatched_what << "\n";
+    }
     env->CallVoidMethod(dispatch_target, dispatch, message);
+    if (trace_main_queue) {
+      std::cerr << "ART Android Looper trace: dispatch exit tid="
+                << CurrentThreadId() << " what=" << dispatched_what
+                << " exception=" << (env->ExceptionCheck() ? 1 : 0) << "\n";
+    }
     if (std::getenv("DARWIN_ART_DEBUG_SLOW_FRAME") != nullptr) {
       const auto message_us =
           std::chrono::duration_cast<std::chrono::microseconds>(
@@ -340,6 +363,10 @@ bool DispatchDueMainMessages(GraphicsState* state, JNIEnv* env,
     logged_native_poll_error = true;
     std::cerr << "ART Android Looper: native poll failed; continuing main "
                  "queue\n";
+  }
+  if (trace_main_queue) {
+    std::cerr << "ART Android Looper trace: dispatch-due exit tid="
+              << CurrentThreadId() << " ok=" << (ok ? 1 : 0) << "\n";
   }
   return ok;
 }
@@ -1951,6 +1978,12 @@ int32_t pump_main_looper(GraphicsState* state) {
   }
   art::ScopedObjectAccess soa(art_thread);
   JNIEnv* env = art_thread->GetJniEnv();
+  const bool trace_main_queue =
+      std::getenv("DARWIN_ART_DEBUG_MAIN_QUEUE_TRACE") != nullptr;
+  if (trace_main_queue) {
+    std::cerr << "ART Android Looper trace: pump enter tid="
+              << CurrentThreadId() << "\n";
+  }
   if (state->gpu_surface != nullptr && !state->owner_wake_bound) {
     void* looper = darwin_art_android_platform_prepare_current_looper();
     if (looper != nullptr &&
@@ -1997,6 +2030,10 @@ int32_t pump_main_looper(GraphicsState* state) {
   // out of this short owner-Looper poll avoids traversing the full
   // WindowManager hierarchy on every 1–2 ms host turn.
   DebugWindowManagerViews(env);
+  if (trace_main_queue) {
+    std::cerr << "ART Android Looper trace: pump exit tid="
+              << CurrentThreadId() << " status=0\n";
+  }
   return 0;
 }
 

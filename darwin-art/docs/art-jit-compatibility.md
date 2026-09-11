@@ -10188,3 +10188,12 @@ incomplete and still requires managed caller unwind validation.
   공유 루트에 누적된 대량 TabState 복원에서만 재현된다. Astra가 SIGQUIT
   thread dump로 첫 입력 전 main native NavigationController 점유를 확인했고,
   실제 ALooper/MessageQueue callback 경계 계측과 수정이 다음 과제다.
+
+- Checkpoint 1044 (2026-09-11): `run-android-apk-app.sh`의 host/LLDB `exec`가
+  EXIT trap을 건너뛰어 매 실행 약 38MiB의 sealed system root를 누적시키던
+  누수를 수정했다. 정상 host 실행에서 shell이 종료 상태를 보존하며 trap을
+  실행하고, LLDB도 동일한 wrapper를 사용한다. 기존 `mnt/run/app.*` 250개
+  (약 9.4GiB)는 활성 프로세스·lease가 없음을 확인한 뒤 직계 경로만 제거해
+  `remaining=0`으로 정리했다. 신규 실행은 `RC=0`, root count `0→0`을
+  확인했다. UKM의 SQLite `disk I/O error`는 용량 부족으로 단정하지 않고
+  VFS/locking 원인 조사를 별도 과제로 유지한다.

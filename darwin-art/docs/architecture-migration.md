@@ -14593,3 +14593,11 @@ or admission exception was added.
   persistence 일반 재실행이 아니라 기존 공유 루트의 대량 TabState 복원에서만
   재현된다. Astra 분석상 첫 입력 전 main native NavigationController가
   점유되며, 실제 ALooper/MessageQueue callback 경계 계측과 수정이 다음 과제다.
+
+- Checkpoint 1044 (2026-09-11): launcher의 host/LLDB `exec`가 EXIT cleanup
+  trap을 우회해 실행마다 약 38MiB system root를 남기던 누수를 수정했다.
+  host 종료 상태를 기다린 뒤 trap을 실행하는 wrapper로 바꾸고, 활성 owner가
+  없음을 재확인한 뒤 `mnt/run/app.*` 250개(약 9.4GiB)를 직계 대상만 제거했다.
+  신규 짧은 Chromium 실행은 `RC=0`, root count `0→0`이었다. UKM SQLite
+  `disk I/O error`는 여유 공간 증거상 용량 부족으로 확정하지 않고 VFS/locking
+  조사를 남긴다.
