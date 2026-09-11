@@ -14545,3 +14545,8 @@ or admission exception was added.
   동일한 471-input graph digest와 동일한 출력 SHA-256을 얻었다. 따라서
   Rust orchestration과 native input closure 사이의 단일 재현 빌드 identity를
   현재 상태에서 검증했다.
+
+- Checkpoint 1036 (2026-09-11): native graph audit가 PASS했다
+  (`runtime=258`, `graphics-jni=63`, `icu=458`, `cached-tu=809`, `phases=12`).
+  직접 소스 invalidation과 GCC depfile 기반 증분 경로까지 확인해 단일 graph
+  identity 검증을 audit 명령으로 재현 가능하게 했다.

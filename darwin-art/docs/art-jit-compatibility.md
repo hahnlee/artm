@@ -10132,3 +10132,8 @@ incomplete and still requires managed caller unwind validation.
   `7096089acba5327b4ce2e6f93fe069b88a3ece4c3aeb4026a6e24470da380751`가
   일치하고, 출력 파일 SHA-256도 동일함을 확인했다. 단일 재현 native graph
   identity가 현재 입력 closure에서 결정적으로 유지된다.
+
+- Checkpoint 1036 (2026-09-11): `audit-native-graph.sh`도 통과했다.
+  runtime=258, graphics-jni=63, icu=458, cached-tu=809, phases=12이며
+  직접 소스 invalidation과 GCC depfile 경로를 확인했다. graph digest는
+  `7096089a…380751`로 유지되고 audit 종료 상태는 0이다.
