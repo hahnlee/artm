@@ -14693,3 +14693,7 @@ or admission exception was added.
   실제 실행해 RenderThread/hwuiTask0/1의 owned attach와 `RC=0` 종료를
   확인했다. ART detach 경고, fatal signal, run_request failure는 관찰되지
   않았다.
+
+- Checkpoint 1061 (2026-09-11): 최신 JNI owner/runtime 변경 후 Chromium
+  lifecycle을 2회 반복해 New-tab=2, JNI-detach-crash=0, service children
+  reaped를 확인했다. acceptance 전체가 `RC=0`으로 통과했다.

@@ -10296,3 +10296,8 @@ incomplete and still requires managed caller unwind validation.
   `DARWIN_ART_DEBUG_JNI_ATTACH=1`로 실행했다. RenderThread와 hwuiTask0/1이
   owned attach로 생성되고 host는 `RC=0`으로 종료했으며 `Native thread exiting
   without ... DetachCurrentThread`, fatal signal, run_request failure는 0건이었다.
+
+- Checkpoint 1061 (2026-09-11): 최신 JNI owner/runtime 변경 후 Chromium
+  lifecycle acceptance를 2회 반복 실행했다. 각 회차에서 New-tab 생성,
+  JNI-detach crash 0, service child reaping을 확인했고 전체 결과가 `RC=0`으로
+  통과했다. 로그는 `_build/chrome-process-lifecycle-acceptance`에 보존한다.
