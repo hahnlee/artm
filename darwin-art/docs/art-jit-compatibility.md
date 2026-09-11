@@ -10791,3 +10791,12 @@ incomplete and still requires managed caller unwind validation.
   현재 실패 목록은 `133-static-invoke-super`, `137-cfi`, `1909-per-agent-tls`,
   `1916-get-set-current-frame`, `1921-suspend-native-recursive-monitor`이고
   전체 실행 종료 후 개별 재현한다.
+
+- Checkpoint 1151 (2026-09-11): fresh ledger는 363/1,076개까지 진행되어
+  357 passed/6 failed, identity `eb468bf1…` 단일성을 유지한다. 병렬 실행에서
+  실패로 표시된 다섯 항목 중 `133-static-invoke-super`, `137-cfi`,
+  `1909-per-agent-tls`, `1916-get-set-current-frame`,
+  `1921-suspend-native-recursive-monitor`를 순차 단독 재실행한 결과는 모두
+  interpreter/JIT/unmodified optimized PASS였다. 따라서 현재 실패는
+  병렬 allocator 압박 가능성이 높지만, 전체 ledger 종료 후 `--resume --parallel 1`
+  로 동일 identity에서 재검증한다.
