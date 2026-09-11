@@ -10718,3 +10718,10 @@ incomplete and still requires managed caller unwind validation.
 - Checkpoint 1135 (2026-09-11): fresh corpus가 약 14분째 실행 중이며
   2243/2259 계열 테스트까지 진행했다. 동일 세션을 유지하고 종료 시점의
   drift guard 결과와 실패 항목만 authoritative evidence로 수집한다.
+
+- Checkpoint 1136 (2026-09-11): Astra가 최신 실패 두 건을 동일 원인으로
+  분류했다. interpreter는 통과하고 JIT MAP_JIT allocator의 metadata/code
+  uint32 거리 조건에서 status=123이 발생하며 shutdown은 정상이다. 0040 패치의
+  임의주소 fallback은 AOSP 계약을 보장하지 않으므로 제거하지 않고, 실행 중인
+  corpus를 중단하거나 새 빌드하지 않은 채 주소 계측과 bounded pair allocator를
+  다음 수정 경계로 확정했다.
