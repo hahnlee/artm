@@ -118,6 +118,47 @@ class CorpusRunnerTest(unittest.TestCase):
             ["001-first", "002-second"],
         )
 
+    def test_runtime_identity_covers_boot_components_and_official_graph(self) -> None:
+        for relative in (
+            "target/debug/darwin-art-host",
+            "_build/runtime-graphics-link-probe/libdarwin_art_runtime_graphics.dylib",
+            "_build/android16-boot-image-darwin/boot-framework-compat.oat",
+            "_build/android16-boot-image-darwin/boot-framework-compat.vdex",
+            "_build/android16-boot-image-darwin/boot-core-libart.art",
+            "_prebuilt/android-16/bootclasspath/core-libart.jar",
+            "_build/android16-ps16k-r07/extracted/conscrypt/javalib/conscrypt.jar",
+            "_build/dex-probe/unsafe-boot-dex/unsafe-boot.jar",
+            "_build/native-graph/build.ninja",
+            "_build/native-graph/build.inputs.sha256",
+        ):
+            with self.subTest(relative=relative):
+                before = corpus.runtime_identity(self.root)
+                path = self.root / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(b"first")
+                created = corpus.runtime_identity(self.root)
+                self.assertNotEqual(before, created)
+                path.write_bytes(b"other")  # Same size, different content.
+                self.assertNotEqual(created, corpus.runtime_identity(self.root))
+
+    def test_resume_invalidates_legacy_and_changed_runtime_records(self) -> None:
+        args = ["--root", str(self.root), "--runner", str(self.runner),
+                "--ledger", str(self.ledger), "--limit", "2", "--resume"]
+        self.assertEqual(corpus.main(args), 1)
+        payload = json.loads((self.ledger / "summary.json").read_text())
+        for record in payload["results"]:
+            del record["runtime_identity"]
+        (self.ledger / "summary.json").write_text(json.dumps(payload))
+        self.assertEqual(corpus.main(args), 1)
+        self.assertEqual((self.root / "count").read_text(), "4")
+        self.assertEqual(corpus.main(args), 1)
+        self.assertEqual((self.root / "count").read_text(), "4")
+        component = self.root / "_build/android16-boot-image-darwin/boot-framework-compat.oat"
+        component.parent.mkdir(parents=True)
+        component.write_bytes(b"new boot component")
+        self.assertEqual(corpus.main(args), 1)
+        self.assertEqual((self.root / "count").read_text(), "6")
+
     def test_shard_selection_is_index_based(self) -> None:
         self.assertEqual(
             corpus.shard_tests(corpus.discover_tests(self.root), 1, 2),

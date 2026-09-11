@@ -14872,3 +14872,12 @@ or admission exception was added.
 - Checkpoint 1068 (2026-09-11): 최신 HWUI/JNI 변경 후 `cargo test -q -p
   darwin-art-host`가 8개와 2개 테스트 묶음을 포함해 전체 `0 failed`로
   통과했다.
+
+- Checkpoint 1093 (2026-09-11): upstream ART corpus ledger의 runtime identity
+  변경을 9개 단위 테스트로 검증했다. host/runtime dylib, 공식 native graph,
+  boot ART/OAT/VDex 및 bootclasspath JAR의 동일 크기 내용 변경을 모두 감지하고,
+  identity가 없는 legacy 결과는 재실행하며, 동일 identity만 resume한다. 과거
+  `004-SignalTest` 결과를 최신 회귀로 잘못 재사용하지 않기 위한 안전장치다.
+  현재 해당 테스트는 boot/JAR checksum mismatch로 실행 전 차단된 상태라 최신
+  PASS/FAIL로 승격하지 않는다. 실행 중 rebuild·환경변수·timeout은 아직 identity에
+  포함되지 않는 잔여 경계다.
