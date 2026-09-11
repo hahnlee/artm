@@ -18,6 +18,36 @@ user change in `crates/art-bootstrap/src/runtime_art/foundation.rs` was untouche
 
 ## Evidence
 
+### Rebuilt-runtime retest (14:26 KST)
+
+Original base/split inputs were restored and both SHA-256 values above were
+reverified. A 30-second run against the rebuilt runtime
+`c767a68f1f8ecef797ba773754e7163ba78e86d3facd74f21386da0fff96c0a5`
+and prepared host
+`eea5168a5cb4c391eb1e286e557ec6b5d11f27cc178740061adeb32cc46dfa6d`
+exited 0; its host PID 65797 is no longer running. Log:
+`/tmp/bluearchive-astra-rebuilt-acceptance.log`.
+
+The run enabled `DARWIN_ART_DEBUG_UNITY_LIFECYCLE=1`,
+`DARWIN_ART_DEBUG_UNITY_STALL=1`, `DARWIN_ART_DEBUG_PTHREAD_SIGNALS=1`,
+`DARWIN_ART_DEBUG_INPUT_LATENCY=1`, `DARWIN_ART_DEBUG_POINTER=1`, scale=2,
+and `DARWIN_ART_TEST_POINTER_SEQUENCE='0,0,0;320,180,10000'`.
+The scanout prefix was the absolute path to
+`_build/bluearchive-acceptance-20260911/rebuilt`.
+
+All four `rebuilt-000001.png` through `rebuilt-000004.png` are 1280x720,
+mean=0/std=0; the final PNG was also visually checked. The center tap reaches
+Android coordinates (640,360); DOWN and UP both report InputChannel consumed=1.
+This is successful input delivery, **not** meaningful game interaction.
+
+The first nativeRender still never returns. The watchdog again captures
+`__semwait_signal -> nanosleep -> usleep -> libil2cpp.so+0x19c964c`
+`-> +0x19bf874`; the image base is 0x310000000. GC Finalizer token 19 receives
+one signal 30/24 pair followed by repeated signal 30 submissions, all returning
+0. Thus caching the diagnostic getenv lookup and the standalone 2,000-cycle
+PASS did not fix the original game's GC acknowledgment stall. The APK-path
+blocker is resolved; the native first-frame blocker remains open.
+
 Artifacts are under `_build/bluearchive-acceptance-20260911/` (ignored):
 
 - `scanout-000002.png`: actual scanout-source Metal blit readback; 1280x720,

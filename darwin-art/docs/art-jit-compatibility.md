@@ -42,7 +42,7 @@ blockers. In particular, successful Unity initialization is not game UI proof.
 | Root literals | Native64 root-slot addresses and compressed payloads pass class/string/MethodType-style use under CC | Exhaustive metadata/native literal inventory |
 | Native unwind metadata | September 6 deterministic-CFI checkpoint records untouched AOSP 137-cfi optimized-JIT local/context/thread/remote success and integrated Darwin unwindstack providers | Preserve this regression under current build identity; do not generalize its coverage to arbitrary native binaries |
 | Execution policy | Production JIT is default-on since September 6; Darwin bytecode/method-shape admission gates are removed. September 11 focused audit covers compiled GC, VarHandle, invokes, OSR/deopt and shutdown | Extend method-level execution evidence beyond the existing focused matrix; broader corpus interpreter/jit summaries are not an independent optimized lane |
-| Original apps | September 11 Calculator 2+3=5, DeskClock Timer and Chromium external HTTPS content have real execution/rendering evidence. Current Blue Archive nativeRender stalls in GC acknowledgment and scanout is black | Repeat acceptance on each rebuilt identity. Blue Archive first nonblack game UI plus meaningful input remains open; original base/split APK inputs are currently absent |
+| Original apps | September 11 Calculator 2+3=5, DeskClock Timer and Chromium external HTTPS content have real execution/rendering evidence. Blue Archive's restored original APKs were retested for 30s on the rebuilt runtime: nativeRender still stalls in GC acknowledgment and four scanouts are black | Repeat acceptance on each rebuilt identity. Blue Archive first nonblack game UI plus meaningful input remains open despite InputChannel DOWN/UP delivery |
 
 ## Validation rules
 
@@ -59,7 +59,7 @@ blockers. In particular, successful Unity initialization is not game UI proof.
 ## Next implementation boundary
 
 Close Blue Archive first-frame/interaction acceptance using unchanged original
-APK inputs after restoring their currently missing path. Its black first frame
+APK inputs, now restored and retested on the rebuilt identity. Its black first frame
 is a native IL2CPP GC acknowledgment blocker, not evidence of a JIT opcode gap.
 The actual guest signal trampoline/semaphore/mask regression now passes 100
 suspend/resume cycles (20 repeated runs); this does not prove the game stall is
@@ -10405,3 +10405,10 @@ incomplete and still requires managed caller unwind validation.
   JNI ownership(owned 100/borrowed 1/explicit detach 1/TLS exit 0), Rust 28개,
   signal 2,000 cycle 및 foreign-thread sanitizer 각 64회가 통과했다. Blue
   Archive는 원본 APK 경로 부재로 여전히 실행하지 못했다.
+
+- Checkpoint 1079 (2026-09-11): 복구된 변경 없는 Blue Archive base/split APK를
+  최신 rebuilt identity로 20초 실행했다. 프로세스는 `RC=0`이고 물리 중앙 탭은
+  `consumed=1`이지만 `nativeRender` 반환은 0회, 1280×720 진단 scanout은
+  mean/stddev 0인 완전 검정이다. IL2CPP Boehm GC의 stop-the-world
+  acknowledgment 대기(`libil2cpp+0x19c964c`)가 현재 첫 프레임 blocker로
+  재현됐다. 이는 APK 수정이나 JIT 성공으로 간주하지 않는다.

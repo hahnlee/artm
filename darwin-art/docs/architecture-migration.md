@@ -14776,6 +14776,12 @@ or admission exception was added.
   graph는 v28·472 inputs·digest `63eeef4f…84943`다. JNI owner와 VM shutdown
   focused tests가 통과했지만 Blue Archive 원본 APK 부재는 미완료로 유지한다.
 
+- Checkpoint 1079 (2026-09-11): 복구된 원본 Blue Archive base/split APK를
+  변경 없이 20초 실행했다. 런타임은 `RC=0`이지만 `nativeRender`가 반환하지
+  않고, 실제 1280×720 scanout은 완전 검정이며 중앙 물리 탭은 소비만 된다.
+  IL2CPP Boehm GC의 stop-the-world acknowledgment 대기에서 멈추는 현상을
+  재현했으므로, 첫 프레임/상호작용 acceptance는 아직 미완료다.
+
 - Checkpoint 1066 (2026-09-11): 최신 JNI/HWUI 및 MAP_JIT 변경 후 ART JIT
   audit를 재실행해 Nterp, compiled/GC, VarHandle, invoke, Surface,
   MediaCodec, W^X 및 shutdown lifecycle 전체가 `RC=0`으로 통과했다.
