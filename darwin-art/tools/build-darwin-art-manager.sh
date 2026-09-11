@@ -68,6 +68,7 @@ for helper in darwin-artctl darwin-artd darwin-art-apk-install \
   copy_file "$project_root/target/release/$helper" "target/release/$helper"
 done
 copy_file "$project_root/tools/run-android-apk-app.sh" tools/run-android-apk-app.sh
+copy_file "$project_root/tools/prepare-darwin-art-host.sh" tools/prepare-darwin-art-host.sh
 copy_file "$project_root/tools/declare-darwin-x18-abi.sh" tools/declare-darwin-x18-abi.sh
 copy_file "$project_root/config/darwin-art-host.entitlements" config/darwin-art-host.entitlements
 copy_file "$project_root/_build/runtime-graphics-link-probe/libdarwin_art_runtime_graphics.dylib" \
@@ -92,6 +93,7 @@ copy_file "$project_root/probes/button/fonts.xml" probes/button/fonts.xml
 copy_file "$project_root/_aosp/external/skia/resources/fonts/Roboto-Regular.ttf" \
   _aosp/external/skia/resources/fonts/Roboto-Regular.ttf
 for relative in \
+  art/javalib/okhttp.jar \
   conscrypt/javalib/conscrypt.jar \
   conscrypt/lib64/libc++.so \
   conscrypt/lib64/libcrypto.so \

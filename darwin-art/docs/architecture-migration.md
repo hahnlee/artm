@@ -15340,3 +15340,7 @@ or admission exception was added.
   accessibility action API가 이 세션에 노출되지 않아 실행 버튼을 자동
   클릭하지 못했다. Host.app 구현 자체와 실제 창 owner/Cancel 검증을 분리해
   기록한다.
+- Checkpoint 1189 (2026-09-11): Manager payload 누락 jar를 보완해 실행 단계가
+  `prepare-darwin-art-host` missing에서 Blue Archive native host 생성까지
+  진행됐다. 현재 기존 lease/PID가 재사용되어 Host.app bundle owner 검증은
+  아직 확정하지 않았다.

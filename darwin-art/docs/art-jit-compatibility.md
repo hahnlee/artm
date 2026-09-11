@@ -10983,3 +10983,8 @@ incomplete and still requires managed caller unwind validation.
   bundle은 존재하지만, CUA/AppleScript 조작 계층에서 실행 버튼을 호출할
   수 있는 API가 현재 노출되지 않았다. 실제 Blue Archive 입력 acceptance는
   조작 경로가 확보될 때까지 보류한다.
+- Checkpoint 1189 (2026-09-11): packaged runtime에서 누락된 `okhttp.jar`를
+  Manager payload에 추가했고 Manager 재빌드가 PASS했다. Blue Archive 실행은
+  실제로 재개되어 Notice/Confirm 화면과 native host PID가 생성됐지만, 기존
+  daemon lease가 남아 Host.app owner 교체 여부는 새 프로세스 정리 후 다시
+  확인해야 한다.

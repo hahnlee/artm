@@ -345,6 +345,8 @@ else
 fi
 if [[ -n "${DARWIN_ART_HOST_BUNDLE:-}" ]]; then
   host="$DARWIN_ART_HOST_BUNDLE/Contents/MacOS/darwin-art-host"
+elif [[ -x "$root/DarwinARTHost.app/Contents/MacOS/darwin-art-host" ]]; then
+  host="$root/DarwinARTHost.app/Contents/MacOS/darwin-art-host"
 fi
 [[ -x "$host" ]] || {
   echo "darwin-art host is missing: $host" >&2

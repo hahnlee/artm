@@ -67,6 +67,8 @@ static NSString *const DARErrorDomain = @"dev.darwinart.manager";
     }
     environment[@"DARWIN_ART_PROFILE"] = profile;
     environment[@"DARWIN_ART_PACKAGED_RUNTIME"] = @"1";
+    environment[@"DARWIN_ART_HOST_BUNDLE"] =
+        [self.runtimeRootURL URLByAppendingPathComponent:@"DarwinARTHost.app" isDirectory:YES].path;
     environment[@"DARWIN_ART_ANGLE_DIRECTORY"] =
         [self.runtimeRootURL URLByAppendingPathComponent:
                                  @"_build/angle-source/out/DarwinArtRelease"].path;
