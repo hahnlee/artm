@@ -10916,3 +10916,8 @@ incomplete and still requires managed caller unwind validation.
   않았고, 이번 tap은 사전 프레임 상태 때문에 Cancel dismiss 증거로 세지 않는다.
   상세 산출물은 `_build/bluearchive-current.J9Jxq6/`이며 물리 버튼·Confirm
   다운로드·로그인·게임플레이는 여전히 미검증이다.
+- Checkpoint 1174 (2026-09-11): Astra 진단에 따라 PIE `__PAGEZERO`의 ASLR
+  slide를 반영하고 exact gap 실패 시 동일 후보를 반복하지 않도록 allocator
+  탐색을 보정했다. graphics bootstrap은 통과했지만 audit는 후보 주소의
+  `KERN_INVALID_ADDRESS`로 여전히 JIT Code Cache 생성에 실패했다. 추가
+  Darwin VM gap 예약/배치 검증이 필요하다.

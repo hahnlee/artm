@@ -1,17 +1,19 @@
 diff --git a/runtime/jit/jit_memory_region.cc b/runtime/jit/jit_memory_region.cc
 --- a/runtime/jit/jit_memory_region.cc
 +++ b/runtime/jit/jit_memory_region.cc
-@@ -20,6 +20,9 @@
+@@ -20,6 +20,11 @@
  #if defined(__APPLE__)
  #include <pthread.h>
  #include <sys/mman.h>
 +#include <mach/mach_init.h>
 +#include <mach/mach_vm.h>
 +#include <mach/mach_port.h>
++#include <mach-o/dyld.h>
++#include <mach-o/loader.h>
  #endif
  #include <android-base/unique_fd.h>
  #include <log/log.h>
-@@ -122,10 +123,107 @@
+@@ -122,10 +123,123 @@
      if (!exec_pages.IsValid()) {
        *error_msg = "Failed to create Darwin MAP_JIT code cache: " + error_str;
        return false;
@@ -35,15 +37,36 @@ diff --git a/runtime/jit/jit_memory_region.cc b/runtime/jit/jit_memory_region.cc
 +      }
 +    const uintptr_t exec_base = reinterpret_cast<uintptr_t>(exec_pages.Begin());
 +    const uintptr_t exec_limit_end = reinterpret_cast<uintptr_t>(exec_pages.End());
-+    // Mach-O binaries reserve the complete low 4GiB (__PAGEZERO). Keep the
-+    // AOSP ordering (data below executable) while never probing that region.
-+    constexpr uintptr_t kDarwinPageZeroEnd = UINT64_C(0x100000000);
++    // Mach-O PIE images extend __PAGEZERO by the ASLR slide.  Derive the
++    // actual lower bound instead of treating 4GiB as universally available.
++    uintptr_t pagezero_end = UINT64_C(0x100000000);
++    const mach_header_64* image = reinterpret_cast<const mach_header_64*>(
++        _dyld_get_image_header(0));
++    if (image != nullptr && image->magic == MH_MAGIC_64) {
++      const uint8_t* command = reinterpret_cast<const uint8_t*>(image) +
++                               sizeof(mach_header_64);
++      const intptr_t slide = _dyld_get_image_vmaddr_slide(0);
++      for (uint32_t i = 0; i < image->ncmds; ++i) {
++        const load_command* lc = reinterpret_cast<const load_command*>(command);
++        if (lc->cmdsize < sizeof(load_command)) break;
++        if (lc->cmd == LC_SEGMENT_64 && lc->cmdsize >= sizeof(segment_command_64)) {
++          const segment_command_64* segment =
++              reinterpret_cast<const segment_command_64*>(command);
++          if (segment->vmaddr == 0 && segment->filesize == 0 && segment->vmsize > 0 &&
++              segment->initprot == VM_PROT_NONE && segment->maxprot == VM_PROT_NONE &&
++              strncmp(segment->segname, "__PAGEZERO", sizeof(segment->segname)) == 0) {
++            const uint64_t end = segment->vmsize + (slide > 0 ? static_cast<uint64_t>(slide) : 0);
++            if (end > pagezero_end) pagezero_end = static_cast<uintptr_t>(end);
++          }
++        }
++        command += lc->cmdsize;
++      }
++    }
 +    uintptr_t free_candidate = 0;
-+    const uintptr_t lower = std::max(kDarwinPageZeroEnd,
++    const uintptr_t lower = std::max(pagezero_end,
 +                                     exec_limit_end > UINT32_MAX ? exec_limit_end - UINT32_MAX : 0u);
 +    mach_vm_address_t cursor = RoundUp(lower, MemMap::GetPageSize());
 +    const mach_vm_address_t limit = exec_base;
-+    size_t collisions = 0;
 +    error_str = "no fitting Darwin JIT metadata gap exec_base=" +
 +                std::to_string(exec_base) + " exec_end=" + std::to_string(exec_limit_end) +
 +                " data=" + std::to_string(rounded_data);
@@ -78,11 +101,6 @@ diff --git a/runtime/jit/jit_memory_region.cc b/runtime/jit/jit_memory_region.cc
 +                                               reinterpret_cast<uint8_t*>(free_candidate),
 +                                               data_capacity, kProtRW, &error_str);
 +        if (data_pages.IsValid()) break;
-+        if (++collisions >= 32) {
-+          error_str = "Darwin JIT gap allocation retries exhausted: " + error_str;
-+          break;
-+        }
-+        continue;
 +      }
 +      if (region_size == 0 || region > UINTPTR_MAX - region_size) {
 +        error_str = "invalid Darwin JIT VM region extent";

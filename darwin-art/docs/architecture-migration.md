@@ -15280,3 +15280,8 @@ or admission exception was added.
   graphics, shutdown 단계는 통과했지만 empty-checkpoint contention fixture가
   실행되지 않았다. 앱 acceptance의 개별 JIT 통과와 분리해 이 allocator
   workload 실패를 Astra에 우선 진단 요청했다.
+- Checkpoint 1174 (2026-09-11): PIE `__PAGEZERO` slide 보정과 exact gap 탐색
+  실패 후 진행을 반영해 graphics bootstrap은 재생성됐다. 그러나 실제
+  `mach_vm_allocate(VM_FLAGS_FIXED)`가 후보에서 `KERN_INVALID_ADDRESS`를
+  반환해 JIT audit는 아직 실패한다. allocator의 VM 예약 모델을 다음 작업에서
+  보완해야 한다.
