@@ -14574,3 +14574,9 @@ or admission exception was added.
   `https://example.com/` 기록을 확인했다. 이번 증거는 URL 전달·탭 상태 반영과
   무충돌 종료를 닫지만, 화면 픽셀 기반 `Example Domain` 로드 완료 게이트는
   별도 acceptance로 남긴다.
+
+- Checkpoint 1041 (2026-09-11): AndroidKeyStore 경계 추가 후 변경 없는 Blue
+  Archive base+`split-0.apk`를 15초 재실행했다. `RC=0`과 Unity ARM64 초기화
+  (12 cores/8192mb)를 확인했고 JobScheduler/AndroidKeyStore 예외와 fatal
+  marker는 없었다. 서비스 초기화 blocker는 해소됐지만 로그인·네트워크·전투를
+  포함하는 실제 게임 플레이 acceptance는 아직 미완료다.

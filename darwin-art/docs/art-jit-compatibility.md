@@ -10166,3 +10166,10 @@ incomplete and still requires managed caller unwind validation.
   uncaught Java exception은 없었다. 이번 실행은 URL 인텐트와 탭 상태 반영을
   확인한 것이며, 화면 픽셀에서 `Example Domain` 텍스트가 보이는 별도 캡처 게이트는
   아직 남아 있다.
+
+- Checkpoint 1041 (2026-09-11): AndroidKeyStore 경계 반영 후 변경 없는 Blue
+  Archive base+`split-0.apk`를 15초 재실행했다. `RC=0`, Unity ARM64 초기화
+  (12 cores/8192mb), JobScheduler·AndroidKeyStore 관련 예외 및 fatal marker
+  없음이 확인됐다. 이는 초기화/서비스 blocker가 더 이상 재현되지 않음을
+  증명하지만, 로그인·네트워크·실제 전투를 포함한 게임 플레이 acceptance는
+  아직 닫지 않는다.
