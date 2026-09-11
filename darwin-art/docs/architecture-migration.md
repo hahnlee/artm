@@ -15067,3 +15067,7 @@ or admission exception was added.
 - Checkpoint 1130 (2026-09-11): 동일 controlled corpus 핸들이 약 7분째 실행
   중이며 worker가 계속 교체되고 있다. 기존 summary의 실패/구 identity 행과
   새 결과가 공존하므로 최종 acceptance는 별도 fresh ledger에서 검증해야 한다.
+
+- Checkpoint 1131 (2026-09-11): fresh corpus 핸들이 약 8분째 살아 있으며
+  current identity 결과가 점진적으로 갱신되고 있다. 기존 ledger 행은 분리
+  검증 대상이며, 프로세스 종료 후 별도 fresh ledger와 identity 재계산을 수행한다.
