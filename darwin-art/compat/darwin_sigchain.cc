@@ -1,4 +1,5 @@
 #include <signal.h>
+#include <pthread.h>
 #include <array>
 #include <cstdint>
 #include <cstring>
@@ -78,7 +79,7 @@ bool DispatchUserHandler(int signal_number, siginfo_t* info, void* context) {
   }
   const auto restore_interrupted_mask = [&]() {
     if (have_interrupted_mask) {
-      sigprocmask(SIG_SETMASK, &interrupted_mask, nullptr);
+      pthread_sigmask(SIG_SETMASK, &interrupted_mask, nullptr);
     }
   };
   // Match AOSP sigchain: special handlers run with ART's private mask, but
@@ -99,7 +100,7 @@ bool DispatchUserHandler(int signal_number, siginfo_t* info, void* context) {
     if ((action.sa_flags & SA_NODEFER) == 0) {
       sigaddset(&handler_mask, signal_number);
     }
-    sigprocmask(SIG_SETMASK, &handler_mask, nullptr);
+    pthread_sigmask(SIG_SETMASK, &handler_mask, nullptr);
   }
   if ((action.sa_flags & SA_SIGINFO) != 0 && action.sa_sigaction != nullptr) {
     if ((action.sa_flags & SA_RESETHAND) != 0) {
@@ -145,7 +146,9 @@ void DarwinSignalDispatcher(int signal_number, siginfo_t* info, void* context) {
       const bool may_not_return =
           (special.sc_flags & SIGCHAIN_ALLOW_NORETURN) != 0;
       sigset_t previous_mask;
-      sigprocmask(SIG_SETMASK, &special.sc_mask, &previous_mask);
+      // Darwin sigprocmask updates every thread's mask. A signal handler's
+      // private mask must affect only the interrupted thread, as on Android.
+      pthread_sigmask(SIG_SETMASK, &special.sc_mask, &previous_mask);
       if (!may_not_return) g_handling_signal[signal_number] = 1;
 #if defined(__APPLE__) && defined(__aarch64__)
       const uintptr_t interrupted_pc = GetInterruptedPc(context);
@@ -156,7 +159,7 @@ void DarwinSignalDispatcher(int signal_number, siginfo_t* info, void* context) {
 #endif
       if (!may_not_return) g_handling_signal[signal_number] = 0;
       if (handled) return;
-      sigprocmask(SIG_SETMASK, &previous_mask, nullptr);
+      pthread_sigmask(SIG_SETMASK, &previous_mask, nullptr);
     }
   }
 

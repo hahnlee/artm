@@ -14799,6 +14799,18 @@ or admission exception was added.
   개선되지 않았고, 다음 수정 경계는 host pending/mask와 chain delivery의
   직접 계측으로 유지한다.
 
+- Checkpoint 1083 (2026-09-11): 독립 fault-boundary probe가 실제
+  condition-wait worker에서 GC signal 100회와 kernel SIGBUS 100회를 통과시켰다.
+  worker mask는 복원되고 pending은 0이었으며 special mask는 `fffef857`였다.
+  ordinary dispatcher 호출의 mask 잔류는 별도 관찰됐지만 Unity 경로의 증거가
+  아니므로 런타임 생산 수정 없이 다음 계측 대상으로 유지한다.
+
+- Checkpoint 1084 (2026-09-11): Darwin sigchain의 프로세스 범위
+  `sigprocmask` 네 곳을 `pthread_sigmask`로 바꿔 Android와 같은 thread-local
+  signal mask 계약을 복원했다. 독립 probe와 공식 build가 PASS했고, 변경 없는
+  Blue Archive에서 `nativeRender` 1,055회/exception 0과 Notice 다운로드 UI가
+  실제 scanout에 표시됐다. 중앙 물리 입력도 DOWN/UP consumed=1로 전달됐다.
+
 - Checkpoint 1066 (2026-09-11): 최신 JNI/HWUI 및 MAP_JIT 변경 후 ART JIT
   audit를 재실행해 Nterp, compiled/GC, VarHandle, invoke, Surface,
   MediaCodec, W^X 및 shutdown lifecycle 전체가 `RC=0`으로 통과했다.

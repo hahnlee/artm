@@ -10431,3 +10431,16 @@ incomplete and still requires managed caller unwind validation.
   kernel sigreturn에 맡기므로 반환 순서 변경은 계약상 근거가 없고 실제 실행도
   실패했다. 현재 baseline에서 문제는 첫 signal 이후 host pending/mask 또는
   chain delivery 경계로 한정되며, 추가 생산 수정 없이 계측 대상으로 유지한다.
+
+- Checkpoint 1083 (2026-09-11): 독립 fault-boundary probe에서 실제 provider
+  condition-wait worker의 GC suspend/resume 100회와 kernel SIGBUS 100회가
+  모두 PASS했다(`mask-restored=yes`, `pending=0`, special mask=`fffef857`).
+  ordinary dispatcher 직접 호출은 mask 잔류를 재현했지만 Unity가 그 경로를
+  사용한다는 증거는 아니므로 생산 코드는 변경하지 않았다.
+
+- Checkpoint 1084 (2026-09-11): fault-boundary probe가 worker에만 SIGBUS를
+  보내도 main thread mask가 오염되는 현상을 재현했다. `darwin_sigchain.cc`의
+  네 `sigprocmask`를 thread-local `pthread_sigmask`로 교체한 뒤 observer mask가
+  0으로 유지되고 probe가 PASS했다. 공식 rebuilt runtime에서 변경 없는 Blue
+  Archive를 15초 실행해 `nativeRender` 1,055회 반환, exception 0, 실제 Notice
+  다운로드 UI scanout을 확인했다. 중앙 DOWN/UP도 consumed=1이었다.
