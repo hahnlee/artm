@@ -15493,3 +15493,6 @@ or admission exception was added.
   `https://example.com/` VIEW 경로를 재검증했다. renderer child Surface가
   실제 buffer를 게시했고, Android CA 검증 `cert_status=0`인 TLS 1.3/HTTP
   200 응답과 SurfaceFlinger 본문 픽셀 scanout이 모두 확인됐다.
+- Checkpoint 1222 (2026-09-11): graphics link audit 검사 코드의
+  rustfmt 불일치만 정리했다. 동작은 변경하지 않았으며 전체 workspace
+  format check와 diff check가 PASS했다.

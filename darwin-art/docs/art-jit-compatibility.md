@@ -11157,3 +11157,7 @@ incomplete and still requires managed caller unwind validation.
   실제 VIEW 실행의 진단 산출물을 재검증했다. child Surface 생성·buffer
   present, TLS 1.3/HTTP 200 및 `cert_status=0`, SurfaceFlinger source의
   본문 픽셀 전달이 확인됐다(`/tmp/chromium-example-diagnosis.dMBHwo`).
+- Checkpoint 1222 (2026-09-11): `graphics_link_checks.rs`의 기존
+  rustfmt 불일치를 기능 변경 없이 정리했다. `cargo fmt --all -- --check`
+  와 `git diff --check`가 모두 PASS해 현재 acceptance/audit 코드의
+  포맷 무결성을 확인했다.
