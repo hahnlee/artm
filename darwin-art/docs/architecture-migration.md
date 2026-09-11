@@ -15217,3 +15217,9 @@ or admission exception was added.
   `tools/chrome-process-lifecycle-acceptance.sh`를 실행해 2회 모두 PASS했다.
   새 탭 검증 2회, JNI detach crash 0, ChildProcessService 자식 프로세스
   정상 회수이며 산출물은 `_build/chrome-process-lifecycle-acceptance/`에 있다.
+
+- Checkpoint 1163 (2026-09-11): Chrome 전체 HTTPS acceptance는 로컬 mkcert
+  루트가 macOS trust store에 없어 `security verify-cert` 단계에서 중단됐다.
+  `mkcert -install`은 관리자 비밀번호가 필요해 자동 설치할 수 없었고,
+  신뢰 우회 없이 blocker로 남겼다. 사용자 환경에서 한 번 설치하면
+  `tools/chromium-android-acceptance/run.sh`를 그대로 재개할 수 있다.
