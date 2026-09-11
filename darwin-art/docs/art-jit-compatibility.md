@@ -11139,3 +11139,7 @@ incomplete and still requires managed caller unwind validation.
   hooks 및 reverse shutdown 단계를 모두 PASS했다. 같은 턴의
   `tools/aosp-core-apps-graphics-acceptance.sh`도 Calculator `2+3=5`,
   DeskClock Timer, HWUI+SurfaceFlinger+Metal 공통 경로로 PASS했다.
+- Checkpoint 1218 (2026-09-11): `tools/android-window-menu-acceptance.sh`를
+  재실행했다(`run.9C49vP`). 변경 없는 Calculator History/외부 dismiss/resize,
+  Calendar Day·Week·Month, Chrome New-tab, Android ViewRoot/InputChannel/
+  SurfaceFlinger popup이 모두 PASS했다.

@@ -15477,3 +15477,7 @@ or admission exception was added.
   HWUI·SurfaceFlinger·Metal 표시도 PASS했다. 남은 acceptance 범위는
   Calendar/Blue Archive의 변경 없는 실제 상호작용과 Chromium readiness
   안정성이다.
+- Checkpoint 1218 (2026-09-11): window-menu acceptance를 다시 실행해
+  Calculator, Calendar, Chrome, Android popup의 실제 메뉴·전환·resize
+  이벤트가 모두 PASS함을 확인했다(`run.9C49vP`). Calendar의 Day/Week/Month
+  전환까지 현재 산출물에서 재현된다.
