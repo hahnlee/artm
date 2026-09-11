@@ -15559,3 +15559,9 @@ or admission exception was added.
   기능별 실행(Nterp/compiled/JNI/GC/예외/필드/inline/class-init/type/loop/
   OSR)이 PASS했으며, 보호 페이지 negative phase의 SIGBUS는 감사가 요구하는
   실패 경계로 판정됐다.
+- Checkpoint 1237 (2026-09-11): Java `InputReceiverDispose`가 직접 native
+  dispatch 중 receiver를 해제할 수 있던 수명 경계를 strong registry lease와
+  active callback count로 고정했다. Astra가 확인한 stale keyboard harness
+  전제(중복 Calculator tap, Calendar 미개방 Spinner)도 Android 실제 창
+  계약에 맞게 보정했다. physical keyboard acceptance 전체가 단일 owner
+  focused-window 경로로 PASS하고 Calendar process exit도 0이다.

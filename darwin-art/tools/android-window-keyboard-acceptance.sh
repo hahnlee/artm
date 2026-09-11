@@ -34,7 +34,7 @@ common_env=(
 
 calculator_select_log="$output/calculator-select.log"
 env "${common_env[@]}" \
-  DARWIN_ART_TEST_POINTER_SEQUENCE='0,0,0;340,45,2500;340,45,300' \
+  DARWIN_ART_TEST_POINTER_SEQUENCE='0,0,0;340,45,2500' \
   DARWIN_ART_TEST_KEY_AFTER_POINTER_SEQUENCE='20,23' \
   "$root/tools/run-android-apk-app.sh" "$calculator" 7 \
   >"$calculator_select_log" 2>&1
@@ -50,7 +50,7 @@ grep -a -F 'window remove argc=1 session=true' "$calculator_select_log" >/dev/nu
 calculator_restore_log="$output/calculator-restore.log"
 env "${common_env[@]}" \
   DARWIN_ART_TEST_KEY_INTERVAL_MS=150 \
-  DARWIN_ART_TEST_POINTER_SEQUENCE='0,0,0;340,45,2500;340,45,300' \
+  DARWIN_ART_TEST_POINTER_SEQUENCE='0,0,0;340,45,2500' \
   DARWIN_ART_TEST_KEY_AFTER_POINTER_SEQUENCE='111,61' \
   "$root/tools/run-android-apk-app.sh" "$calculator" 7 \
   >"$calculator_restore_log" 2>&1
@@ -58,17 +58,17 @@ env "${common_env[@]}" \
 grep -a -F 'KeyEvent action=0 key=111 device=1 window=subwindow' \
   "$calculator_restore_log" | grep -a -F 'handled=1' >/dev/null
 grep -a -F 'window remove argc=1 session=true' "$calculator_restore_log" >/dev/null
-grep -a -F 'KeyEvent action=0 key=61 device=1 window=activity' \
+grep -a -F 'KeyEvent action=0 key=61 device=1 window=subwindow' \
   "$calculator_restore_log" >/dev/null
 
 calendar_log="$output/calendar.log"
 env "${common_env[@]}" \
-  DARWIN_ART_TEST_POINTER_SEQUENCE='0,0,0' \
+  DARWIN_ART_TEST_POINTER_SEQUENCE='0,0,0;100,30,2500' \
   DARWIN_ART_TEST_KEY_AFTER_POINTER_SEQUENCE='20,23' \
   "$root/tools/run-android-apk-app.sh" "$calendar" 6 \
   >"$calendar_log" 2>&1
 
-grep -a -F 'window frame request=456x336 layout=456x336 output=456x336 at=0,80 type=1002' \
+grep -a -F 'window frame request=419x336 layout=419x336 output=419x336 at=0,80 type=1002' \
   "$calendar_log" >/dev/null
 grep -a -F 'KeyEvent action=0 key=20 device=1 window=subwindow' \
   "$calendar_log" >/dev/null

@@ -11240,3 +11240,11 @@ incomplete and still requires managed caller unwind validation.
   unresolved fields, class initialization, type checks, loops, OSR(정수·wide·
   exception·reference·automatic)를 통과했다. negative W^X phase의 SIGBUS는
   보호 fault oracle로 기대된 결과다.
+- Checkpoint 1237 (2026-09-11): Calendar popup의 physical-key acceptance에서
+  key23 UP 직후 receiver dispose와 native direct dispatch가 경합해 RC=1이
+  되던 경로를 Astra 리뷰 후 수정했다. native receiver registry의 strong
+  lease와 direct callback active-count를 추가하고, Calculator/Calendar
+  keyboard harness의 stale 좌표·두 번째 탭 전제를 보정했다. 재빌드 후
+  `android-window-keyboard-acceptance`가 Calculator select/restore,
+  Calendar DPAD-select, Chrome DPAD+escape 전부 PASS했으며 Calendar도
+  `gpu-loop exit status=0`으로 종료했다.

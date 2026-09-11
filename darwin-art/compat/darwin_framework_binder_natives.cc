@@ -68,6 +68,22 @@ struct DarwinInputReceiver {
   std::atomic<uint32_t> active_callbacks{0};
 };
 
+// The Java WindowInputEventReceiver stores this native address as a jlong.
+// Keep an independent strong lease so a Java dispose performed during
+// dispatch cannot free the receiver before the native call returns.
+std::mutex g_input_receiver_registry_mutex;
+std::unordered_map<DarwinInputReceiver*,
+                   std::shared_ptr<DarwinInputReceiver>>
+    g_input_receiver_registry;
+
+std::shared_ptr<DarwinInputReceiver> FindInputReceiverLease(
+    DarwinInputReceiver* receiver) {
+  if (receiver == nullptr) return nullptr;
+  std::lock_guard<std::mutex> lock(g_input_receiver_registry_mutex);
+  auto it = g_input_receiver_registry.find(receiver);
+  return it == g_input_receiver_registry.end() ? nullptr : it->second;
+}
+
 void ClearParcel(JNIEnv* env, DarwinParcel* parcel) {
   if (parcel == nullptr) return;
   for (jobject binder : parcel->binders) env->DeleteGlobalRef(binder);
@@ -1503,6 +1519,8 @@ void InputReceiverDispose(JNIEnv* env, jclass, jlong pointer) {
   auto* receiver = reinterpret_cast<DarwinInputReceiver*>(
       static_cast<std::uintptr_t>(pointer));
   if (receiver == nullptr) return;
+  auto receiver_lease = FindInputReceiverLease(receiver);
+  if (receiver_lease == nullptr) return;
   std::shared_ptr<DarwinInputReceiver> keep_alive;
   receiver->dispose_requested.store(true, std::memory_order_release);
   receiver->disposed.store(true, std::memory_order_release);
@@ -1532,6 +1550,10 @@ void InputReceiverDispose(JNIEnv* env, jclass, jlong pointer) {
   }
   if (receiver->active_callbacks.load(std::memory_order_acquire) == 0) {
     CleanupReceiverRefs(env, receiver);
+  }
+  if (receiver->channel == nullptr) {
+    std::lock_guard<std::mutex> lock(g_input_receiver_registry_mutex);
+    g_input_receiver_registry.erase(receiver);
   }
   // A channel-owned shared_ptr (or the callback's strong snapshot) performs
   // the actual object destruction after any in-flight callback returns.
@@ -1683,6 +1705,10 @@ jlong InputReceiverInit(JNIEnv* env, jclass, jobject weak_receiver,
     return 0;
   }
   auto* receiver = receiver_shared.get();
+  {
+    std::lock_guard<std::mutex> lock(g_input_receiver_registry_mutex);
+    g_input_receiver_registry.emplace(receiver, receiver_shared);
+  }
   {
     std::lock_guard<std::mutex> lock(receiver->channel->packet_mutex);
     receiver->channel->consumer = receiver_shared;
@@ -3406,7 +3432,10 @@ bool DispatchFrameworkInputEvent(JNIEnv* env, jobject view_root, jobject event,
                             : env->GetLongField(java_receiver, pointer_field);
   auto* receiver = reinterpret_cast<DarwinInputReceiver*>(
       static_cast<std::uintptr_t>(pointer));
-  if (receiver == nullptr || receiver->channel == nullptr ||
+  auto receiver_lease = FindInputReceiverLease(receiver);
+  receiver = receiver_lease.get();
+  if (receiver == nullptr || receiver->disposed.load(std::memory_order_acquire) ||
+      receiver->channel == nullptr ||
       receiver->weak_receiver == nullptr || env->ExceptionCheck()) {
     env->ExceptionClear();
     env->DeleteLocalRef(receiver_class);
@@ -3414,6 +3443,7 @@ bool DispatchFrameworkInputEvent(JNIEnv* env, jobject view_root, jobject event,
     env->DeleteLocalRef(view_root_class);
     return false;
   }
+  receiver->active_callbacks.fetch_add(1, std::memory_order_acq_rel);
   jclass weak_class = env->GetObjectClass(receiver->weak_receiver);
   jmethodID weak_get =
       weak_class == nullptr
@@ -3495,6 +3525,11 @@ bool DispatchFrameworkInputEvent(JNIEnv* env, jobject view_root, jobject event,
   env->DeleteLocalRef(receiver_class);
   env->DeleteLocalRef(java_receiver);
   env->DeleteLocalRef(view_root_class);
+  const uint32_t previous =
+      receiver->active_callbacks.fetch_sub(1, std::memory_order_acq_rel);
+  if (previous == 1 && receiver->dispose_requested.load(std::memory_order_acquire)) {
+    CleanupReceiverRefs(env, receiver);
+  }
   return delivered;
 }
 
