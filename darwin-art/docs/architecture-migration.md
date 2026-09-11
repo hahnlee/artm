@@ -15324,3 +15324,7 @@ or admission exception was added.
   launcher script가 분리된 구조라 단순 LSUIElement 변경으로 해결되지 않는다.
   실제 host command를 bundle executable로 선택하는 opt-in 경로를 추가해야
   하며, 현재는 구조 조사 단계다.
+- Checkpoint 1185 (2026-09-11): packaged Manager가 실제 `darwin-art-host`
+  executable을 소유하는 signed Host.app을 생성한다. launcher override와
+  bundle metadata/codesign 검증은 PASS했으며, 실제 창 owner 및 물리 Cancel
+  전후 프레임 검증이 남아 있다.

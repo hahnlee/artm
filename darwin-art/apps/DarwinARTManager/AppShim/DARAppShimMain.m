@@ -70,6 +70,8 @@ int main(void) {
             [NSProcessInfo.processInfo.environment mutableCopy];
         environment[@"DARWIN_ART_PROFILE"] = profile;
         environment[@"DARWIN_ART_PACKAGED_RUNTIME"] = @"1";
+        environment[@"DARWIN_ART_HOST_BUNDLE"] =
+            [runtime URLByAppendingPathComponent:@"DarwinARTHost.app" isDirectory:YES].path;
         environment[@"DARWIN_ART_ANGLE_DIRECTORY"] =
             [runtime URLByAppendingPathComponent:@"_build/angle-source/out/DarwinArtRelease"].path;
         environment[@"DARWIN_ART_MOLTENVK_DYLIB"] =

@@ -10966,3 +10966,7 @@ incomplete and still requires managed caller unwind validation.
   `DARAppShimMain`은 profile daemonize를 호출하고, 실제 host command는
   `run-android-apk-app.sh` 내부에서 구성된다. 따라서 bundle owner를 바꾸려면
   shim 단독 수정이 아니라 packaged runtime host 경로 override가 필요하다.
+- Checkpoint 1185 (2026-09-11): Manager build에 실제 `DarwinARTHost.app`을
+  추가하고 launcher가 `DARWIN_ART_HOST_BUNDLE` override를 사용하도록 했다.
+  Host.app의 CFBundleExecutable/LSUIElement/signature 검증이 PASS했다.
+  실제 Blue Archive CUA 입력은 다음 단계에서 실행한다.

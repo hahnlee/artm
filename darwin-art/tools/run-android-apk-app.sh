@@ -312,6 +312,9 @@ if [[ -z "$installed_record" && -n "$profile_mount" ]]; then
     else
       host="$root/target/debug/darwin-art-host"
     fi
+    if [[ -n "${DARWIN_ART_HOST_BUNDLE:-}" ]]; then
+      host="$DARWIN_ART_HOST_BUNDLE/Contents/MacOS/darwin-art-host"
+    fi
     [[ -x "$host" ]] || {
       echo "darwin-art host is missing; run cargo xtask build before installing" >&2
       exit 69
@@ -339,6 +342,9 @@ if [[ "${DARWIN_ART_PACKAGED_RUNTIME:-0}" == "1" ]]; then
   host="$root/target/release/darwin-art-host"
 else
   host="$root/target/debug/darwin-art-host"
+fi
+if [[ -n "${DARWIN_ART_HOST_BUNDLE:-}" ]]; then
+  host="$DARWIN_ART_HOST_BUNDLE/Contents/MacOS/darwin-art-host"
 fi
 [[ -x "$host" ]] || {
   echo "darwin-art host is missing: $host" >&2

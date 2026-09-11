@@ -35,8 +35,12 @@ cargo build -q --release \
 cargo build -q --release \
   --manifest-path "$project_root/tools/android-apk-native-extract/Cargo.toml"
 "$project_root/tools/materialize-moltenvk.sh" >/dev/null
-
 runtime="$contents/Resources/DarwinART"
+host_app="$runtime/DarwinARTHost.app"
+mkdir -p "$host_app/Contents/MacOS"
+cp "$source_root/HostInfo.plist" "$host_app/Contents/Info.plist"
+cp "$project_root/target/release/darwin-art-host" "$host_app/Contents/MacOS/darwin-art-host"
+chmod +x "$host_app/Contents/MacOS/darwin-art-host"
 copy_file() {
   local source="$1"
   local destination="$runtime/$2"
@@ -133,6 +137,8 @@ for helper in "$runtime/target/release/"*; do
   [[ "$helper" == "$runtime/target/release/darwin-art-host" ]] && continue
   codesign --force --sign - --timestamp=none "$helper" >/dev/null
 done
+codesign --force --sign - --options runtime --timestamp=none \
+  --entitlements "$project_root/config/darwin-art-host.entitlements" "$host_app" >/dev/null
 codesign --force --sign - --timestamp=none "$shim_launcher" >/dev/null
 codesign --force --sign - --timestamp=none "$app" >/dev/null
 plutil -lint "$contents/Info.plist" >/dev/null
