@@ -15294,3 +15294,7 @@ or admission exception was added.
 - Checkpoint 1176 (2026-09-11): 일반 mapping 시도는 주소 계약을 보장하지
   않아 exact 경로로 복원했다. JIT allocator는 여전히 `KERN_INVALID_ADDRESS`
   상태이며, 명시적 non-overwriting VM reservation 구현이 남아 있다.
+- Checkpoint 1177 (2026-09-11): Darwin MAP_JIT executable에는 reservation을
+  전달하지 않고, metadata에만 PROT_NONE reservation을 만든 뒤
+  `MapAnonymous(..., &reservation)`으로 소유권을 넘기는 방향을 Astra 리뷰로
+  확정했다. 구현과 audit 재검증이 남아 있다.

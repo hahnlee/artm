@@ -10932,3 +10932,7 @@ incomplete and still requires managed caller unwind validation.
   보장하지 않아 제거하고 exact mapping 경로로 복원했다. JIT audit의
   `KERN_INVALID_ADDRESS`는 해결되지 않았으며, 다음은 non-overwriting
   reservation을 실제 주소로 확보한 뒤 소유권을 넘기는 구현이다.
+- Checkpoint 1177 (2026-09-11): Astra가 `MapFileAtAddress` reservation이
+  Darwin에서 MAP_FIXED를 유발해 MAP_JIT 계약을 깨뜨릴 수 있음을 확인했다.
+  metadata만 별도 PROT_NONE reservation으로 확보한 뒤 소유권을 이전하는
+  설계가 확정됐으며, 실제 코드 적용 전 상태다.
