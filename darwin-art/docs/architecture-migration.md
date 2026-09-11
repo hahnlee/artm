@@ -15120,3 +15120,9 @@ or admission exception was added.
 - Checkpoint 1142 (2026-09-11): fresh corpus가 약 28분째 진행 중이며 current
   identity 행은 1,057개까지 갱신됐다. 실패 6건 모두 동일 MAP_JIT 범위 오류로
   확인됐고, 남은 구 identity 행은 종료 후 별도 ledger에서 확인한다.
+
+- Checkpoint 1143 (2026-09-11): controlled fresh corpus가 종료 코드 1로
+  완료됐다. 결과는 동일 runtime identity `26ba01e4…` 1,076개로 수렴했으며
+  1,070 passed / 6 failed이다. 여섯 실패는 모두 interpreter PASS 후
+  MAP_JIT data/code uint32 거리 초과로 optimized compilation이 status=123이 된
+  allocator 경계이며, shutdown은 정상이다.
