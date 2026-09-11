@@ -42,7 +42,7 @@ blockers. In particular, successful Unity initialization is not game UI proof.
 | Root literals | Native64 root-slot addresses and compressed payloads pass class/string/MethodType-style use under CC | Exhaustive metadata/native literal inventory |
 | Native unwind metadata | September 6 deterministic-CFI checkpoint records untouched AOSP 137-cfi optimized-JIT local/context/thread/remote success and integrated Darwin unwindstack providers | Preserve this regression under current build identity; do not generalize its coverage to arbitrary native binaries |
 | Execution policy | Production JIT is default-on since September 6; Darwin bytecode/method-shape admission gates are removed. September 11 focused audit covers compiled GC, VarHandle, invokes, OSR/deopt and shutdown | Extend method-level execution evidence beyond the existing focused matrix; broader corpus interpreter/jit summaries are not an independent optimized lane |
-| Original apps | September 11 Calculator 2+3=5, DeskClock Timer and Chromium external HTTPS content have real execution/rendering evidence. Blue Archive's restored original APKs were retested for 30s on the rebuilt runtime: nativeRender still stalls in GC acknowledgment and four scanouts are black | Repeat acceptance on each rebuilt identity. Blue Archive first nonblack game UI plus meaningful input remains open despite InputChannel DOWN/UP delivery |
+| Original apps | September 11 Calculator 2+3=5, DeskClock Timer and Chromium external HTTPS content have real execution/rendering evidence. Thread-local sigchain fix eb90d025 lets unchanged Blue Archive render its actual Notice UI; a synthetic Cancel tap dismisses it and transitions to the game's resetting-data screen, verified in before/after scanouts | Preserve acceptance on each rebuilt identity. Physical-button-click automation, Confirm/download, login and gameplay remain unverified; synthetic input is not physical input |
 
 ## Validation rules
 
@@ -58,14 +58,23 @@ blockers. In particular, successful Unity initialization is not game UI proof.
 
 ## Next implementation boundary
 
-Close Blue Archive first-frame/interaction acceptance using unchanged original
-APK inputs, now restored and retested on the rebuilt identity. Its black first frame
-is a native IL2CPP GC acknowledgment blocker, not evidence of a JIT opcode gap.
-The actual guest signal trampoline/semaphore/mask regression now passes 100
-suspend/resume cycles (20 repeated runs); this does not prove the game stall is
-fixed. The provider's diagnostic getenv lookup was moved off the signal path.
-Rebuild through the official incremental graphics closure before counting any
-runtime result for that change, and retain APK/runtime identities with evidence.
+Blue Archive's native GC acknowledgment/first-frame blocker is fixed by keeping
+sigchain masks thread-local (`eb90d025`): Darwin's process-wide sigprocmask was
+overwriting other threads' masks. The independent fault probe now preserves the
+uninvolved main thread's mask while a real condition-variable worker completes
+100 GC cycles and 100 targeted kernel SIGBUS deliveries. The rebuilt runtime
+returns from nativeRender and renders actual game UI.
+
+Meaningful **synthetic** input is now demonstrated: Cancel at Android (514,504)
+receives DOWN/UP consumed=1 with an 81,174us hold; Notice disappears and the game
+shows "Resetting the game data...". The run exits 0 with 1,230 normal nativeRender
+returns. Evidence: `/tmp/bluearchive-cancel-input.log`, scanouts
+`_build/bluearchive-acceptance-20260911/cancel-input-000006.png` (before) and
+`cancel-input-000008.png` (after), both visually reviewed. The read-only verifier
+`tools/verify-bluearchive-cancel-acceptance.sh` checks event ordering, pre-click
+Notice OCR and a nonblank post-click frame without Notice. Physical click
+automation remains blocked by the UI tool's inability to select the unbundled
+host. Confirm was not pressed; download, login and gameplay are not claimed.
 
 Continue method-level compiled execution/OSR/deopt/GC accounting separately from
 the broader corpus's interpreter/jit summaries. Production JIT enablement and
