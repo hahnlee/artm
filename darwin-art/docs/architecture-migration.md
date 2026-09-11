@@ -15369,3 +15369,8 @@ or admission exception was added.
   확인되지 않았다. 두 번째 좌표가 SuggestionsTileView에 도달했으며,
   JIT 상태와 기본 profile의 타 앱 Surface 혼입을 분리한 재현 harness가
   다음 작업이다. 현재 Chromium acceptance는 미완료로 유지한다.
+- Checkpoint 1196 (2026-09-11): Chromium을 임시 profile root에서 실행하는
+  격리 실험은 새 profile의 system-server/Binder 초기화와 support DEX 로딩이
+  성립하지 않아 실패했다. 이 결과는 verifier 완화 근거가 아니며, 기존
+  default profile의 타 앱 Surface를 PID/layer 기준으로 제외하는 설계가
+  필요하다는 제약을 기록한다.

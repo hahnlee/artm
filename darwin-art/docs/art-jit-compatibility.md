@@ -11018,3 +11018,8 @@ incomplete and still requires managed caller unwind validation.
   SuggestionsTileView를 선택했다. Astra 분석상 이전 interpreter-fallback
   PASS와의 JIT A/B 및 기본 profile의 Blue Archive 프레임 오염 분리가
   필요하며, 이번 결과를 acceptance PASS로 승격하지 않았다.
+- Checkpoint 1196 (2026-09-11): Astra 권고에 따라 임시 profile root로
+  Chromium을 격리한 A/B를 시도했으나, 새 profile의 system-server가 Binder/
+  SurfaceFlinger를 게시하지 못해 support DEX class load status=5로 종료됐다.
+  따라서 이 방식은 현재 acceptance 경로로 채택하지 않고, 기본 profile 오염
+  제거와 JIT A/B를 별도 harness로 설계해야 한다.
