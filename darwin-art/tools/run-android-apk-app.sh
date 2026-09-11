@@ -453,9 +453,39 @@ else
 fi
 printf '%s\n' "$$" >"$system_root/.darwin-art-owner-pid"
 icon_file=""
+wait_for_app_processes() {
+  [[ -n "$profile_mount" && -x "$profile_ctl" && -n "$package" ]] || return 0
+  local deadline=0
+  local pids=""
+  local signal=""
+  # The host normally reaps service children before returning. This second
+  # supervisor boundary covers fatal/early exits where Rust Drop cannot run:
+  # profile leases are authoritative, so do not remove the shared root while
+  # a child still belongs to this package.
+  for signal in none TERM KILL; do
+    deadline=$((SECONDS + 5))
+    while (( SECONDS < deadline )); do
+      pids="$("$profile_ctl" ps 2>/dev/null | awk -v package="$package" '$2 == package { print $1 }')"
+      [[ -z "$pids" ]] && return 0
+      if [[ "$signal" != none ]]; then
+        # Only signal rows owned by this APK package. android.system and all
+        # other profile residents remain outside this launch cleanup scope.
+        kill -"$signal" $pids 2>/dev/null || true
+      fi
+      sleep 0.05
+    done
+  done
+  # Leave the root for the profile daemon's stale-root janitor if a child
+  # ignored both signals; never delete it under a live process lease.
+  return 1
+}
 cleanup_system_root() {
   chmod -R u+w "$system_root" 2>/dev/null || true
-  rm -rf "$system_root"
+  if wait_for_app_processes; then
+    rm -rf "$system_root"
+  else
+    echo "darwin-art: retaining system root while app process leases remain: $system_root" >&2
+  fi
   [[ -z "$icon_file" ]] || rm -f "$icon_file"
 }
 trap cleanup_system_root EXIT

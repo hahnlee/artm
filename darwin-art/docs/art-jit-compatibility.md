@@ -11200,3 +11200,17 @@ incomplete and still requires managed caller unwind validation.
   재실행해 동일 SHA-256 `ef122706…9e060fcb`, `undefined=0 exports=15`,
   두 번째 `ninja: no work to do.`를 확인했다. native graph audit도
   `headless-artifact=graph-owned`로 PASS했다.
+- Checkpoint 1231 (2026-09-11): graph 변경 후 `audit-art-jit.sh`가
+  compiled/string-class-root/GC/native-exit 및 shutdown 전 구간 PASS했다.
+  Window acceptance는 default profile에서 Chrome service-child의 후행
+  storage race(status=27)를 한 번 재현했으나, Astra 권고대로 새
+  `DARWIN_ART_APP_DATA_ROOT`로 Chrome만 재실행해 main/child 초기화와 종료가
+  정상임을 확인했다. 고정 popup geometry를 요구하는 기존 acceptance에는
+  격리 root를 강제로 넣지 않고 변경을 되돌렸으며, lifecycle race는 별도
+  supervisor 과제로 남긴다.
+- Checkpoint 1232 (2026-09-11): Astra가 분류한 service-child/app-root
+  lifecycle race를 launcher supervisor에서 보강했다. EXIT cleanup이
+  profile daemon의 해당 APK lease를 확인하고 최대 5초 grace 후 TERM/KILL한
+  뒤에만 system root를 삭제하며, `android.system`은 제외한다. 새 app-data
+  Chrome 실행에서 child PID가 정상 회수되고 `profile ps`에 Chrome lease가
+  없으며 root가 제거되는 것을 확인했다.

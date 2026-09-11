@@ -15527,3 +15527,15 @@ or admission exception was added.
   추가해 archive와 dylib 모두 graph ownership 아래 두었다. identity
   harness의 clean→materialize→warm 순서와 native graph 구조 검증이
   `headless-artifact=graph-owned`, 동일 hash, warm no-op으로 PASS했다.
+- Checkpoint 1231 (2026-09-11): JIT audit는 현재 graph에서 다시 PASS했다.
+  Chrome window acceptance의 status=27은 framework resource 결함이 아니라
+  main 종료와 늦은 service-child의 shared app-root 수명 경계로 분류됐다.
+  격리 app-data 실행에서는 같은 경로가 정상 종료했으며, 기존 geometry
+  acceptance를 깨는 임시 root 변경은 제거했다. 다음 lifecycle 작업은
+  fatal/early-exit에서도 child 전체 회수 후 root를 정리하는 supervisor
+  계약을 증명해야 한다.
+- Checkpoint 1232 (2026-09-11): launcher EXIT 경계에 profile-lease 기반
+  child supervisor를 추가했다. 앱 host의 fatal/early exit에서도 해당
+  package service-child가 모두 종료·회수된 뒤 shared system root를 정리하며,
+  5초 후에도 남으면 해당 PID에만 TERM/KILL하고 root를 보존한다. 격리 Chrome
+  lifecycle 실행과 profile daemon audit가 PASS했다.
