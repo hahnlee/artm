@@ -10747,3 +10747,7 @@ incomplete and still requires managed caller unwind validation.
 - Checkpoint 1141 (2026-09-11): fresh corpus가 약 26분째 실행 중이며 current
   identity 행이 1,010개까지 갱신됐다. 실패 5건은 동일 allocator 범위 오류로
   남아 있고, 나머지 구 identity 행은 세션 완료 후에만 재검증한다.
+
+- Checkpoint 1142 (2026-09-11): fresh corpus가 약 28분째 진행 중이며 current
+  identity 행은 1,057개까지 갱신됐다. 실패 6건 모두 동일 MAP_JIT 범위 오류로
+  확인됐고, 남은 구 identity 행은 종료 후 별도 ledger에서 확인한다.
