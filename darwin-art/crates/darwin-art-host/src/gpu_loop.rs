@@ -342,7 +342,17 @@ pub(super) fn run(
             if loop_error.is_some() {
                 break;
             }
+            let tap_started = Instant::now();
             for action in [0_u32, 1_u32] {
+                if loop_error.is_some() {
+                    break;
+                }
+                if action == 1 && debug_latency {
+                    eprintln!(
+                        "DARWIN_ART synthetic tap x={x} y={y} hold_requested_ms={test_hold_ms} down_to_up_us={}",
+                        tap_started.elapsed().as_micros()
+                    );
+                }
                 let event = synthetic_event(action, x, y);
                 let status = runtime
                     .graphics()
@@ -370,9 +380,14 @@ pub(super) fn run(
                 // does not promote it to a click when both timestamps fall
                 // in the same millisecond. Real NSEvents naturally have this
                 // spacing; synthetic acceptance taps must model it too.
-                if action == 0 && test_hold_ms > 0 {
-                    let pump_status =
-                        owned_surface_wait_slice(runtime, test_hold_ms as f64 / 1000.0);
+                // Native Looper waits can wake early for queued work. A
+                // single wait slice (also capped at 16 ms) cannot guarantee
+                // the requested DOWN/UP spacing. Measure actual elapsed time
+                // and keep servicing Android work until the tap deadline.
+                while action == 0 && tap_started.elapsed() < Duration::from_millis(test_hold_ms) {
+                    let remaining =
+                        Duration::from_millis(test_hold_ms).saturating_sub(tap_started.elapsed());
+                    let pump_status = owned_surface_wait_slice(runtime, remaining.as_secs_f64());
                     if pump_status != 0 {
                         loop_error = Some(HostError::SurfaceFailed {
                             operation: "gpu_test_pointer_sequence_hold",
@@ -582,7 +597,17 @@ pub(super) fn run(
             if loop_error.is_some() {
                 break;
             }
+            let tap_started = Instant::now();
             for action in [0_u32, 1_u32] {
+                if loop_error.is_some() {
+                    break;
+                }
+                if action == 1 && debug_latency {
+                    eprintln!(
+                        "DARWIN_ART synthetic tap x={x} y={y} hold_requested_ms={test_hold_ms} down_to_up_us={}",
+                        tap_started.elapsed().as_micros()
+                    );
+                }
                 let event = synthetic_event(action, x, y);
                 let status = runtime
                     .graphics()
@@ -601,9 +626,10 @@ pub(super) fn run(
                     loop_error = Some(error);
                     break;
                 }
-                if action == 0 && test_hold_ms > 0 {
-                    let pump_status =
-                        owned_surface_wait_slice(runtime, test_hold_ms as f64 / 1000.0);
+                while action == 0 && tap_started.elapsed() < Duration::from_millis(test_hold_ms) {
+                    let remaining =
+                        Duration::from_millis(test_hold_ms).saturating_sub(tap_started.elapsed());
+                    let pump_status = owned_surface_wait_slice(runtime, remaining.as_secs_f64());
                     if pump_status != 0 {
                         loop_error = Some(HostError::SurfaceFailed {
                             operation: "gpu_test_post_drag_pointer_sequence_hold",

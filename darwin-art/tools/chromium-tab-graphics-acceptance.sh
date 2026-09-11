@@ -59,6 +59,26 @@ env \
   "$root/tools/run-android-apk-app.sh" "$apk" 70 >"$app_log" 2>&1
 tail -n +"$start_line" "$central_log" >"$output/surfaceflinger.log"
 
+# Looper fd readiness can end a native wait before its timeout. Verify the
+# host actually preserved the configured hold interval for both sequence taps;
+# handled input alone does not establish that Chromium received a real click.
+awk '
+  /DARWIN_ART synthetic tap / {
+    requested = -1; elapsed = -1
+    for (i = 1; i <= NF; i++) {
+      split($i, field, "=")
+      if (field[1] == "hold_requested_ms") requested = field[2] + 0
+      if (field[1] == "down_to_up_us") elapsed = field[2] + 0
+    }
+    count++
+    if (requested != 18 || elapsed < requested * 1000) invalid = 1
+  }
+  END { exit (count != 2 || invalid) }
+' "$app_log" || {
+  echo 'Chrome synthetic taps did not preserve the requested hold interval' >&2
+  exit 1
+}
+
 grep -a -F 'org.chromium.chrome.browser.ui.android.bars_common.TabSwitcherButtonView' \
   "$app_log" >/dev/null || {
   echo 'Chrome did not hit its real tab-switcher button' >&2

@@ -9541,6 +9541,13 @@ incomplete and still requires managed caller unwind validation.
   3초 실행해 309개 Unity JNI 등록과 추가 12개 등록까지 fatal 없이
   통과했다.
 
+- Checkpoint 1070 (2026-09-11): Chromium tab-graphics acceptance를 재실행해
+  `RC=0`, `target-states=10`으로 통과했다. 실제 합성 탭 hold는
+  20.292ms/78.280ms였고 host monotonic deadline 보장을 추가했다.
+  `https://example.com` VIEW 실행도 `RC=0`으로 창과 URL 표시를 확인했지만,
+  본문 DOM 렌더링 완료의 독립 증거는 없어 full HTTPS E2E로 승격하지 않는다.
+  HTTPS/WebGL acceptance는 macOS mkcert trust 설치 후 재실행해야 한다.
+
 - Checkpoint 938 (2026-09-10): 변경 없는 Blue Archive 1.93.454564를
   최신 runtime으로 15초 실행했다. `libmain.so`·`libil2cpp.so` graph
   로드, Unity RegisterNatives 309건 및 후속 등록 세트, Unity 초기화와

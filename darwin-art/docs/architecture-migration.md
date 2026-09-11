@@ -14056,6 +14056,13 @@ or admission exception was added.
   thread stop, ELF unload, detach, `destroy-vm complete` 순서를 모두
   통과했다.
 
+- Checkpoint 1070 (2026-09-11): Chromium tab-graphics 경로를 새 app-data로
+  검증해 real `TabSwitcherButtonView`/`TabGridView`, child SurfaceControl과
+  GPU 상태를 확인했다(`RC=0`, `target-states=10`). 합성 MotionEvent의
+  DOWN→UP 간격은 monotonic deadline으로 보장되며 실제 20.292ms/78.280ms를
+  기록했다. `https://example.com`은 VIEW 인텐트로 창과 URL까지 표시됐지만
+  본문 로드의 독립 증거는 없어 HTTPS E2E는 trust 설치 후 재검증한다.
+
 - Checkpoint 1069 (2026-09-11): 최신 JNI/HWUI 변경 후 AOSP Calculator와
   DeskClock graphics acceptance가 `RC=0`으로 통과했다. Calculator `2+3=5`,
   DeskClock Timer, HWUI+SurfaceFlinger+Metal 공통 경로를 재확인했다.
