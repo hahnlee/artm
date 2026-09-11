@@ -11172,3 +11172,7 @@ incomplete and still requires managed caller unwind validation.
 - Checkpoint 1225 (2026-09-11): 동일 borrowed envelope의 중복 등록을
   `EEXIST`로 거부하는 회귀 테스트를 추가했다. 등록→중복→unregister
   순서를 포함한 facade 단위 테스트 5개와 format/diff 검사가 모두 PASS했다.
+- Checkpoint 1226 (2026-09-11): `tools/audit-android-jni-trampoline.sh`를
+  실행해 JNI scalar/reference 반환, GP/FP 독립, Android 8-byte stack,
+  shorty/cache identity, W^X rw→rx, multipage 309건 및 aggregate/V 인자
+  거부 경계를 모두 PASS했다.

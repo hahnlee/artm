@@ -15505,3 +15505,6 @@ or admission exception was added.
 - Checkpoint 1225 (2026-09-11): 동일 borrowed ELF envelope 중복 등록을
   `EEXIST`로 거부하는 회귀 테스트를 추가했다. facade 5개 테스트와
   format/diff 검사가 PASS해 ownership 계약의 fail-closed 경계를 고정했다.
+- Checkpoint 1226 (2026-09-11): JNI trampoline 전용 ABI 감사를 재실행했다.
+  scalar/ref 반환, GP/FP·stack 규약, cache identity, W^X 전환,
+  multipage 및 aggregate/V 거부가 모두 PASS해 native 호출 경계를 고정했다.
