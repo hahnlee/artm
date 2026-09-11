@@ -14488,3 +14488,8 @@ or admission exception was added.
   두 번 연속 실행해 모두 `RC=0`, GPU loop `frames_presented=7`, terminate cleanup
   성공을 확인했다. service child 종료 경합은 재현되지 않았으며, 안정화된 반복
   경로의 증거로 기록한다.
+
+- Checkpoint 1025 (2026-09-11): 공식 runner chrome-1/chrome-2 로그를 대조해
+  두 회차 모두 새 탭 메뉴 이벤트와 window remove를 확인하고 crash marker가
+  없음을 검증했다. 두 로그의 모든 service child PID는 현재 생존하지 않는다.
+  따라서 종료 fence·직렬화 회수의 반복 acceptance 조건은 충족했다.

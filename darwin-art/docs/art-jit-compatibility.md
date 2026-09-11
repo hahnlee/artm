@@ -10065,3 +10065,9 @@ incomplete and still requires managed caller unwind validation.
   frames_presented=7`, terminate service cleanup 성공을 기록했고 Binder/Java
   fatal은 없었다. fence와 release 직렬화가 적용된 반복 경로의 정상 증거로
   기록한다.
+
+- Checkpoint 1025 (2026-09-11): 공식 lifecycle runner의 두 산출 로그를 직접
+  검증했다. 각 회차에서 `new_tab_menu_id=1`, `window remove=1`, JNI detach/
+  fatal crash marker=0이며 로그에 등장한 모든 service child PID가 종료됐다.
+  셸 세션의 최종 PASS 문자열은 수집되지 않았지만 acceptance 조건 자체는 모두
+  충족되어 child-reaping 반복 증거를 확보했다.
