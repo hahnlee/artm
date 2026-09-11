@@ -15207,3 +15207,8 @@ or admission exception was added.
 - Checkpoint 1160 (2026-09-11): fresh ledger가 1,007/1,076개까지 진행되어
   1,001 passed/6 failed이며 identity `eb468bf1…` 단일성을 유지한다. 실행은
   정상 진행 중이고, 마지막 항목 완료 후 순차 재검증을 시작한다.
+
+- Checkpoint 1161 (2026-09-11): fresh ledger 1,076개 전체가 동일 identity
+  `eb468bf197a5…`로 `passed` 되었다. 병렬 실행에서 일시 실패했던 6개는
+  runner의 잘못된 resume skip 동작을 수정한 뒤 `--resume --parallel 1`로
+  실제 재실행했고 모두 PASS했다. runner 단위 테스트 9개도 통과했다.

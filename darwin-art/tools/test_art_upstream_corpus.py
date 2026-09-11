@@ -89,7 +89,8 @@ class CorpusRunnerTest(unittest.TestCase):
             ]),
             1,
         )
-        self.assertEqual((self.root / "count").read_text(), "2")
+        # Resume must retry the failed test while retaining the passed row.
+        self.assertEqual((self.root / "count").read_text(), "3")
         (self.archive / "001-first/input.txt").write_text("changed", encoding="utf-8")
         self.assertEqual(
             corpus.main([
@@ -98,7 +99,8 @@ class CorpusRunnerTest(unittest.TestCase):
             ]),
             1,
         )
-        self.assertEqual((self.root / "count").read_text(), "3")
+        # The changed first test and the still-failing second test both run.
+        self.assertEqual((self.root / "count").read_text(), "5")
 
     def test_fail_fast_does_not_start_unqueued_inputs(self) -> None:
         (self.root / "count").unlink(missing_ok=True)
@@ -152,12 +154,13 @@ class CorpusRunnerTest(unittest.TestCase):
         self.assertEqual(corpus.main(args), 1)
         self.assertEqual((self.root / "count").read_text(), "4")
         self.assertEqual(corpus.main(args), 1)
-        self.assertEqual((self.root / "count").read_text(), "4")
+        # The failed row is retried even though its inputs are unchanged.
+        self.assertEqual((self.root / "count").read_text(), "5")
         component = self.root / "_build/android16-boot-image-darwin/boot-framework-compat.oat"
         component.parent.mkdir(parents=True)
         component.write_bytes(b"new boot component")
         self.assertEqual(corpus.main(args), 1)
-        self.assertEqual((self.root / "count").read_text(), "6")
+        self.assertEqual((self.root / "count").read_text(), "7")
 
     def test_shard_selection_is_index_based(self) -> None:
         self.assertEqual(

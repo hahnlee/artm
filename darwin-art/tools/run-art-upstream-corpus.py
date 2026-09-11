@@ -397,7 +397,10 @@ def main(argv: Iterable[str] | None = None) -> int:
                 and previous.input_hash == current_hash
                 and previous.runner_hash == runner_digest
                 and previous.runtime_identity == runtime_digest
-                and previous.status in TERMINAL_STATUSES):
+                # A failed run is deliberately retried.  ``--resume`` is a
+                # continuation mechanism for proven results, not a way to
+                # freeze transient allocator/runtime failures in the ledger.
+                and previous.status == "passed"):
             print(f"{test}\tresumed\t{previous.status}")
             continue
         work.append(test)
