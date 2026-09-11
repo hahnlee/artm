@@ -14502,3 +14502,8 @@ or admission exception was added.
 - Checkpoint 1027 (2026-09-11): AOSP Calendar 변경 없는 APK를 실제 실행해
   `RC=0`, Day/Week/Month 텍스트 전환과 window remove를 검증했다. 최신 debug
   로그는 `/tmp/darwin-art-calendar-debug.h6swmU`에 보존하며 fatal/uncaught는 없다.
+
+- Checkpoint 1028 (2026-09-11): Blue Archive 변경 없는 APK를 실행해 window/GPU
+  loop 진입은 확인했으나 `libmain.so` UnsatisfiedLinkError와 JobScheduler NPE,
+  AndroidKeyStore 미지원 로그가 발생했다. `RC=0`만으로 acceptance를 닫지 않고,
+  APK native payload 및 시스템 서비스 계약을 Astra와 분리 진단한다.

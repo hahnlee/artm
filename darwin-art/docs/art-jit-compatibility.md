@@ -10081,3 +10081,10 @@ incomplete and still requires managed caller unwind validation.
   `RC=0`과 Day/Week/Month 전환 텍스트, window remove를 확인했다. 메뉴 acceptance
   기존 로그와 최신 debug 런 모두 crash marker가 없으며, 최신 산출물은
   `/tmp/darwin-art-calendar-debug.h6swmU`다.
+
+- Checkpoint 1028 (2026-09-11): 변경 없는 Blue Archive APK(version 454564,
+  sha256=25479ffb...)를 실행했다. 프로세스는 `RC=0`으로 window/GPU loop까지
+  도달했지만 metadata가 `native=0`이고 앱에서 `UnsatisfiedLinkError(libmain.so)`,
+  JobScheduler NPE, AndroidKeyStore 미지원이 발생했다. 따라서 이를 APK
+  acceptance 성공으로 판정하지 않고 native payload/시스템 서비스 호환성 과제로
+  Astra 진단을 요청했다.
