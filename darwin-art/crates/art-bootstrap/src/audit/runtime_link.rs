@@ -6,6 +6,11 @@ use super::runtime_link_checks::validate_runtime_link;
 use super::*;
 
 pub(crate) fn audit_runtime_link(root: &Path) -> Result<()> {
+    // This audit is a supported direct entry point.  Refresh the headless
+    // bootstrap producer before force-loading its archive so the link checks
+    // can never validate a stale object set (notably the framework shutdown
+    // owner) left by an earlier graph invocation.
+    build_runtime_bootstrap(root)?;
     // Runtime::Create can compile JNI stubs through the ART compiler archive.
     // Build that producer here, too: the headless audit is a supported direct
     // entry point (and is used by `all`), so relying on a prior explicit JIT

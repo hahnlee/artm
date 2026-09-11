@@ -11187,3 +11187,10 @@ incomplete and still requires managed caller unwind validation.
   `undefined=0 exports=15`로 PASS했고, 새
   `tools/audit-headless-artifact-identity.sh`가 동일 audit 두 번의
   SHA-256 `c74d5709…f4ce7d` 일치를 확인했다.
+- Checkpoint 1229 (2026-09-11): Astra 지적대로 `audit-runtime-link`가
+  headless bootstrap producer를 먼저 공식 graph 경로로 재빌드하도록 고쳤다.
+  stale archive가 아닌 최신 `darwin_framework_graphics_runtime.cc.o`에서
+  `darwin_art::ShutdownFrameworkAsyncWorkers()` export를 확인했고,
+  undefined 심볼 허용치 정책을 제거해 모든 link failure를 fail-closed로
+  변경했다. 재실행 결과 `undefined=0 exports=15`, artifact identity
+  SHA-256 `ef122706…9e060fcb`가 PASS했다.

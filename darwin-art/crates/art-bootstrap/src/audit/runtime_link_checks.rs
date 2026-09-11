@@ -6,9 +6,8 @@ use std::process::{Command, Output};
 use crate::Result;
 use crate::support::command_output;
 
-const MAX_EXPECTED_UNDEFINED: usize = 365;
-
-/// Validate the completed headless runtime link without rebuilding any input.
+/// Validate the completed headless runtime link after its producer is refreshed
+/// by the audit entry point.
 ///
 /// Keeping symbol policy in its own module means changing an acceptance list
 /// does not change the link-command orchestration or its native cache inputs.
@@ -153,16 +152,9 @@ pub(crate) fn validate_runtime_link(
         )
         .into());
     }
-    if undefined.len() > MAX_EXPECTED_UNDEFINED {
-        return Err(format!(
-            "Runtime link closure regressed: undefined={} maximum={MAX_EXPECTED_UNDEFINED}",
-            undefined.len()
-        )
-        .into());
-    }
-    println!(
-        "audit-runtime-link: closure incomplete undefined={} quick=0 jni=0 context=0",
+    Err(format!(
+        "Runtime link closure incomplete: undefined={} quick=0 jni=0 context=0",
         undefined.len()
-    );
-    Ok(())
+    )
+    .into())
 }

@@ -15516,3 +15516,9 @@ or admission exception was added.
   shutdown 호출을 graphics 조건부로 분리해 C ABI undefined symbol을
   제거했다. runtime-link `undefined=0 exports=15`와 동일 audit 두 번의
   headless dylib hash 일치가 PASS해 실제 byte identity 스크립트를 확보했다.
+- Checkpoint 1229 (2026-09-11): headless runtime-link audit가 stale
+  bootstrap archive를 force-load하지 않도록 canonical native graph producer를
+  audit 시작 시 갱신하게 했다. shutdown owner export가 archive에 존재함을
+  `nm`으로 확인하고, historical undefined 허용 상한을 삭제해 링크 실패를
+  항상 오류로 반환한다. 두 번의 identity audit 결과 hash
+  `ef122706…9e060fcb`가 일치했다.
