@@ -10533,3 +10533,8 @@ incomplete and still requires managed caller unwind validation.
   fresh 실행이 `passed`로 전환됐다. 이후 전체 1,076개 corpus의 legacy 결과를
   현재 identity로 갱신하는 병렬 실행을 시작했으며, 이 checkpoint 시점에 196개가
   새 identity로 기록됐다.
+
+- Checkpoint 1097 (2026-09-11): 전체 corpus current-identity 재실행을 계속
+  관찰했다. 실행 프로세스는 살아 있으며 1,076개 결과 중 236개가 새 runtime
+  identity로 갱신된 시점까지 모두 `passed`였다. 나머지는 아직 실행 중이므로
+  전체 current-identity acceptance 완료로 판정하지 않는다.
