@@ -10974,3 +10974,8 @@ incomplete and still requires managed caller unwind validation.
   앱 목록과 Blue Archive 설치 항목이 CUA 접근성 트리에 노출되는 것을 확인했다.
   Host.app bundle은 서명 검증을 통과했고, 실제 Blue Archive 실행/Cancel 입력은
   다음 단계에서 수행한다.
+- Checkpoint 1187 (2026-09-11): Host.app 실행 전 desktop 상태를 확인했다.
+  Manager는 CUA 접근성 트리에 노출됐지만, macOS의 메모리 부족 경고와
+  ChatGPT 접근성 권한 대화상자가 전면에 있어 Blue Archive 실행 입력을
+  안전하게 진행하지 않았다. 외부 창을 정리한 뒤 Host owner acceptance를
+  재개해야 한다.

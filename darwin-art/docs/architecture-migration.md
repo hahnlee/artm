@@ -15332,3 +15332,7 @@ or admission exception was added.
   Blue Archive 항목이 접근성 트리에 노출됐다. Host.app 자체 bundle 검증은
   통과했지만 실제 launch 후 창 owner가 Host.app인지 확인하는 acceptance가
   아직 남아 있다.
+- Checkpoint 1187 (2026-09-11): 실제 화면 캡처에서 Manager와 Blue Archive
+  항목은 확인됐으나 macOS 메모리 부족 경고 및 접근성 권한 모달이 입력을
+  가로막았다. 이 상태에서 물리 클릭을 주장하지 않고, 리소스/권한 정리 후
+  Host.app owner 검증을 다시 수행한다.
