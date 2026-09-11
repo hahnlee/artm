@@ -10012,3 +10012,8 @@ incomplete and still requires managed caller unwind validation.
   3개 child가 모두 `binder=ready`/descriptor 응답을 완료했고, Chromium의
   `uncaught Java exception`은 관찰되지 않았다. 미연결 child의 15초 self-timeout은
   별도 lifecycle 동작으로 기록한다.
+
+- Checkpoint 1016 (2026-09-11): 회귀 확인 중 `chrome-process-lifecycle-acceptance.sh`
+  가 window-seconds=10 이후 host/child 프로세스를 2분 이상 유지했다. 이번 실행에서
+  생성된 host 61214와 child 61432/61435/61436은 종료되지 않아 해당 PID만 강제
+  종료했다. 이는 이전 bind fatal과 별개의 lifecycle hang으로 Astra에 재검토 요청했다.

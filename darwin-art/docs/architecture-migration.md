@@ -14437,3 +14437,8 @@ or admission exception was added.
   반환하고 spawn 리소스를 해제했다. framework compat DEX 재빌드 후 실제 Chromium
   `example.com` VIEW 실행은 child 3개 모두 ready/descriptor 응답과 정상 종료를
   보였으며 fatal marker가 사라졌다. AOSP식 ready 전 bind 실패 전파를 확인했다.
+
+- Checkpoint 1016 (2026-09-11): lifecycle acceptance 재실행에서 테스트 host와
+  세 child가 설정된 10초 창 이후에도 2분 이상 살아 있어, 생성된 PID만 종료했다.
+  이는 Binder startup 예외 제거 후 드러난 별도 종료/정리 경로 문제이며, 원인 분석
+  전까지 acceptance 완료로 판정하지 않는다.
