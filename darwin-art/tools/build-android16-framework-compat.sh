@@ -59,6 +59,7 @@ javac --release 8 -encoding UTF-8 -d "$classes" -classpath "$android_jar" \
   "$root/tools/android-framework-compat/src/dev/darwinart/security/DarwinSecurityProvider.java" \
   "$root/tools/android-framework-compat/src/dev/darwinart/security/DarwinHttpsDiagnostic.java" \
   "$root/tools/android-framework-compat/src/dev/darwinart/security/DarwinAndroidCAStore.java" \
+  "$root/tools/android-framework-compat/src/dev/darwinart/security/DarwinAndroidKeyStore.java" \
   "$root/tools/android-framework-compat/src/dev/darwinart/security/DarwinSecureRandom.java" \
   "$root/tools/android-framework-compat/src/dev/darwinart/security/DarwinTrustManagerFactory.java"
 unzip -p "$framework" classes.dex > "$out/input/framework.dex"
@@ -93,6 +94,10 @@ fi
   "$classes/dev/darwinart/security/DarwinSecurityProvider.class" \
   "$classes/dev/darwinart/security/DarwinHttpsDiagnostic.class" \
   "$classes/dev/darwinart/security/DarwinAndroidCAStore.class" \
+  "$classes/dev/darwinart/security/DarwinAndroidKeyStore.class" \
+  "$classes/dev/darwinart/security/DarwinAndroidKeyStore\$HmacKey.class" \
+  "$classes/dev/darwinart/security/DarwinAndroidKeyStore\$HmacKeyGenerator.class" \
+  "$classes/dev/darwinart/security/DarwinAndroidKeyStore\$HmacMac.class" \
   "$classes/dev/darwinart/security/DarwinSecureRandom.class" \
   "$classes/dev/darwinart/security/DarwinTrustManagerFactory.class" \
   "$classes/dev/darwinart/security/DarwinTrustManagerFactory\$DarwinTrustManager.class" \

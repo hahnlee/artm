@@ -14567,3 +14567,10 @@ or admission exception was added.
   `RESULT_FAILURE`로 처리해 가짜 성공을 피했다. button DEX(classes=113,
   methods=3101) 빌드가 PASS했으며 Blue Archive에서 JobScheduler NPE가 제거되고
   AndroidKeyStore 미지원이 다음 단계로 명확해졌다.
+
+- Checkpoint 1040 (2026-09-11): 변경 없는 Chromium APK에 새 임시 데이터 루트와
+  `ACTION_VIEW https://example.com`을 주어 20초 실행했다. 프로세스는 `RC=0`으로
+  종료했고 macOS trust root 157개 export 및 tab state/active-tab/TabDB의
+  `https://example.com/` 기록을 확인했다. 이번 증거는 URL 전달·탭 상태 반영과
+  무충돌 종료를 닫지만, 화면 픽셀 기반 `Example Domain` 로드 완료 게이트는
+  별도 acceptance로 남긴다.

@@ -10158,3 +10158,11 @@ incomplete and still requires managed caller unwind validation.
   button DEX 계약은 classes=113/methods=3101로 재생성·검증됐고 Blue Archive
   재실행에서 기존 JobScheduler NPE는 사라졌으며 AndroidKeyStore가 다음 blocker로
   드러났다.
+
+- Checkpoint 1040 (2026-09-11): 변경 없는 Chromium APK를 새 임시 앱 데이터
+  루트에서 `ACTION_VIEW` + `https://example.com`으로 20초 실행했다. 런타임은
+  `RC=0`으로 종료했고 macOS trust root 157개가 export되었으며, 생성된 tab
+  state/active-tab/TabDB에 `https://example.com/`이 기록되었다. Fatal signal이나
+  uncaught Java exception은 없었다. 이번 실행은 URL 인텐트와 탭 상태 반영을
+  확인한 것이며, 화면 픽셀에서 `Example Domain` 텍스트가 보이는 별도 캡처 게이트는
+  아직 남아 있다.

@@ -5,13 +5,18 @@ import java.security.Provider;
 /** Boot-class-path JCA provider for a detached Darwin Android process. */
 public final class DarwinSecurityProvider extends Provider {
     public DarwinSecurityProvider() {
-        super("DarwinART", 1.0, "Darwin ART macOS security provider");
+        // Android exposes this as a distinct provider name; keeping that name
+        // is required for APKs that explicitly request AndroidKeyStore.
+        super("AndroidKeyStore", 1.0, "Darwin ART AndroidKeyStore provider");
         put("SecureRandom.SHA1PRNG", DarwinSecureRandom.class.getName());
         put("SecureRandom.NativePRNG", DarwinSecureRandom.class.getName());
         put("TrustManagerFactory.PKIX", DarwinTrustManagerFactory.class.getName());
         put("Alg.Alias.TrustManagerFactory.X509", "PKIX");
         put("Alg.Alias.TrustManagerFactory.SunX509", "PKIX");
         put("KeyStore.AndroidCAStore", DarwinAndroidCAStore.class.getName());
+        put("KeyStore.AndroidKeyStore", DarwinAndroidKeyStore.class.getName());
+        put("KeyGenerator.HmacSHA256", DarwinAndroidKeyStore.HmacKeyGenerator.class.getName());
+        put("Mac.HmacSHA256", DarwinAndroidKeyStore.HmacMac.class.getName());
         // Conscrypt's default KeyManagerFactory asks for the Android BKS
         // trust-store type when no explicit KeyStore is supplied.  Android
         // ships that type as part of its platform provider; map it to the
