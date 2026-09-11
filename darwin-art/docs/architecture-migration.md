@@ -14472,3 +14472,8 @@ or admission exception was added.
   spawn의 검사·생성·등록을 동일 admission lock 아래로 이동했다. shutdown/terminate는
   fence 게시와 map detach 후 OS wait를 수행한다. 종료 중 spawn 거부는 확인했으나
   반복 acceptance의 child-reaping PASS는 아직 닫지 않았다.
+
+- Checkpoint 1022 (2026-09-11): Condvar active-reaper 대기는 owner thread
+  callback 교착을 유발해 제거했다. release의 map 제거부터 child wait까지 Mutex를
+  유지해 shutdown과 회수를 직렬화했으며 host 테스트 8개가 통과했다. 반복
+  acceptance는 정리된 프로세스 상태에서 재실행한다.

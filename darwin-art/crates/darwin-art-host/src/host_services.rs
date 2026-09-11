@@ -159,10 +159,11 @@ impl ServiceProcessManager {
         if debug {
             eprintln!("ART Binder host: release requested pid={pid}");
         }
-        let Some(mut child) = self
+        let mut child_state = self
             .children
             .lock()
-            .map_err(|_| "service child table poisoned".to_owned())?
+            .map_err(|_| "service child table poisoned".to_owned())?;
+        let Some(mut child) = child_state
             .children
             .remove(&pid)
             .map(|managed| managed.child)
@@ -174,21 +175,26 @@ impl ServiceProcessManager {
             eprintln!("darwin-art-host: duplicate release for child PID {pid}");
             return Ok(());
         };
-        let state = child.try_wait().map_err(|error| error.to_string())?;
-        if debug {
-            eprintln!("ART Binder host: release pid={pid} state={state:?}");
-        }
-        if state.is_none() {
+        // Keep the state lock until the child is reaped. Shutdown therefore
+        // cannot detach the same child while this callback is waiting.
+        let reap_result = (|| {
+            let state = child.try_wait().map_err(|error| error.to_string())?;
             if debug {
-                eprintln!("ART Binder host: killing live child pid={pid}");
+                eprintln!("ART Binder host: release pid={pid} state={state:?}");
             }
-            child.kill().map_err(|error| error.to_string())?;
-        }
-        let waited = child.wait().map_err(|error| error.to_string())?;
-        if debug {
-            eprintln!("ART Binder host: reaped child pid={pid} status={waited:?}");
-        }
-        Ok(())
+            if state.is_none() {
+                if debug {
+                    eprintln!("ART Binder host: killing live child pid={pid}");
+                }
+                child.kill().map_err(|error| error.to_string())?;
+            }
+            let waited = child.wait().map_err(|error| error.to_string())?;
+            if debug {
+                eprintln!("ART Binder host: reaped child pid={pid} status={waited:?}");
+            }
+            Ok(())
+        })();
+        reap_result
     }
 
     pub(crate) fn shutdown_all(&self) -> Result<(), String> {

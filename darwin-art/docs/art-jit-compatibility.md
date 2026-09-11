@@ -10049,3 +10049,8 @@ incomplete and still requires managed caller unwind validation.
   단일 Mutex 상태로 바꾸고 spawn admission fence를 추가했다. 종료는 stopping을
   먼저 게시하고 map을 detach한 뒤 unlock 후 kill/reap한다. 반복 runner에서 종료
   직전 추가 spawn이 fence로 거부되는 증거를 얻었지만 child-reaping PASS는 보류한다.
+
+- Checkpoint 1022 (2026-09-11): active-reaper Condvar 대기는 owner thread
+  callback 교착을 일으켜 제거했다. release가 child를 제거·wait하는 동안 동일
+  Mutex를 유지해 shutdown과 회수를 직렬화했다. `cargo test -p darwin-art-host`
+  8개 테스트가 모두 통과했으며 잔여 child를 정리했다.
