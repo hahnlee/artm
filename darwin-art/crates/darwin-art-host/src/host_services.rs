@@ -3,7 +3,7 @@ use darwin_art_engine_sys::{HostServices, ServiceSpawnRequest, ServiceSpawnResul
 use std::collections::HashMap;
 use std::env;
 use std::ffi::{CStr, OsString, c_void};
-use std::os::fd::{FromRawFd, IntoRawFd, RawFd};
+use std::os::fd::{AsRawFd, FromRawFd, IntoRawFd, RawFd};
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::net::UnixStream;
 use std::os::unix::process::CommandExt;
@@ -112,6 +112,14 @@ impl ServiceProcessManager {
         unsafe { close(inherited_fd) };
         let child = child?;
         let pid = i32::try_from(child.id()).map_err(|_| "child PID overflow".to_owned())?;
+        if env::var_os("DARWIN_ART_DEBUG_BINDER").is_some() {
+            eprintln!(
+                "ART Binder host: spawned service pid={pid} component={} instance={} control_fd={}",
+                request.component.to_string_lossy(),
+                request.instance_name.to_string_lossy(),
+                browser_stream.as_raw_fd()
+            );
+        }
         self.children
             .lock()
             .map_err(|_| "service child table poisoned".to_owned())?
@@ -120,6 +128,10 @@ impl ServiceProcessManager {
     }
 
     fn release(&self, pid: i32) -> Result<(), String> {
+        let debug = env::var_os("DARWIN_ART_DEBUG_BINDER").is_some();
+        if debug {
+            eprintln!("ART Binder host: release requested pid={pid}");
+        }
         let Some(mut child) = self
             .children
             .lock()
@@ -134,14 +146,20 @@ impl ServiceProcessManager {
             eprintln!("darwin-art-host: duplicate release for child PID {pid}");
             return Ok(());
         };
-        if child
-            .try_wait()
-            .map_err(|error| error.to_string())?
-            .is_none()
-        {
+        let state = child.try_wait().map_err(|error| error.to_string())?;
+        if debug {
+            eprintln!("ART Binder host: release pid={pid} state={state:?}");
+        }
+        if state.is_none() {
+            if debug {
+                eprintln!("ART Binder host: killing live child pid={pid}");
+            }
             child.kill().map_err(|error| error.to_string())?;
         }
-        child.wait().map_err(|error| error.to_string())?;
+        let waited = child.wait().map_err(|error| error.to_string())?;
+        if debug {
+            eprintln!("ART Binder host: reaped child pid={pid} status={waited:?}");
+        }
         Ok(())
     }
 

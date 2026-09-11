@@ -9980,3 +9980,10 @@ incomplete and still requires managed caller unwind validation.
   child들에서 descriptor 응답이 정상이며, 실패 채널은 child의 `binder=ready` 전에
   `phase=wait-ready-dispatcher errno=9 (EBADF)`로 종료됐다. 따라서 예외 문구는
   Binder 미지원이 아니라 service startup/transport 종료 경합을 표시한다.
+
+- Checkpoint 1011 (2026-09-11): Binder transport 실패를 `wait-ready`, send,
+  reply 단계와 errno로 분류하도록 native/host 진단을 확장했다. Chromium
+  `example.com` VIEW 실행에서 정상 child 20개가 descriptor를 반환했으며,
+  마지막 child는 spawn 직후 `wait-ready-dispatcher errno=9 (EBADF)`로
+  channel이 사라졌다. 이 증거는 descriptor 계약 문제가 아니라 child startup
+  또는 channel lifetime 경합임을 재확인한다.

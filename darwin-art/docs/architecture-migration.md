@@ -14409,3 +14409,9 @@ or admission exception was added.
   마지막 실패는 child 준비 전 `wait-ready-dispatcher errno=9 (EBADF)`였다.
   AOSP 계약상 descriptor transaction 구현 부재가 아니라, host의 service channel
   startup/cleanup 경합을 다음 수정 대상으로 확정했다.
+
+- Checkpoint 1011 (2026-09-11): `TransactRemoteBinder`와 Rust service manager에
+  단계별 failure/child spawn·reap 진단을 추가하고 graphics runtime을 재빌드했다.
+  최신 실행은 instance=20에서 child 준비 전 `wait-ready-dispatcher errno=9`
+  (EBADF)로 종료됐다. 앞선 20개 child의 `INTERFACE_TRANSACTION` 응답은 정상이며,
+  다음 단계는 child startup 실패 또는 channel 수명 경합의 직접 원인 수집이다.
