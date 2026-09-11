@@ -14397,3 +14397,9 @@ or admission exception was added.
   차단됐다. 이는 코드 결함이 아닌 외부 trust prerequisite이며, `mkcert -install`
   은 System.keychain/admin trust를 변경하므로 승인 없이 실행하지 않는다.
   CA 우회 없이 사용자의 trust 등록 승인 후 gate를 재실행해야 한다.
+
+- Checkpoint 1009 (2026-09-11): 일반 브라우저의 `https://example.com/`은 정상
+  로드되어 TLS/문서 렌더링을 확인했다. 반면 실제 Chromium APK VIEW intent
+  실행은 rc=0 뒤 `Crashing due to uncaught Java exception` 로그를 남겼다.
+  이 결과는 macOS trust gate 통과나 Chromium 런타임 호환성 완료를 의미하지 않으며,
+  해당 런타임 경로는 Astra 원인 분석 대상으로 남긴다.

@@ -9968,3 +9968,9 @@ incomplete and still requires managed caller unwind validation.
   DarwinAndroidCAStore↔Chromium TLS 계약을 대체하지 못한다. `mkcert -install`
   은 System.keychain/admin trust를 변경하므로 사용자 명시 승인 전에는 수행하지
   않는다. 내부 런타임/JIT/APK acceptance는 계속 PASS 상태다.
+
+- Checkpoint 1009 (2026-09-11): `https://example.com/`을 Codex 일반 브라우저에서
+  직접 열어 TLS와 DOM 렌더링(Example Domain heading/link)을 확인했다. 동일 URI를
+  실제 Chromium APK의 Android VIEW intent로 전달한 런타임 실행은 host rc=0이지만
+  Chromium child log의 `Crashing due to uncaught Java exception`으로 종료되어,
+  외부 브라우저 성공과 Darwin Chromium HTTPS acceptance를 분리해 기록한다.
