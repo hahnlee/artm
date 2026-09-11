@@ -10921,3 +10921,14 @@ incomplete and still requires managed caller unwind validation.
   탐색을 보정했다. graphics bootstrap은 통과했지만 audit는 후보 주소의
   `KERN_INVALID_ADDRESS`로 여전히 JIT Code Cache 생성에 실패했다. 추가
   Darwin VM gap 예약/배치 검증이 필요하다.
+
+- Checkpoint 1175 (2026-09-11): exact fixed mapping 대신 Darwin 일반 익명
+  mapping 경로를 시도했으나 audit에서 동일하게 `KERN_INVALID_ADDRESS`가
+  발생해 JIT fixture는 실행되지 않았다. graphics bootstrap은 통과했으며,
+  다음 단계는 VM gap 예약을 명시적으로 유지하는 방식으로 되돌려 검증하는
+  것이다.
+
+- Checkpoint 1176 (2026-09-11): 일반 익명 mapping은 후보 주소 제약을
+  보장하지 않아 제거하고 exact mapping 경로로 복원했다. JIT audit의
+  `KERN_INVALID_ADDRESS`는 해결되지 않았으며, 다음은 non-overwriting
+  reservation을 실제 주소로 확보한 뒤 소유권을 넘기는 구현이다.

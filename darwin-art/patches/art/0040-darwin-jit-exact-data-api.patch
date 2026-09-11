@@ -13,7 +13,7 @@ diff --git a/runtime/jit/jit_memory_region.cc b/runtime/jit/jit_memory_region.cc
  #endif
  #include <android-base/unique_fd.h>
  #include <log/log.h>
-@@ -122,10 +123,123 @@
+@@ -122,10 +123,125 @@
      if (!exec_pages.IsValid()) {
        *error_msg = "Failed to create Darwin MAP_JIT code cache: " + error_str;
        return false;

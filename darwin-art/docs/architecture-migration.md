@@ -15285,3 +15285,12 @@ or admission exception was added.
   `mach_vm_allocate(VM_FLAGS_FIXED)`가 후보에서 `KERN_INVALID_ADDRESS`를
   반환해 JIT audit는 아직 실패한다. allocator의 VM 예약 모델을 다음 작업에서
   보완해야 한다.
+
+- Checkpoint 1175 (2026-09-11): 일반 익명 mapping 시도 후에도 JIT Code Cache
+  생성이 `KERN_INVALID_ADDRESS`로 실패했다. bootstrap은 통과했지만 실제
+  AOSP JIT contention fixture는 미실행 상태이며, 명시적 Darwin VM 예약 모델이
+  다음 수정 대상이다.
+
+- Checkpoint 1176 (2026-09-11): 일반 mapping 시도는 주소 계약을 보장하지
+  않아 exact 경로로 복원했다. JIT allocator는 여전히 `KERN_INVALID_ADDRESS`
+  상태이며, 명시적 non-overwriting VM reservation 구현이 남아 있다.
