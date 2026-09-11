@@ -10126,3 +10126,9 @@ incomplete and still requires managed caller unwind validation.
   두 실행 모두 JNI detach crash/fatal signal이 없고, 분리된 Chromium service
   child가 모두 종료·reap됐다. native child lifecycle과 VM shutdown 계약의
   반복 실행 증거로 기록한다.
+
+- Checkpoint 1035 (2026-09-11): `darwin-art-xtask native-graph`를 동일 작업
+  트리에서 두 번 생성해 입력 471개와 graph digest
+  `7096089acba5327b4ce2e6f93fe069b88a3ece4c3aeb4026a6e24470da380751`가
+  일치하고, 출력 파일 SHA-256도 동일함을 확인했다. 단일 재현 native graph
+  identity가 현재 입력 closure에서 결정적으로 유지된다.

@@ -14540,3 +14540,8 @@ or admission exception was added.
   동일 APK로 연속 2회 통과했다(`new-tab=2`, `JNI-detach-crash=0`,
   `service-children=reaped`). 각 실행의 isolated service child가 shutdown
   전에 모두 수거되어 native-thread/VM 종료 경계를 회귀 검증했다.
+
+- Checkpoint 1035 (2026-09-11): `darwin-art-xtask native-graph` 2회 실행에서
+  동일한 471-input graph digest와 동일한 출력 SHA-256을 얻었다. 따라서
+  Rust orchestration과 native input closure 사이의 단일 재현 빌드 identity를
+  현재 상태에서 검증했다.
