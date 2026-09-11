@@ -15103,3 +15103,8 @@ or admission exception was added.
 - Checkpoint 1138 (2026-09-11): controlled fresh corpus가 약 21분째 진행 중이며
   `642-fp-callees`까지 동일 identity로 재실행됐다. 현재 공통 MAP_JIT 범위 실패가
   4건으로 누적되었고, 세션 종료 전에는 allocator 수정이나 결과 승격을 하지 않는다.
+
+- Checkpoint 1139 (2026-09-11): fresh corpus가 약 22분째 실행 중이며
+  `726-array-store`까지 다섯 개의 동일 MAP_JIT uint32-range 실패가 누적됐다.
+  테스트들은 interpreter 단계와 shutdown을 통과했고, 세션 완료 전에는 의미론
+  결함으로 분류하지 않는다.
