@@ -15015,3 +15015,8 @@ or admission exception was added.
   HMAC acceptance도 `PASS`했다. 계정이 필요한 로그인·콘텐츠 다운로드·전투는
   여전히 별도 acceptance로 남아 있다.
 - Checkpoint 1119 (2026-09-11): 현재 프로필의 원본 Blue Archive base+split APK를 다시 실행해 Unity/IL2CPP 진입과 graphics lifecycle을 확인했다. AndroidKeyStore cross-process writer/reader도 재실행해 HMAC 일치와 material 비노출을 확인했다. 계정·서버 콘텐츠에 종속된 이후 화면은 acceptance로 승격하지 않았다.
+
+- Checkpoint 1120 (2026-09-11): Chromium lifecycle acceptance가 프로필 패키지
+  mount의 변경 없는 APK를 자동 발견하도록 경로를 보강한 뒤 두 iteration을
+  `PASS`했다(new-tab=2, JNI-detach-crash=0, service-children=reaped). 기존
+  `_build/installed-apps`와 현재 profile store 양쪽을 지원해 재현 실행 경계를 고정했다.

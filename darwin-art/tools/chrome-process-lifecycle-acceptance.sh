@@ -6,6 +6,15 @@ output="$root/_build/chrome-process-lifecycle-acceptance"
 chrome="$(find "$root/_build/installed-apps/org.chromium.chrome" \
   -name base.apk -type f 2>/dev/null | head -1)"
 
+# Installed APKs are normally exposed through the profile package store. Keep
+# the legacy build output as the first choice, but make lifecycle acceptance
+# follow the same immutable package mount used by run-android-apk-app.sh.
+if [[ ! -f "$chrome" ]]; then
+  profile_root="${DARWIN_ART_PROFILE_ROOT:-$HOME/Library/Application Support/DarwinART/profiles}"
+  chrome="$(find "$profile_root" -path '*/mnt/packages/org.chromium.chrome/*/*/base.apk' \
+    -type f 2>/dev/null | head -1)"
+fi
+
 [[ -f "$chrome" ]] || {
   echo 'missing installed Chrome APK' >&2
   exit 66
