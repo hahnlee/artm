@@ -15434,3 +15434,7 @@ or admission exception was added.
   Chrome New-tab과 Android ViewRoot/InputChannel/SurfaceFlinger popup을
   모두 PASS했다. 남은 앱 acceptance는 Blue Archive 실제 상호작용과
   Chromium JIT-on 안정성이다.
+- Checkpoint 1209 (2026-09-11): 변경 없는 Blue Archive Cancel verifier의
+  원본 로그/프레임을 재검증했다. Notice 전후 OCR, nonblank frame,
+  Cancel DOWN/UP consumed=1이 모두 PASS했다. 다운로드·로그인·실제
+  게임플레이는 계정/서버 의존성이 있어 별도 미완료 항목으로 유지한다.

@@ -11092,3 +11092,8 @@ incomplete and still requires managed caller unwind validation.
   재실행이 PASS했다. 변경 없는 Calculator의 History/외부 dismiss/resize,
   Calendar의 Day·Week·Month 전환, Chrome New-tab 및 Android popup의
   ViewRoot+InputChannel+SurfaceFlinger 경계를 모두 통과했다.
+- Checkpoint 1209 (2026-09-11): 변경 없는 Blue Archive 원본 acceptance의
+  read-only verifier 결과를 재확인했다. Cancel DOWN/UP `consumed=1`,
+  Notice 전후 OCR 및 nonblank post-UP frame 조건이 모두 PASS했다
+  (`_build/bluearchive-cancel-verification/run.kmMKlu`). 계정 로그인과
+  서버 의존 게임플레이까지의 acceptance로 확대하지 않는다.
