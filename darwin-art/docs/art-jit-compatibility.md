@@ -10285,6 +10285,13 @@ incomplete and still requires managed caller unwind validation.
   JNI object audit 및 runtime/host graphics closure audit가 모두 `RC=0`으로
   통과했다(archive-members=1970, registrar=51, ART-TLS warning=0).
 
+- Checkpoint 1060 (2026-09-11): 변경 없는 Blue Archive 1.93.454564
+  base+`split-0.apk`를 최신 런타임에서 실행했다. native resolver=24와
+  libmain/libunity/libil2cpp 로드, Unity ARM64 초기화(12 cores/8192mb),
+  `Product Name: Blue Archive`까지 도달했고 `RC=0`이었다. 이번 실행에는
+  JobScheduler/AndroidKeyStore/fatal marker가 없었다. 로그인·실제 전투 입력은
+  계정/네트워크가 필요한 별도 acceptance로 남긴다.
+
 - Checkpoint 1059 (2026-09-11): JNI owner 통합 후 실제 변경 없는 Calculator를
   `DARWIN_ART_DEBUG_JNI_ATTACH=1`로 실행했다. RenderThread와 hwuiTask0/1이
   owned attach로 생성되고 host는 `RC=0`으로 종료했으며 `Native thread exiting

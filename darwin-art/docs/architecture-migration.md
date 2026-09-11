@@ -14683,6 +14683,12 @@ or admission exception was added.
   runtime/host graphics closure audit가 모두 PASS(`RC=0`, archive-members=1970,
   registrar=51, ART-TLS warning=0)했다.
 
+- Checkpoint 1060 (2026-09-11): 변경 없는 Blue Archive base+`split-0.apk`를
+  실행해 native resolver=24, Unity/IL2CPP ARM64 초기화 및 `Product Name:
+  Blue Archive`를 확인했다. `RC=0`이며 JobScheduler/AndroidKeyStore/fatal
+  marker가 없었다. 로그인·전투 플레이는 계정/네트워크 의존 acceptance로
+  별도 유지한다.
+
 - Checkpoint 1059 (2026-09-11): JNI owner 통합 후 변경 없는 Calculator를
   실제 실행해 RenderThread/hwuiTask0/1의 owned attach와 `RC=0` 종료를
   확인했다. ART detach 경고, fatal signal, run_request failure는 관찰되지
