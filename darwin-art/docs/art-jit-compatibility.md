@@ -10396,3 +10396,12 @@ incomplete and still requires managed caller unwind validation.
   `2+3=5`, DeskClock Timer, HWUI+SurfaceFlinger+Metal 공통 경로와 shutdown
   lifecycle을 재확인했다. `audit-native-graph.sh`도 입력 472개, digest
   `63eeef4f…84943`, runtime 258/graphics-jni 63으로 PASS했다.
+
+- Checkpoint 1078 (2026-09-11): 공식 incremental graphics closure를 최신
+  provider 변경과 함께 재생성해 RC=0, registrar=51, fake/host ICU·fmt·CoreText
+  모두 0으로 확인했다. runtime SHA-256은
+  `c767a68f1f8ecef797ba773754e7163ba78e86d3facd74f21386da0fff96c0a5`, host는
+  `eea5168a5cb4c391eb1e286e557ec6b5d11f27cc178740061adeb32cc46dfa6d`이다.
+  JNI ownership(owned 100/borrowed 1/explicit detach 1/TLS exit 0), Rust 28개,
+  signal 2,000 cycle 및 foreign-thread sanitizer 각 64회가 통과했다. Blue
+  Archive는 원본 APK 경로 부재로 여전히 실행하지 못했다.

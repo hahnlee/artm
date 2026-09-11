@@ -14768,6 +14768,14 @@ or admission exception was added.
   HWUI→SurfaceFlinger→Metal과 VM shutdown이 모두 PASS했다. Native graph도
   472 inputs/digest `63eeef4f…84943`로 재현 identity를 갱신했다.
 
+- Checkpoint 1078 (2026-09-11): 공식 incremental graphics closure와 host
+  preparation을 최신 소스에서 재생성해 RC=0, strict codesign PASS를 확인했다.
+  runtime/host SHA-256은 각각
+  `c767a68f1f8ecef797ba773754e7163ba78e86d3facd74f21386da0fff96c0a5` /
+  `eea5168a5cb4c391eb1e286e557ec6b5d11f27cc178740061adeb32cc46dfa6d`이며,
+  graph는 v28·472 inputs·digest `63eeef4f…84943`다. JNI owner와 VM shutdown
+  focused tests가 통과했지만 Blue Archive 원본 APK 부재는 미완료로 유지한다.
+
 - Checkpoint 1066 (2026-09-11): 최신 JNI/HWUI 및 MAP_JIT 변경 후 ART JIT
   audit를 재실행해 Nterp, compiled/GC, VarHandle, invoke, Surface,
   MediaCodec, W^X 및 shutdown lifecycle 전체가 `RC=0`으로 통과했다.
