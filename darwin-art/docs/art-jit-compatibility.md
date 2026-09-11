@@ -11264,3 +11264,11 @@ incomplete and still requires managed caller unwind validation.
   변경 없는 APK의 첫 화면 및 Cancel 입력까지만 증명된 상태로 남겼다.
   계정·서버가 필요한 실제 gameplay 한 세션과 Chromium HTTPS fixture(CA
   trust)는 별도 환경 의존 항목이며 완료로 과장하지 않는다.
+
+- Checkpoint 1241 (2026-09-12): Corrected the prior stability conclusion:
+  DeskClock interactive use crashed on Command FlagsChanged because the native
+  view queried NSEvent.isARepeat (and also queried characters without checking
+  event type). LLDB captured the AppKit assertion before it escaped into Rust.
+  This evidence does not implicate JIT or concurrent profiles. Guarded key-only
+  properties; graphics-link audit and eight modifier down/up events passed.
+  JIT remains enabled. Short feature tests are not sustained-use acceptance.

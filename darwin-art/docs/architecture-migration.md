@@ -15578,3 +15578,13 @@ or admission exception was added.
   Blue Archive 계정·서버 의존 gameplay와 사용자 지시로 보류한 Chromium
   HTTPS CA trust fixture뿐이다. 이 환경 의존 항목은 런타임 성공 증거와
   분리해 기록한다.
+
+- Checkpoint 1241 (2026-09-12): DeskClock's apparently timed abort was traced
+  with LLDB to an Objective-C assertion in NSEvent.isARepeat on FlagsChanged,
+  called by DarwinArtMetalView.flagsChanged -> enqueueKeyEvent. The exception
+  escaped AppKit pumping into Rust. Simultaneous-profile and JIT causality
+  claims were unsupported. Guarded both repeat and characters properties by
+  KeyDown/KeyUp event type; modifier keys retain Android packets with no text
+  or repeat. Graphics-link audit passed; direct runtime-view regression sent
+  Command/Shift/Option/Control down/up successfully. Short prior acceptance
+  runs did not establish interactive or sustained app stability.

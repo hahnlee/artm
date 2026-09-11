@@ -591,7 +591,12 @@ NSEventModifierFlags ModifierFlagForKey(unsigned short code) {
   const uint32_t key_code = AndroidKeyCode(scan_code);
   if (key_code == 0) return;
   const uint64_t event_time_nanos = AndroidEventTimeNanos();
-  if (action == 0 && !event.isARepeat) {
+  // AppKit raises an exception for key-only properties on FlagsChanged.
+  // Modifier transitions still produce Android keys, without text or repeat.
+  const bool is_key_event = event.type == NSEventTypeKeyDown ||
+                            event.type == NSEventTypeKeyUp;
+  const bool is_repeat = is_key_event && event.isARepeat;
+  if (action == 0 && !is_repeat) {
     _keyDownTimes[scan_code] = event_time_nanos;
     _keyRepeatCounts[scan_code] = 0;
   }
@@ -599,10 +604,10 @@ NSEventModifierFlags ModifierFlagForKey(unsigned short code) {
   const uint64_t down_time_nanos =
       down == _keyDownTimes.end() ? event_time_nanos : down->second;
   uint32_t repeat_count = 0;
-  if (action == 0 && event.isARepeat) {
+  if (action == 0 && is_repeat) {
     repeat_count = ++_keyRepeatCounts[scan_code];
   }
-  NSString* characters = event.characters;
+  NSString* characters = is_key_event ? event.characters : nil;
   const uint32_t unicode_char =
       characters.length == 0 ? 0 : [characters characterAtIndex:0];
   const DarwinArtKeyEventV1 packet{
