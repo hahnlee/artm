@@ -10702,3 +10702,7 @@ incomplete and still requires managed caller unwind validation.
 - Checkpoint 1131 (2026-09-11): fresh corpus 핸들이 약 8분째 살아 있으며
   current identity 결과가 점진적으로 갱신되고 있다. 기존 ledger 행은 분리
   검증 대상이며, 프로세스 종료 후 별도 fresh ledger와 identity 재계산을 수행한다.
+
+- Checkpoint 1132 (2026-09-11): 동일 corpus 세션이 약 10분째 계속 실행 중이며
+  summary는 부분 갱신 상태다. 종료 전까지 drift guard와 기존 행 분리 원칙을
+  유지하고, 최종 결과가 나오면 별도 identity-only ledger로 재검증한다.
