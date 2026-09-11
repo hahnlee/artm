@@ -10950,3 +10950,7 @@ incomplete and still requires managed caller unwind validation.
   Cache 생성 경고와 fixture 미실행이 사라졌고, empty-checkpoint contention,
   monitor/JIT 기능별 acceptance가 PASS했다. 이전 실패는 stale graphics-link
   dylib identity를 사용한 검증이었다.
+- Checkpoint 1181 (2026-09-11): 최신 graphics-link dylib를 사용한 재실행에서
+  `ART empty checkpoint mutex contention PASS`와 전체 JIT 기능별 PASS를
+  확인했다. JIT 증거 ledger는 현재 runtime artifact 기준으로 닫혔고,
+  변경 없는 APK acceptance로 다음 단계가 이동했다.

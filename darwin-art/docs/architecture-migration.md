@@ -15309,3 +15309,7 @@ or admission exception was added.
   link 산출물을 갱신한 후 JIT audit를 재실행했다. 최신 dylib에서 JIT Code
   Cache와 empty-checkpoint contention fixture가 정상 실행되어 PASS했으며,
   stale artifact identity 문제가 확인·해결됐다.
+- Checkpoint 1181 (2026-09-11): 최신 link artifact로 JIT audit를 재실행해
+  empty-checkpoint mutex contention과 기능별 JIT acceptance가 모두 PASS했다.
+  이제 남은 범위는 Chromium HTTPS와 Blue Archive의 실제 물리 입력/게임
+  acceptance다.
