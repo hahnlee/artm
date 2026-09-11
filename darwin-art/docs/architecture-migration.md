@@ -14889,3 +14889,8 @@ or admission exception was added.
   `passed`했고, 이어 `--resume --parallel 4 --limit 20`에서 현재 runtime
   identity 기준 첫 20개 corpus가 모두 `passed`(일부는 동일 identity resume)했다.
   이는 historical SIGABRT를 최신 실패로 재사용하지 않는 현재 acceptance 증거다.
+
+- Checkpoint 1095 (2026-09-11): boot image 재생성 이후에도 `cargo test -q
+  -p darwin-art-host`의 host 단위 테스트 8개와 보조 묶음 2개가 모두
+  `0 failed`로 통과했다. 이 검증은 사용자 변경 중인 `foundation.rs`를
+  커밋하거나 되돌리지 않은 상태에서 수행했다.
