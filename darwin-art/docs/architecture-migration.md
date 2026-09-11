@@ -15481,3 +15481,7 @@ or admission exception was added.
   Calculator, Calendar, Chrome, Android popup의 실제 메뉴·전환·resize
   이벤트가 모두 PASS함을 확인했다(`run.9C49vP`). Calendar의 Day/Week/Month
   전환까지 현재 산출물에서 재현된다.
+- Checkpoint 1219 (2026-09-11): Blue Archive 변경 없는 APK의 Cancel
+  verifier를 재실행했다. Notice 제거와 nonblank scanout, consumed DOWN/UP,
+  nativeRender 종료를 모두 PASS해 앱 UI 이벤트 경계를 재확인했다
+  (`run.WR52q9`). 로그인·실제 서버 게임은 계정 의존성으로 미검증이다.
