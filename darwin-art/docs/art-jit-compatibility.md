@@ -10768,3 +10768,7 @@ incomplete and still requires managed caller unwind validation.
   재실행해 모두 interpreter/JIT/unmodified optimized PASS를 확인했다. 혼합
   ledger 오염을 피하기 위해 별도 `art-upstream-corpus-after-allocator` ledger로
   전체 1,076개 fresh 실행을 시작했다.
+
+- Checkpoint 1146 (2026-09-11): 새 ledger fresh 실행이 시작 후 약 1분간
+  drift 없이 진행되어 첫 58개가 identity `eb468bf1…`로 모두 passed였다.
+  전체 완료 전에는 단일 identity acceptance를 확정하지 않는다.
