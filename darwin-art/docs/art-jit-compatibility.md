@@ -10843,3 +10843,8 @@ incomplete and still requires managed caller unwind validation.
   `eb468bf197a5…`로 `passed` 되었다. 병렬 실행에서 일시 실패했던 6개는
   runner의 잘못된 resume skip 동작을 수정한 뒤 `--resume --parallel 1`로
   실제 재실행했고 모두 PASS했다. runner 단위 테스트 9개도 통과했다.
+
+- Checkpoint 1162 (2026-09-11): 설치된 변경 없는 공식 Chrome APK에 대해
+  `tools/chrome-process-lifecycle-acceptance.sh`를 실행해 2회 모두 PASS했다.
+  새 탭 검증 2회, JNI detach crash 0, ChildProcessService 자식 프로세스
+  정상 회수이며 산출물은 `_build/chrome-process-lifecycle-acceptance/`에 있다.
