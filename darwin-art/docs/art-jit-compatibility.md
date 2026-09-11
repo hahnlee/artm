@@ -10525,3 +10525,11 @@ incomplete and still requires managed caller unwind validation.
   -p darwin-art-host`의 host 단위 테스트 8개와 보조 묶음 2개가 모두
   `0 failed`로 통과했다. 이 검증은 사용자 변경 중인 `foundation.rs`를
   커밋하거나 되돌리지 않은 상태에서 수행했다.
+
+- Checkpoint 1096 (2026-09-11): NativeBridge가 Android의 system namespace
+  SONAME을 Darwin hardened dyld에 bare 상대 경로로 전달하던 결함을 재현했다.
+  `darwin_native_bridge_stubs.cc`에 capability directory를 통한 절대 경로
+  shim을 추가하고 graphics runtime을 재링크한 뒤, 변경 없는 `115-native-bridge`
+  fresh 실행이 `passed`로 전환됐다. 이후 전체 1,076개 corpus의 legacy 결과를
+  현재 identity로 갱신하는 병렬 실행을 시작했으며, 이 checkpoint 시점에 196개가
+  새 identity로 기록됐다.
