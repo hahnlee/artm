@@ -15008,3 +15008,9 @@ or admission exception was added.
   tools/test_art_upstream_corpus.py` 9개가 통과했고, `audit-native-graph.sh`도
   runtime=258, graphics-jni=63, ICU=458, cached TU=809, 472 inputs에서
   duplicate/누락 없이 `PASS`했다. graph digest는 `00b69efe…d8f5f`로 기록됐다.
+
+- Checkpoint 1118 (2026-09-11): 보존된 변경 없는 Blue Archive base+split APK를
+  실제 30초 실행해 Unity/IL2CPP arm64와 24개 native library 등록, TLS 요청,
+  graphics present 및 정상 shutdown을 재확인했다. AndroidKeyStore cross-process
+  HMAC acceptance도 `PASS`했다. 계정이 필요한 로그인·콘텐츠 다운로드·전투는
+  여전히 별도 acceptance로 남아 있다.
