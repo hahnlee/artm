@@ -10022,3 +10022,11 @@ incomplete and still requires managed caller unwind validation.
   생성된 것이었다. 실제 pointer-sequence lifecycle host는 별도 PID로 78초 이상
   CPU 100% 상태를 보여 owner-loop/frame-clock 정체 후보가 됐다. 해당 테스트
   PID만 종료했고 Astra에 원인 분석을 요청했다.
+
+- Checkpoint 1018 (2026-09-11): Chromium APK에 `android.intent.action.VIEW`와
+  `https://example.com/`을 주입해 재실행했다. 실제 실행은 `RC=0`으로 종료했고
+  uncaught/fatal marker 없이 여러 isolated child가 `binder=ready` 및 descriptor
+  응답을 완료했다. 별도 frame 계측 런에서 보인 `Binder dispatcher failed`와
+  status=27은 부모 run_request 실패로 단정하지 않고, 기존 child가 종료된 뒤
+  늦게 시작한 자식의 ready 전 채널/dispatcher 오류로 분리한다. `binder=ready`는
+  StartServingRemoteBinder 이전 로그일 수 있으므로 wire-ready 증거와 구분한다.

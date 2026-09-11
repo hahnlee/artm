@@ -21,6 +21,13 @@ pub(super) fn run(
     options: &RunOptions,
     graphics_attached: bool,
 ) -> Result<HostOutcome, HostError> {
+    let debug_boundaries = std::env::var_os("DARWIN_ART_DEBUG_FRAME_TIMING").is_some();
+    if debug_boundaries {
+        eprintln!(
+            "DARWIN_ART gpu-loop enter visible_seconds={}",
+            options.visible_seconds
+        );
+    }
     // Only the wake token crosses into the display-clock helper. The opaque
     // GraphicsSession remains owned and consumed by this ART owner thread.
     let owner_wake = runtime
@@ -727,6 +734,9 @@ pub(super) fn run(
         eprintln!("DARWIN_ART host received graceful termination request");
     }
     if let Some(error) = loop_error {
+        if debug_boundaries {
+            eprintln!("DARWIN_ART gpu-loop exit error={error}");
+        }
         return Err(error);
     }
     if test_pointer.is_some() {
@@ -750,6 +760,9 @@ pub(super) fn run(
         );
     }
     frame_timing::report();
+    if debug_boundaries {
+        eprintln!("DARWIN_ART gpu-loop exit status=0 frames_presented={frames_presented}");
+    }
     Ok(HostOutcome {
         process,
         frames_presented,

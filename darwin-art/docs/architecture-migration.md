@@ -14447,3 +14447,11 @@ or admission exception was added.
   PID를 분리했다. 실제 pointer-sequence 경로의 host가 78초 후에도 CPU 100%로
   유지되어 owner-loop/frame-clock 정체 후보가 됐다. 테스트 PID만 종료했으며,
   다음 단계는 해당 GPU loop와 cleanup의 enter/exit 증거 수집이다.
+
+- Checkpoint 1018 (2026-09-11): 실제 Chromium APK를 `https://example.com/` VIEW
+  인텐트로 실행해 `RC=0`, uncaught/fatal 없음과 child ready/descriptor 응답을
+  확인했다. frame 계측 런의 status=27/`Binder dispatcher failed`는 부모 수명주기
+  오류가 아니라 선행 child 종료 후 늦게 준비한 서비스 자식의 endpoint 오류일
+  가능성이 우선이다. 따라서 부모 GPU loop 경계와 자식 wire-ready/dispatcher
+  경계를 별도 계측해야 하며, `binder=ready` 문자열만으로 전송 성공을 판정하지
+  않는다.
