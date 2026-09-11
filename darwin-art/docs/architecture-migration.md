@@ -14844,6 +14844,12 @@ or admission exception was added.
   InputChannel acceptance이며, 물리 클릭·Confirm 다운로드·로그인·게임플레이는
   여전히 별도 미완료다.
 
+- Checkpoint 1091 (2026-09-11): upstream corpus resume의 첫 20개 중 19개는
+  기존 PASS였지만 `004-SignalTest` optimized lane이 compiled `Main.main` 뒤
+  generated-code fault 2회와 unexpected signal 6으로 실패했다. interpreter
+  expected-output은 통과했으며, 이 JIT/signal 경계는 새 미완료 항목으로
+  기록하고 우회·제외 없이 Astra 원인 분석을 진행한다.
+
 - Checkpoint 1066 (2026-09-11): 최신 JNI/HWUI 및 MAP_JIT 변경 후 ART JIT
   audit를 재실행해 Nterp, compiled/GC, VarHandle, invoke, Surface,
   MediaCodec, W^X 및 shutdown lifecycle 전체가 `RC=0`으로 통과했다.

@@ -88,6 +88,13 @@ boundaries, not work that needs to be restarted.
   before/after hashes. The result is synthetic InputChannel acceptance only;
   physical click, Confirm/download, login and gameplay remain open.
 
+- Checkpoint 1091 (2026-09-11): upstream corpus resume (parallel=4, first 20)
+  found 19 resumed PASS and one real failure, `004-SignalTest`. Its interpreter
+  expected-output passes, but the optimized lane installs compiled `Main.main`,
+  hits two generated-code faults, then receives unexpected signal 6 and exits 1.
+  This is now an explicit JIT/signal boundary blocker; no workaround or test
+  exclusion has been added.
+
 Read this index and the latest architecture-migration entry when resuming.
 Append dated evidence as work advances; keep this status table current.
 
