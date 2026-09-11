@@ -15195,3 +15195,7 @@ or admission exception was added.
 - Checkpoint 1157 (2026-09-11): fresh ledger가 835/1,076개까지 진행되어
   829 passed/6 failed이며 identity `eb468bf1…` 단일성을 유지한다. 원 실행은
   계속 진행 중이며, 종료 후 실패 항목의 단일 스레드 재검증을 수행한다.
+
+- Checkpoint 1158 (2026-09-11): fresh ledger가 898/1,076개까지 진행되어
+  892 passed/6 failed이며 identity `eb468bf1…` 단일성을 유지한다. 원 실행은
+  계속 진행 중이고, 종료 후 실패 행을 순차 재검증한다.
