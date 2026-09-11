@@ -49,6 +49,7 @@ import java.util.Map;
 import java.util.concurrent.Executor;
 import android.app.Application;
 import android.app.Service;
+import android.app.job.JobScheduler;
 import android.test.mock.MockContext;
 
 public final class ProbeContext extends ContextWrapper {
@@ -132,6 +133,7 @@ public final class ProbeContext extends ContextWrapper {
     private Object accountManager;
     private Object cameraManager;
     private Object telephonyManager;
+    private Object jobScheduler;
     private final String packageName;
     private final ClassLoader classLoader;
     private volatile Display display;
@@ -1244,6 +1246,10 @@ public final class ProbeContext extends ContextWrapper {
         if (USAGE_STATS_SERVICE.equals(name)) {
             return constructUsageStatsManager();
         }
+        if (JOB_SCHEDULER_SERVICE.equals(name)) {
+            if (jobScheduler == null) jobScheduler = constructJobScheduler();
+            return jobScheduler;
+        }
         if (VIBRATOR_SERVICE.equals(name)) {
             return construct("android.os.SystemVibrator");
         }
@@ -1374,6 +1380,9 @@ public final class ProbeContext extends ContextWrapper {
         }
         if ("android.app.usage.UsageStatsManager".equals(className)) {
             return USAGE_STATS_SERVICE;
+        }
+        if (JobScheduler.class.getName().equals(className)) {
+            return JOB_SCHEDULER_SERVICE;
         }
         if ("android.app.AlarmManager".equals(className)) {
             return ALARM_SERVICE;
@@ -1680,6 +1689,27 @@ public final class ProbeContext extends ContextWrapper {
         } catch (ReflectiveOperationException error) {
             throw new IllegalStateException(
                     "Could not construct android.app.usage.UsageStatsManager", error);
+        }
+    }
+
+    private Object constructJobScheduler() {
+        try {
+            Class<?> serviceManager = Class.forName("android.os.ServiceManager");
+            Method getService = serviceManager.getDeclaredMethod("getService", String.class);
+            getService.setAccessible(true);
+            IBinder binder = (IBinder) getService.invoke(null, JOB_SCHEDULER_SERVICE);
+            if (binder == null) throw new IllegalStateException("IJobScheduler is not installed");
+            Class<?> interfaceClass = Class.forName("android.app.job.IJobScheduler");
+            Class<?> stubClass = Class.forName("android.app.job.IJobScheduler$Stub");
+            Method asInterface = stubClass.getMethod("asInterface", IBinder.class);
+            Object service = asInterface.invoke(null, binder);
+            Class<?> managerClass = Class.forName("android.app.JobSchedulerImpl");
+            Constructor<?> constructor = managerClass.getDeclaredConstructor(Context.class,
+                    interfaceClass);
+            constructor.setAccessible(true);
+            return constructor.newInstance(this, service);
+        } catch (ReflectiveOperationException error) {
+            throw new IllegalStateException("Could not construct android.app.JobScheduler", error);
         }
     }
 

@@ -171,6 +171,9 @@ pub(crate) fn build_button_dex_probe(root: &Path) -> Result<()> {
                 "dev/darwinart/simple/DarwinServiceBridge$ManagerHandler.class",
             ))
             .arg(button(
+                "dev/darwinart/simple/DarwinServiceBridge$JobSchedulerHandler.class",
+            ))
+            .arg(button(
                 "dev/darwinart/simple/DarwinServiceBridge$MediaSessionInterfaceHandler.class",
             ))
             .arg(button(
@@ -298,14 +301,15 @@ pub(crate) fn build_button_dex_probe(root: &Path) -> Result<()> {
                     class[73]=Ljavax/microedition/khronos/egl/EGLSurface;";
     verify_dex_contract(
         &output,
-        112,
-        3098,
+        113,
+        3101,
         &[
             "Ldev/darwinart/probe/ProbeActivity;",
             "Ldev/darwinart/probe/ProbeContext$BaseContext;",
             "Ldev/darwinart/probe/ProbeContext$RemoteServiceBinder;",
             "Ldev/darwinart/probe/JitInvokeCustom;",
             "Ldev/darwinart/simple/DarwinServiceBridge;",
+            "Ldev/darwinart/simple/DarwinServiceBridge$JobSchedulerHandler;",
             "Ldev/darwinart/system/DarwinSystemServer;",
             "Ljavax/microedition/khronos/egl/DarwinEGL10;",
         ],

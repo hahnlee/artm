@@ -28,6 +28,7 @@ import android.view.ViewParent;
 import android.view.Window;
 import dev.darwinart.probe.ProbeHostDocumentProvider;
 import java.util.ArrayList;
+import java.util.List;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.WeakHashMap;
@@ -767,6 +768,15 @@ public final class DarwinServiceBridge {
             attach(usageStatsBinder, usageStatsService,
                     "android.app.usage.IUsageStatsManager");
 
+            Binder jobSchedulerBinder = new Binder();
+            Class<?> jobSchedulerInterface = Class.forName("android.app.job.IJobScheduler");
+            Object jobSchedulerService = Proxy.newProxyInstance(
+                    jobSchedulerInterface.getClassLoader(),
+                    new Class<?>[] {jobSchedulerInterface},
+                    new JobSchedulerHandler(jobSchedulerBinder));
+            attach(jobSchedulerBinder, jobSchedulerService,
+                    "android.app.job.IJobScheduler");
+
             // Some production framework.jar distributions omit the hidden
             // role-controller AIDL interface while retaining RoleManager. On
             // Android this service is optional for an app process, so do not
@@ -1208,6 +1218,8 @@ public final class DarwinServiceBridge {
                     metadataClass, serviceClass, devicePolicyBinder);
             Object usageStatsServiceValue = serviceValue(
                     metadataClass, serviceClass, usageStatsBinder);
+            Object jobSchedulerServiceValue = serviceValue(
+                    metadataClass, serviceClass, jobSchedulerBinder);
             Object roleServiceValue = roleBinder == null ? null : serviceValue(
                     metadataClass, serviceClass, roleBinder);
             Object inputMethodServiceValue = serviceValue(
@@ -1259,7 +1271,7 @@ public final class DarwinServiceBridge {
                     new ManagerHandler(displayServiceValue, activityManagerServiceValue,
                             activityServiceValue, userServiceValue,
                             devicePolicyServiceValue,
-                            usageStatsServiceValue, roleServiceValue,
+                            usageStatsServiceValue, jobSchedulerServiceValue, roleServiceValue,
                             inputMethodServiceValue, textServicesServiceValue,
                             inputServiceValue, uiModeServiceValue,
                             bluetoothManagerServiceValue,
@@ -1366,6 +1378,50 @@ public final class DarwinServiceBridge {
         attach.invoke(binder, owner, descriptor);
     }
 
+    /** A real typed JobScheduler binder with an empty persistent queue. */
+    private static final class JobSchedulerHandler implements InvocationHandler {
+        private final Binder binder;
+
+        JobSchedulerHandler(Binder binder) { this.binder = binder; }
+
+        @Override
+        public Object invoke(Object proxy, Method method, Object[] args) throws Exception {
+            String name = method.getName();
+            if ("asBinder".equals(name)) return binder;
+            if ("getAllPendingJobsInNamespace".equals(name)) {
+                Class<?> slice = Class.forName("android.content.pm.ParceledListSlice");
+                Constructor<?> ctor = slice.getDeclaredConstructor(List.class);
+                ctor.setAccessible(true);
+                return ctor.newInstance(new ArrayList<>());
+            }
+            if ("getAllPendingJobs".equals(name)) return new HashMap<>();
+            if ("getPendingJob".equals(name)) return null;
+            if ("getPendingJobReason".equals(name)) return Integer.valueOf(0);
+            if ("getPendingJobReasons".equals(name)) return new int[0];
+            if ("getPendingJobReasonsHistory".equals(name)
+                    || "getStartedJobs".equals(name)
+                    || "getAllJobSnapshots".equals(name)) {
+                if ("getAllJobSnapshots".equals(name)) {
+                    Class<?> slice = Class.forName("android.content.pm.ParceledListSlice");
+                    Constructor<?> ctor = slice.getDeclaredConstructor(List.class);
+                    ctor.setAccessible(true);
+                    return ctor.newInstance(new ArrayList<>());
+                }
+                return new ArrayList<>();
+            }
+            if ("schedule".equals(name) || "scheduleAsPackage".equals(name)
+                    || "enqueue".equals(name)) return Integer.valueOf(0);
+            if ("cancel".equals(name) || "cancelAll".equals(name)
+                    || "cancelAllInNamespace".equals(name)
+                    || "notePendingUserRequestedAppStop".equals(name)
+                    || "registerUserVisibleJobObserver".equals(name)
+                    || "unregisterUserVisibleJobObserver".equals(name)) return null;
+            if ("canRunUserInitiatedJobs".equals(name)
+                    || "hasRunUserInitiatedJobsPermission".equals(name)) return Boolean.FALSE;
+            throw new UnsupportedOperationException("Unsupported IJobScheduler method: " + name);
+        }
+    }
+
     private static final class ManagerHandler implements InvocationHandler {
         private final Object displayService;
         private final Object activityService;
@@ -1373,6 +1429,7 @@ public final class DarwinServiceBridge {
         private final Object userService;
         private final Object devicePolicyService;
         private final Object usageStatsService;
+        private final Object jobSchedulerService;
         private final Object roleService;
         private final Object inputMethodService;
         private final Object textServicesService;
@@ -1399,7 +1456,7 @@ public final class DarwinServiceBridge {
         ManagerHandler(Object displayService, Object activityManagerService,
                 Object activityService, Object userService,
                 Object devicePolicyService,
-                Object usageStatsService, Object roleService,
+                Object usageStatsService, Object jobSchedulerService, Object roleService,
                 Object inputMethodService, Object textServicesService,
                 Object inputService, Object uiModeService,
                 Object bluetoothManagerService,
@@ -1419,6 +1476,7 @@ public final class DarwinServiceBridge {
             this.userService = userService;
             this.devicePolicyService = devicePolicyService;
             this.usageStatsService = usageStatsService;
+            this.jobSchedulerService = jobSchedulerService;
             this.roleService = roleService;
             this.inputMethodService = inputMethodService;
             this.textServicesService = textServicesService;
@@ -1454,6 +1512,7 @@ public final class DarwinServiceBridge {
                 if ("user".equals(args[0])) return userService;
                 if ("device_policy".equals(args[0])) return devicePolicyService;
                 if ("usagestats".equals(args[0])) return usageStatsService;
+                if ("jobscheduler".equals(args[0])) return jobSchedulerService;
                 if ("role".equals(args[0])) return roleService;
                 if ("activity_task".equals(args[0])) {
                     return activityService;

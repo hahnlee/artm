@@ -10149,3 +10149,12 @@ incomplete and still requires managed caller unwind validation.
   `SystemJobScheduler.getPendingJobs()`에서 JobScheduler가 null인 동일한
   blocker가 재현됐다. 게임 플레이 acceptance는 서비스 계약 구현 전까지
   닫지 않는다.
+
+- Checkpoint 1039 (2026-09-11): AOSP API 계약에 맞춰 `ProbeContext`가
+  `JobSchedulerImpl(Context, IJobScheduler)`를 ServiceManager의 typed Binder로
+  생성하도록 추가하고, DarwinServiceBridge에 `IJobScheduler` Binder를 등록했다.
+  `getAllPendingJobsInNamespace`/snapshot은 `ParceledListSlice`를 반환하고
+  schedule/enqueue는 `RESULT_FAILURE`(0)로 정직하게 미지원 처리한다. 변경 후
+  button DEX 계약은 classes=113/methods=3101로 재생성·검증됐고 Blue Archive
+  재실행에서 기존 JobScheduler NPE는 사라졌으며 AndroidKeyStore가 다음 blocker로
+  드러났다.

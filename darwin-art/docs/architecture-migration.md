@@ -14560,3 +14560,10 @@ or admission exception was added.
   native=24 및 Unity 초기화가 정상이고 RC=0이었으나
   `JobScheduler.getAllPendingJobs()` 호출 시 null 서비스가 다시 발생했다.
   이는 unchanged APK acceptance를 막는 실제 framework service 계약 blocker다.
+
+- Checkpoint 1039 (2026-09-11): `ProbeContext`/DarwinServiceBridge에 AOSP typed
+  JobScheduler 경계를 추가했다. 실제 `IJobScheduler` Binder와
+  `JobSchedulerImpl`을 연결하고 조회는 `ParceledListSlice`, 예약은
+  `RESULT_FAILURE`로 처리해 가짜 성공을 피했다. button DEX(classes=113,
+  methods=3101) 빌드가 PASS했으며 Blue Archive에서 JobScheduler NPE가 제거되고
+  AndroidKeyStore 미지원이 다음 단계로 명확해졌다.
