@@ -14907,3 +14907,8 @@ or admission exception was added.
   관찰했다. 실행 프로세스는 살아 있으며 1,076개 결과 중 236개가 새 runtime
   identity로 갱신된 시점까지 모두 `passed`였다. 나머지는 아직 실행 중이므로
   전체 current-identity acceptance 완료로 판정하지 않는다.
+
+- Checkpoint 1098 (2026-09-11): 장시간 병렬 corpus refresh 프로세스가 여전히
+  실행 중임을 확인했다. ledger는 1,076개 모두 `passed`이며, 그중 267개가
+  현재 runtime identity로 갱신됐다. 잔여 항목은 legacy 결과를 재사용하지 않고
+  순차적으로 재실행 중이므로 완료 판정은 보류한다.
