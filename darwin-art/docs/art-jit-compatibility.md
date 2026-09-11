@@ -10113,3 +10113,10 @@ incomplete and still requires managed caller unwind validation.
   acceptance가 PASS했다(RC=0). Chromium에 `VIEW https://example.com`을
   전달한 실행은 RC=0였지만 Chrome 탭 복원만 관찰되어 URL 네비게이션
   acceptance는 아직 닫지 않는다.
+
+- Checkpoint 1033 (2026-09-11): Chromium을 새 앱 데이터 루트에서
+  `ACTION_VIEW` + `https://example.com`으로 20초 실행했다. 런타임 RC=0,
+  macOS CA export=157이며, 생성된 Android tab state/active-tab FlatBuffer와
+  TabDB에 `https://example.com/` 및 `Example Domain`이 기록됐다. 따라서 URL
+  인텐트가 실제 Chrome 탭 상태로 반영되는 것은 확인했지만, 화면 픽셀/로드
+  완료 신호는 별도 캡처 게이트로 계속 보강한다.

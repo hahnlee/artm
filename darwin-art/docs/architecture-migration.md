@@ -14529,3 +14529,9 @@ or admission exception was added.
   MediaCodec gate와 기능별 acceptance가 모두 PASS(RC=0)했다. Chromium
   `VIEW https://example.com` 실행은 프로세스/윈도우 RC=0까지 갔으나 기존 탭
   복원만 관찰되어 URL 전달 경로는 별도 acceptance로 남겼다.
+
+- Checkpoint 1033 (2026-09-11): 새 앱 데이터 루트의 변경 없는 Chromium APK에
+  `ACTION_VIEW https://example.com`을 전달해 RC=0으로 실행했다. 생성된
+  Android tab state/active-tab FlatBuffer와 TabDB에 URL과 `Example Domain`이
+  남아 실제 탭 네비게이션 상태 반영을 확인했다. 화면 캡처 기반 로드 완료
+  게이트는 아직 별도 과제로 남긴다.
