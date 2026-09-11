@@ -10467,3 +10467,10 @@ incomplete and still requires managed caller unwind validation.
   720×1280 GPU shared IOSurface를 사용하고 Nterp acceptance가 통과했으며,
   런처는 `RC=0`으로 종료했다. 이번 실행은 Calendar 표시·graphics 회귀 증거이며
   Day/Week/Month 조작의 최신 물리 입력 증거는 별도로 남긴다.
+
+- Checkpoint 1089 (2026-09-11): Blue Archive 변경 없는 원본 APK에서
+  synthetic InputChannel Cancel 입력을 검증했다. (514,504) DOWN/UP가
+  `consumed=1`, hold 81/174ms로 전달됐고, 전후 scanout이 Notice(654.38MB
+  안내)에서 Notice가 사라진 `Resetting the game data...` 상태로 변했다.
+  nativeRender 1,230회/RC=0, 픽셀 통계도 0.5765/0.2282→0.7297/0.1762로
+  달라졌다. 이는 synthetic 입력 증거이며 OS 물리 클릭은 아니다.

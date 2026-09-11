@@ -14832,6 +14832,12 @@ or admission exception was added.
   경로를 확인했다. Calendar 기본 실행과 합성 경로는 회귀가 없으며, 세부 뷰
   전환 입력은 별도 acceptance로 유지한다.
 
+- Checkpoint 1089 (2026-09-11): 변경 없는 Blue Archive에서 logical Cancel
+  좌표 (257,252)에 synthetic InputChannel DOWN/UP를 보내 `consumed=1`과
+  81/174ms hold를 확인했다. 실제 scanout은 Notice에서 `Resetting the game
+  data...` 상태로 바뀌었고 nativeRender 1,230회/RC=0이었다. Confirm 다운로드와
+  OS 물리 클릭은 수행하지 않았으므로 해당 범위는 별도 미완료다.
+
 - Checkpoint 1066 (2026-09-11): 최신 JNI/HWUI 및 MAP_JIT 변경 후 ART JIT
   audit를 재실행해 Nterp, compiled/GC, VarHandle, invoke, Surface,
   MediaCodec, W^X 및 shutdown lifecycle 전체가 `RC=0`으로 통과했다.
