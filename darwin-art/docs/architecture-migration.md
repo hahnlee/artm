@@ -15569,6 +15569,10 @@ or admission exception was added.
   service-child와 JNI detach 회수를 확인했고, SolitaireCG의 변경 없는
   custom View drag도 정상 입력·종료했다. 사용자 지시에 따라 macOS CA
   trust 설치는 수행하지 않고 Chromium HTTPS fixture gate를 보류한다.
+- Checkpoint 1240 (2026-09-11): Blue Archive 변경 없는 APK의 현재 증거는
+  title/login/menu/options와 Cancel 입력까지이며 실제 계정 기반 gameplay는
+  서버·계정 외부 조건으로 반복 미검증 상태다. 더 이상의 동일 실행은 하지
+  않고 `gameplay=BLOCKED_ENV`로 acceptance matrix에 고정한다.
 - Checkpoint 1239 (2026-09-11): 전체 workspace unit/doc tests가 실패 0으로
   완료됐다. 이미 검증된 앱을 불필요하게 재실행하지 않으며, 현재 남은 범위는
   Blue Archive 계정·서버 의존 gameplay와 사용자 지시로 보류한 Chromium

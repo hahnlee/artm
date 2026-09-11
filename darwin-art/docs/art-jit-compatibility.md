@@ -11254,6 +11254,11 @@ incomplete and still requires managed caller unwind validation.
   custom `SolitaireView` drag 입력이 consumed=1로 처리되고 crash=0인 것을
   확인했다. Chromium HTTPS fixture는 사용자 지시에 따라 CA trust gate를
   보류하며, 실제 `example.com` 및 tab graphics 증거는 유지한다.
+- Checkpoint 1240 (2026-09-11): 기존 Blue Archive 산출물을 재검토했다.
+  변경 없는 APK의 title/login/menu/options 렌더링과 Cancel DOWN/UP 및
+  nonblank post-UP frame은 증명되어 있지만, 계정·서버가 필요한 전투
+  gameplay frame은 존재하지 않는다. 이미 반복 확인된 동일 외부 조건으로,
+  추가 실행 없이 `gameplay=BLOCKED_ENV`로 분리한다.
 - Checkpoint 1239 (2026-09-11): 전체 `cargo test --workspace`가 실패 없이
   통과했다. 이미 PASS한 앱 acceptance는 반복 실행하지 않고, Blue Archive는
   변경 없는 APK의 첫 화면 및 Cancel 입력까지만 증명된 상태로 남겼다.
