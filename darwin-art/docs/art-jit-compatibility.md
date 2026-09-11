@@ -10268,3 +10268,8 @@ incomplete and still requires managed caller unwind validation.
   JIT fixture가 앱 실행을 가로채지 않고 host가 `RC=0`으로 종료했으며, 이전
   MAP_JIT 주소 불일치 로그는 재현되지 않았다. optimized compiler fixture와
   debuggable APK 실행은 서로 다른 acceptance 계약으로 유지한다.
+
+- Checkpoint 1056 (2026-09-11): 실제 Calculator APK와 optimized JIT audit가
+  최신 MAP_JIT 수정 후 모두 `RC=0`으로 통과했고 주소 불일치는 재현되지 않았다.
+  shutdown 시 HWUI worker JNI detach 경고가 남아 native-thread ownership gate는
+  아직 닫지 않았다.

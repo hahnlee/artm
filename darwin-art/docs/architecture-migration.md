@@ -14667,3 +14667,7 @@ or admission exception was added.
   확인했다. 앱 실행 전 fixture assertion으로 오인했던 status=119는 재현되지
   않았고 MAP_JIT 주소 불일치도 관찰되지 않았다. optimized JIT와 debuggable
   APK 실행 gate는 분리해 유지한다.
+
+- Checkpoint 1056 (2026-09-11): MAP_JIT 수정 뒤 실제 Calculator APK 실행과
+  optimized JIT audit가 모두 `RC=0`으로 통과했다. shutdown 시 HWUI worker의
+  JNI detach 경고가 남아 native-thread ownership 계약은 다음 gate로 유지한다.
