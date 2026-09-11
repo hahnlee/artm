@@ -15499,3 +15499,6 @@ or admission exception was added.
 - Checkpoint 1223 (2026-09-11): 전체 Rust workspace `cargo check`가
   42.29초 만에 PASS했다. 사용자 소유 `foundation.rs`는 보존했으며,
   `bionic-vm-facade`의 기존 unused/dead-code 경고 3개만 남아 있다.
+- Checkpoint 1224 (2026-09-11): borrowed ELF range 등록을 보정해 동일한
+  시작 주소 envelope 중복을 `EEXIST`로 fail-closed 처리했다. facade 4개
+  unit test 및 workspace check가 PASS했고 관련 컴파일 경고가 제거됐다.

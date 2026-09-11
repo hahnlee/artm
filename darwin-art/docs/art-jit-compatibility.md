@@ -11165,3 +11165,7 @@ incomplete and still requires managed caller unwind validation.
   건드리지 않고 `cargo check --workspace`를 실행해 전체 Rust workspace가
   성공적으로 빌드됨을 확인했다(42.29s). `bionic-vm-facade`의 기존
   unused/dead-code 경고 3개는 남아 있어 별도 정리 항목으로 기록한다.
+- Checkpoint 1224 (2026-09-11): `bionic-vm-facade` borrowed-range 등록의
+  중복 envelope를 AOSP errno 계약에 맞춰 `EEXIST`로 거부하고 불필요한
+  mapping lock을 제거했다. facade 단위 테스트 4개와 `cargo check
+  --workspace`가 PASS했으며 이전 unused/dead-code 경고도 해소됐다.

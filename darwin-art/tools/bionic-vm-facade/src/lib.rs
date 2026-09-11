@@ -340,12 +340,8 @@ pub extern "C" fn darwin_art_bionic_vm_register_borrowed_range(
         return -1;
     }
     let start = address as usize;
-    let Some(end) = start.checked_add(length) else {
+    let Some(_end) = start.checked_add(length) else {
         set_errno(ANDROID_EOVERFLOW);
-        return -1;
-    };
-    let Ok(mappings) = provider.mappings.lock() else {
-        set_errno(ANDROID_EIO);
         return -1;
     };
     // A borrowed range describes an externally-owned Android ELF image. The
@@ -360,7 +356,10 @@ pub extern "C" fn darwin_art_bionic_vm_register_borrowed_range(
     // One ELF image may publish multiple overlapping envelopes while its
     // PT_LOAD segments are finalized. Track each exact envelope independently
     // so the matching unregister call remains transactional.
-    borrowed.insert(start, length);
+    if borrowed.insert(start, length).is_some() {
+        set_errno(ANDROID_EEXIST);
+        return -1;
+    }
     0
 }
 
