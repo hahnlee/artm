@@ -10182,6 +10182,12 @@ incomplete and still requires managed caller unwind validation.
   정체 자체는 런타임 persistence 회귀로 남겨 두며, timeout/강제 종료로 숨기지
   않는다.
 
+- Checkpoint 1067 (2026-09-11): JNI/HWUI ownership 및 MAP_JIT 변경을 반영한
+  `audit-native-graph.sh`가 `RC=0`으로 통과했다. 입력 472개, runtime=258,
+  graphics-jni=63, ICU=458, cached TU=809, archive=8, phases=12이며 graph
+  digest `8bd43dce…3298e`가 warm no-op/직접 source invalidation 조건에서
+  결정적으로 유지됐다.
+
 - Checkpoint 1066 (2026-09-11): 최신 HWUI JNI owner 및 MAP_JIT 변경 후
   `audit-art-jit.sh`를 재실행했다. Nterp, compiled arithmetic/GC, VarHandle,
   invoke-polymorphic/custom, Surface lockCanvas, MediaCodec output-surface,

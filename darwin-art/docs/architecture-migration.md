@@ -14720,3 +14720,8 @@ or admission exception was added.
 - Checkpoint 1066 (2026-09-11): 최신 JNI/HWUI 및 MAP_JIT 변경 후 ART JIT
   audit를 재실행해 Nterp, compiled/GC, VarHandle, invoke, Surface,
   MediaCodec, W^X 및 shutdown lifecycle 전체가 `RC=0`으로 통과했다.
+
+- Checkpoint 1067 (2026-09-11): 최신 변경 후 `audit-native-graph.sh`가
+  `RC=0`으로 통과했다. 입력 472개와 graph digest
+  `8bd43dce…3298e`, runtime=258, graphics-jni=63, ICU=458, cached TU=809,
+  archives=8, phases=12를 확인해 재현 build identity를 갱신했다.
