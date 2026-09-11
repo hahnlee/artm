@@ -10017,3 +10017,8 @@ incomplete and still requires managed caller unwind validation.
   가 window-seconds=10 이후 host/child 프로세스를 2분 이상 유지했다. 이번 실행에서
   생성된 host 61214와 child 61432/61435/61436은 종료되지 않아 해당 PID만 강제
   종료했다. 이는 이전 bind fatal과 별개의 lifecycle hang으로 Astra에 재검토 요청했다.
+
+- Checkpoint 1017 (2026-09-11): PID 시각 대조 결과 위 PID들은 수동 URL 실행에서
+  생성된 것이었다. 실제 pointer-sequence lifecycle host는 별도 PID로 78초 이상
+  CPU 100% 상태를 보여 owner-loop/frame-clock 정체 후보가 됐다. 해당 테스트
+  PID만 종료했고 Astra에 원인 분석을 요청했다.

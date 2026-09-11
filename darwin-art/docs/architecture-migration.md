@@ -14442,3 +14442,8 @@ or admission exception was added.
   세 child가 설정된 10초 창 이후에도 2분 이상 살아 있어, 생성된 PID만 종료했다.
   이는 Binder startup 예외 제거 후 드러난 별도 종료/정리 경로 문제이며, 원인 분석
   전까지 acceptance 완료로 판정하지 않는다.
+
+- Checkpoint 1017 (2026-09-11): 실행 identity를 재대조해 수동 URL 실행과 lifecycle
+  PID를 분리했다. 실제 pointer-sequence 경로의 host가 78초 후에도 CPU 100%로
+  유지되어 owner-loop/frame-clock 정체 후보가 됐다. 테스트 PID만 종료했으며,
+  다음 단계는 해당 GPU loop와 cleanup의 enter/exit 증거 수집이다.
