@@ -14933,6 +14933,10 @@ or admission exception was added.
   runtime identity 갱신 수가 565개로 증가했다. 남은 항목은 동일 실행에서
   계속 갱신한다.
 
+- Checkpoint 1106 (2026-09-11): current-identity corpus refresh가 17분 이상
+  살아 있으며, 1,076개 결과는 모두 `passed`, identity 갱신 항목은 691개다.
+  장시간 AOSP/JVMTI 테스트를 포함한 동일 실행을 유지한다.
+
 - Checkpoint 1100 (2026-09-11): 현재 identity corpus refresh 프로세스가
   10분 이상 생존하고 CPU를 사용하며 계속 진행 중임을 확인했다. ledger는
   1,076개 모두 `passed`, current identity 갱신은 299개다. 프로세스를 재시작하거나
