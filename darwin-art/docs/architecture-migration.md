@@ -14518,3 +14518,8 @@ or admission exception was added.
   concurrent execution=2209를 통과했다. 두 negative 실행의 SIGBUS(상태 138)는
   보호 위반이 차단됐다는 의도된 결과로 확인했으며, JIT memory 기능별 증거를
   ledger에 추가했다.
+
+- Checkpoint 1031 (2026-09-11): JIT negative fixture에 fault 직전 phase/address
+  로그를 추가하고 audit가 armed-phase를 검증하도록 했다. positive concurrent
+  execution=2647 및 두 expected SIGBUS gate가 통과해 음성 결과의 원인 귀속
+  증거를 강화했다.

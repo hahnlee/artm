@@ -23,11 +23,16 @@ int main(int argc, char** argv) {
   auto first_fn = reinterpret_cast<int (*)()>(code);
   assert(first_fn() == 42);
   if (argc == 2 && strcmp(argv[1], "--protected-write") == 0) {
+    fprintf(stderr, "JIT memory negative phase=protected-write armed address=%p\n",
+            code);
     *static_cast<volatile uint32_t*>(code) = first[0];
     return 99; // Must fault: this thread is execute-only for JIT memory.
   }
   if (argc == 2 && strcmp(argv[1], "--execute-while-writing") == 0) {
     DarwinArtJitWriteScope write;
+    fprintf(stderr,
+            "JIT memory negative phase=execute-while-writing armed address=%p\n",
+            code);
     return first_fn() == 42 ? 99 : 98; // Must fault: this thread cannot execute.
   }
   std::atomic<bool> done{false};

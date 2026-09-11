@@ -10100,3 +10100,9 @@ incomplete and still requires managed caller unwind validation.
   protected-write/execute-while-writing negative 모드는 의도된 SIGBUS(쉘 상태
   138)로 보호 fault gate를 통과했다. 스크립트의 `Bus error: 10` 출력은 실패가
   아니라 negative 증거이며 JIT memory ledger를 PASS로 기록한다.
+
+- Checkpoint 1031 (2026-09-11): JIT 음성 smoke에 fault 직전
+  `phase=... armed`와 보호 대상 주소 로그를 추가하고 audit가 해당 phase를
+  반드시 확인하도록 보강했다. positive concurrent execution=2647 및 두
+  expected SIGBUS gate가 통과했으며, fault-site PC 귀속 전 단계의 명시적
+  armed 증거를 확보했다.

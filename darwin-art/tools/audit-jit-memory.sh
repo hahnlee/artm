@@ -19,5 +19,9 @@ for mode in protected-write execute-while-writing; do
     echo "JIT memory: expected protection fault for $mode, got $status" >&2
     exit 1
   fi
+  grep -F "JIT memory negative phase=$mode armed" "$build/$mode.log" >/dev/null || {
+    echo "JIT memory: protection fault for $mode lacked armed-phase evidence" >&2
+    exit 1
+  }
 done
 echo 'JIT memory: PASS signed MAP_JIT nested scopes concurrent execution positive+negative W^X gates'
