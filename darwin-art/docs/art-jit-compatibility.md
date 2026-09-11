@@ -10617,3 +10617,9 @@ incomplete and still requires managed caller unwind validation.
   재실행해 `RC=0`을 확인했다. ARM64 intrinsics, compiled/JNI/GC/예외 경로,
   VarHandle 및 invoke-polymorphic/custom, 배열·문자열·CRC·Memory 경로와
   compiled/native exit hooks, VM shutdown이 모두 PASS 증거를 남겼다.
+
+- Checkpoint 1114 (2026-09-11): 변경 없는 Calendar API29 APK를 20초 실행해
+  설치·ClassLoader·ViewRoot/HWUI 초기화와 720x1280 GPU scanout을 확인했다.
+  보존된 Chromium APK로 tab/grid graphics acceptance도 `PASS`했다
+  (GLES/ANGLE/Graphite/Dawn/MoltenVK/AHB/SurfaceFlinger/Metal). HTTPS E2E는
+  현재 macOS mkcert root 미신뢰로 중단되며, sudo 키체인 승인 후 재실행해야 한다.
