@@ -15384,3 +15384,8 @@ or admission exception was added.
   `-Xusejit:false` requested/actual=0 및 env/AOSP 옵션 충돌 거부를 확인했다.
   기본 requested=1에서 actual=0이므로 host JIT backend 초기화 원인은
   다음 단계에서 Astra 리뷰와 함께 추적한다.
+- Checkpoint 1199 (2026-09-11): post-Create 진단 필드를 확장해 기본 실행의
+  `jit_object=0`, `compiler_callbacks=0`, `aot_compiler=0`을 확인했다.
+  AOSP 옵션 전달은 정상이나 detached host에서 JIT 객체 생성이 누락된
+  상태이므로, 다음 단계는 runtime bootstrap의 JIT 초기화 계약과
+  컴파일러 archive 연결을 분리해 검증하는 것이다.

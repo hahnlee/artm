@@ -806,7 +806,11 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
   // Runtime::Create, since ParsedOptions is moved into ART at that boundary.
   std::cerr << "ART runtime JIT: requested=" << (enable_jit ? 1 : 0)
             << " actual="
-            << (art::Runtime::Current()->UseJitCompilation() ? 1 : 0) << "\n";
+            << (art::Runtime::Current()->UseJitCompilation() ? 1 : 0)
+            << " jit_object=" << (art::Runtime::Current()->GetJit() != nullptr ? 1 : 0)
+            << " compiler_callbacks=" << (art::Runtime::Current()->IsCompiler() ? 1 : 0)
+            << " aot_compiler=" << (art::Runtime::Current()->IsAotCompiler() ? 1 : 0)
+            << "\n";
   // Android's zygote specialization publishes DEBUG_ENABLE_JDWP separately
   // from ApplicationInfo.FLAG_DEBUGGABLE. ART run-tests that attach a limited
   // JVMTI environment use that process capability while deliberately keeping

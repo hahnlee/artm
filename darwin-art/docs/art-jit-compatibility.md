@@ -11035,3 +11035,8 @@ incomplete and still requires managed caller unwind validation.
   requested=0/actual=0으로 종료되고, `DARWIN_ART_JIT=1`과의 충돌은
   명시적으로 거부된다. 기본 실행은 requested=1이지만 actual=0으로
   관측되어 JIT 생성 경로는 아직 별도 조사 대상이며 완료로 간주하지 않는다.
+- Checkpoint 1199 (2026-09-11): 기본 실행을 JIT trace로 재현해
+  `requested=1 actual=0 jit_object=0 compiler_callbacks=0 aot_compiler=0`을
+  확인했다. 따라서 단순 옵션 파싱 문제가 아니라 현재 detached runtime
+  인스턴스에 Jit 객체가 생성되지 않는 초기화 문제다. trace에는 compiler
+  compile 요청 실패도 있어 JIT backend/컴파일러 연결을 Astra와 별도 조사한다.
