@@ -10785,3 +10785,9 @@ incomplete and still requires managed caller unwind validation.
 - Checkpoint 1149 (2026-09-11): post-allocator fresh ledger가 약 4분째 진행
   중이며 204개 항목을 동일 identity `eb468bf1…`로 기록했다(202 passed,
   133-static-invoke-super와 137-cfi 2 failed). 두 실패는 종료 후 단독 재현한다.
+
+- Checkpoint 1150 (2026-09-11): post-allocator fresh ledger가 계속 진행 중이며
+  237개 항목을 동일 identity `eb468bf1…`로 기록했다(232 passed/5 failed).
+  현재 실패 목록은 `133-static-invoke-super`, `137-cfi`, `1909-per-agent-tls`,
+  `1916-get-set-current-frame`, `1921-suspend-native-recursive-monitor`이고
+  전체 실행 종료 후 개별 재현한다.
