@@ -11060,6 +11060,12 @@ incomplete and still requires managed caller unwind validation.
   `TabSwitcherButtonView`는 소비했지만 두 번째 입력이 `SuggestionsTileView`로
   전달되어 게이트가 실패했다(`run.Zeu1Pa`). 이를 그래픽 오염이 아닌
   JIT-on UI/event 경로 회귀로 분리한다.
+- Checkpoint 1204 (2026-09-11): JIT 유지 + AOSP no-inline 옵션
+  (`-Xcompiler-option --inline-max-code-units=0`)으로 Chromium 게이트를
+  재실행했다. JIT trace와 함께 실제 `TabGridView`, target-states=10,
+  GPU/SurfaceFlinger 검증이 PASS했다(`run.2nus3h`). 따라서 인라이닝을
+  끄면 해결되는 결정적 codegen 문제는 확인되지 않았고, 간헐 실패는
+  cold startup 또는 callback lifecycle race 후보로 유지한다.
 - Checkpoint 1203 (2026-09-11): `DARWIN_ART_JIT_TRACE=1`로 같은 Chromium
   게이트를 재현한 결과 JIT on에서도 실제 `TabGridView`가 hit되고
   `target-states=10`으로 PASS했다(`run.NAy3z0`). 첫 tap hold는 19.505ms,

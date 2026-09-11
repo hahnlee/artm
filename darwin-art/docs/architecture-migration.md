@@ -15406,6 +15406,10 @@ or admission exception was added.
   첫 탭 버튼 이후 두 번째 클릭이 SuggestionsTileView에 도달했다. 다음은
   JIT 컴파일/디옵트가 Chrome UI listener 또는 tab-grid attach에 미치는
   영향을 Astra 리뷰 후 계측하는 작업이다.
+- Checkpoint 1204 (2026-09-11): JIT on/no-inline Chromium 실행이 실제
+  TabGridView와 10개 합성 상태를 통과했다(`run.2nus3h`). JIT codegen을
+  전역으로 우회할 근거는 없으며, 실패 재현 시 UP 이후 `performClick`,
+  focus/pressed 상태와 coordinator attach 순서를 직접 기록해야 한다.
 - Checkpoint 1203 (2026-09-11): JIT trace 실행에서는 변경 없는 Chromium의
   탭 전환이 다시 PASS했다(`run.NAy3z0`, 실제 TabGridView, 합성 상태 10개).
   동일 JIT-on에서 실패한 `run.Zeu1Pa`와 함께 좌표/hold/GPU 출력 문제는
