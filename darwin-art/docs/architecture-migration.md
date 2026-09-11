@@ -14056,6 +14056,10 @@ or admission exception was added.
   thread stop, ELF unload, detach, `destroy-vm complete` 순서를 모두
   통과했다.
 
+- Checkpoint 1069 (2026-09-11): 최신 JNI/HWUI 변경 후 AOSP Calculator와
+  DeskClock graphics acceptance가 `RC=0`으로 통과했다. Calculator `2+3=5`,
+  DeskClock Timer, HWUI+SurfaceFlinger+Metal 공통 경로를 재확인했다.
+
 - Checkpoint 946 (2026-09-10): Chromium window-menu 재검증 중 `elf-unload`
   직후 SIGABRT와 0x0 popup relayout이 관측됐다. Astra 리뷰를 먼저 받아
   early-error cleanup과 teardown abort를 분리하기로 했고, 호스트에

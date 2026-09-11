@@ -10182,6 +10182,11 @@ incomplete and still requires managed caller unwind validation.
   정체 자체는 런타임 persistence 회귀로 남겨 두며, timeout/강제 종료로 숨기지
   않는다.
 
+- Checkpoint 1069 (2026-09-11): 최신 JNI/HWUI owner 변경 후 변경 없는 AOSP
+  Calculator와 DeskClock graphics acceptance를 재실행했다. Calculator
+  `2+3=5`, DeskClock Timer 및 HWUI+SurfaceFlinger+Metal 공통 경로가 모두
+  `RC=0`으로 통과했다.
+
 - Checkpoint 1068 (2026-09-11): HWUI/JNI ownership 변경 후 `cargo test -q -p
   darwin-art-host`를 재실행했다. host crate의 8개+2개 테스트 및 전체 test
   target이 모두 통과했다(`0 failed`).
