@@ -1,31 +1,19 @@
---- a/thread/CommonPool.h
-+++ b/thread/CommonPool.h
-@@ -83,5 +83,6 @@
-     static constexpr auto QUEUE_SIZE = 128;
- 
-     static void post(Task&& func);
-+    static void shutdown();
- 
-     template <class F>
-@@ -111,6 +112,7 @@
-     ~CommonPool();
- 
-     void enqueue(Task&&);
-+    void stop();
-     void doWaitForIdle();
- 
-     void workerLoop();
 --- a/thread/CommonPool.cpp
 +++ b/thread/CommonPool.cpp
-@@ -53,6 +53,18 @@
+@@ -53,6 +53,23 @@
  }
  
  CommonPool::~CommonPool() {
 +    stop();
 +}
 +
++// Set by instance() once the singleton has actually been constructed.
++static CommonPool* g_darwin_common_pool = nullptr;
++
 +void CommonPool::shutdown() {
-+    instance().stop();
++    // Do not call instance() here: zygote shutdown must not lazily create
++    // HWUI workers (their JNI attachment is correctly forbidden by ART).
++    if (g_darwin_common_pool != nullptr) g_darwin_common_pool->stop();
 +}
 +
 +extern "C" __attribute__((visibility("default"))) void darwin_art_hwui_shutdown_common_pool() {

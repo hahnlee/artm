@@ -14970,3 +14970,9 @@ or admission exception was added.
   을 실제 브라우저 탭으로 열어 확인했다. 제목/본문/`Learn more` 링크가 접근성
   트리에 노출되고 화면에도 정상 렌더링되었다. current-identity corpus refresh는
   별도 프로세스로 계속 실행 중이며, zygote 종료 경로의 SIGABRT 수정은 아직 남아 있다.
+
+- Checkpoint 1111 (2026-09-11): Astra 진단에 따라 CommonPool shutdown이
+  singleton을 lazy-create하지 않고 이미 생성된 pool만 stop하도록 수정했다. HWUI
+  static foundation 재빌드와 graphics-link audit가 통과했으며, 새 runtime identity에서
+  `689-zygote-jit-deopt`, `728-imt-conflict-zygote`, `980-redefine-object`를 포함한
+  corpus 1,076/1,076이 모두 `passed`다.
