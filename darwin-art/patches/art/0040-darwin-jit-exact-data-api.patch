@@ -11,7 +11,7 @@ diff --git a/runtime/jit/jit_memory_region.cc b/runtime/jit/jit_memory_region.cc
  #endif
  #include <android-base/unique_fd.h>
  #include <log/log.h>
-@@ -122,10 +123,87 @@
+@@ -122,10 +123,107 @@
      if (!exec_pages.IsValid()) {
        *error_msg = "Failed to create Darwin MAP_JIT code cache: " + error_str;
        return false;
@@ -20,6 +20,19 @@ diff --git a/runtime/jit/jit_memory_region.cc b/runtime/jit/jit_memory_region.cc
 -                                      data_capacity, kProtRW, false, false,
 -                                      nullptr, &error_str);
 +    const size_t rounded_data = RoundUp(data_capacity, MemMap::GetPageSize());
++    constexpr size_t kPairAttempts = 16;
++    bool mapped_pair = false;
++    for (size_t attempt = 0; attempt != kPairAttempts; ++attempt) {
++      if (attempt != 0) {
++        exec_pages.Reset();
++        data_pages.Reset();
++        exec_pages = MemMap::MapFileAtAddress(nullptr, exec_capacity, kProtRWX,
++                                              MAP_PRIVATE | MAP_ANON | MAP_JIT, -1,
++                                              /* start= */ 0, /* low_4gb= */ false,
++                                              name.c_str(), /* reuse= */ false, nullptr,
++                                              &error_str);
++        if (!exec_pages.IsValid()) break;
++      }
 +    const uintptr_t exec_base = reinterpret_cast<uintptr_t>(exec_pages.Begin());
 +    const uintptr_t exec_limit_end = reinterpret_cast<uintptr_t>(exec_pages.End());
 +    // Mach-O binaries reserve the complete low 4GiB (__PAGEZERO). Keep the
@@ -77,21 +90,28 @@ diff --git a/runtime/jit/jit_memory_region.cc b/runtime/jit/jit_memory_region.cc
 +      }
 +      cursor = RoundUp(region + region_size, MemMap::GetPageSize());
 +    }
-+    if (!data_pages.IsValid()) {
-+      // Metadata-first fallback for fragmented Mach maps. MAP_JIT placement
-+      // is kernel-selected; validate its actual address with the guard below.
-+      exec_pages.Reset();
-+      data_pages = MemMap::MapAnonymous(data_cache_name.c_str(), nullptr,
-+                                        data_capacity, kProtRW, false, false,
-+                                        nullptr, &error_str);
-+      if (data_pages.IsValid()) {
-+        // MemMap expected_ptr is an exact-address contract, not an mmap hint.
-+        exec_pages = MemMap::MapFileAtAddress(
-+            nullptr, exec_capacity, kProtRWX,
-+            MAP_PRIVATE | MAP_ANON | MAP_JIT, -1, /* start= */ 0,
-+            /* low_4gb= */ false, name.c_str(), /* reuse= */ false, nullptr,
-+            &error_str);
++    if (data_pages.IsValid()) {
++      const uintptr_t data_begin = reinterpret_cast<uintptr_t>(data_pages.Begin());
++      const uintptr_t data_end = reinterpret_cast<uintptr_t>(data_pages.End());
++      const uintptr_t exec_end = reinterpret_cast<uintptr_t>(exec_pages.End());
++      if (data_begin <= exec_base && data_end <= exec_base &&
++          exec_end - data_begin <= UINT32_MAX) {
++        mapped_pair = true;
++        break;
 +      }
++      error_str = "Darwin JIT pair outside uint32 range attempt=" +
++                  std::to_string(attempt) + " data=" + std::to_string(data_begin) +
++                  ".." + std::to_string(data_end) + " exec=" +
++                  std::to_string(exec_base) + ".." + std::to_string(exec_end);
++      data_pages.Reset();
++    }
++    exec_pages.Reset();
++    }
++    if (!mapped_pair) {
++      data_pages.Reset();
++      exec_pages.Reset();
++      *error_msg = "Darwin JIT pair allocation exhausted: " + error_str;
++      return false;
 +    }
 +    if (!data_pages.IsValid() || !exec_pages.IsValid()) {
 +      exec_pages.Reset();

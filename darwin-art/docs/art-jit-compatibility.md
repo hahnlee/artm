@@ -10762,3 +10762,9 @@ incomplete and still requires managed caller unwind validation.
   1,076개 전부 동일 identity `26ba01e4…`로 기록되며 1,070 passed/6 failed다.
   실패는 `024`, `582`, `642`, `726`, `949`, `2256`이고 모두 optimized
   compilation 단계 status=123으로, 0040 MAP_JIT allocator 수정이 남아 있다.
+
+- Checkpoint 1145 (2026-09-11): 0040 allocator를 bounded pair retry로 수정하고
+  graphics bootstrap 재빌드가 통과했다. 기존 실패 6개를 새 runtime에서 단독
+  재실행해 모두 interpreter/JIT/unmodified optimized PASS를 확인했다. 혼합
+  ledger 오염을 피하기 위해 별도 `art-upstream-corpus-after-allocator` ledger로
+  전체 1,076개 fresh 실행을 시작했다.
