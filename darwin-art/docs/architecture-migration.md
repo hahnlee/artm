@@ -14587,3 +14587,9 @@ or admission exception was added.
   `iterations=2`, `new-tab=2`, `JNI-detach-crash=0`, `service-children=reaped`
   PASS다. 공유 persistence에서 발생한 입력 전 NavigationController 정체는
   별도 런타임 회귀로 보존하며 강제 종료로 통과 처리하지 않는다.
+
+- Checkpoint 1043 (2026-09-11): 동일한 임시 앱 데이터 루트에서 Chromium을
+  연속 2회 실행해 모두 `RC=0` 및 synthetic input 4건 처리를 확인했다. 정체는
+  persistence 일반 재실행이 아니라 기존 공유 루트의 대량 TabState 복원에서만
+  재현된다. Astra 분석상 첫 입력 전 main native NavigationController가
+  점유되며, 실제 ALooper/MessageQueue callback 경계 계측과 수정이 다음 과제다.

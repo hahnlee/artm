@@ -10181,3 +10181,10 @@ incomplete and still requires managed caller unwind validation.
   `service-children=reaped`로 PASS했다. 공유 데이터 루트의 누적 TabState 복원
   정체 자체는 런타임 persistence 회귀로 남겨 두며, timeout/강제 종료로 숨기지
   않는다.
+
+- Checkpoint 1043 (2026-09-11): 동일한 임시 앱 데이터 루트로 Chromium을 두
+  번 연속 실행해 모두 `RC=0`으로 종료되고 synthetic input 4건이 처리됨을
+  확인했다. 따라서 정체는 일반적인 persistence 재실행 자체가 아니라 기존
+  공유 루트에 누적된 대량 TabState 복원에서만 재현된다. Astra가 SIGQUIT
+  thread dump로 첫 입력 전 main native NavigationController 점유를 확인했고,
+  실제 ALooper/MessageQueue callback 경계 계측과 수정이 다음 과제다.
