@@ -11007,3 +11007,8 @@ incomplete and still requires managed caller unwind validation.
   10개 입력·프레임·graphics acceptance 테스트가 모두 PASS했다. 이 결과는
   native attachment ownership 및 reverse shutdown 계약의 Rust 단위 증거를
   새 빌드 상태에서 재확인한 것이다.
+- Checkpoint 1194 (2026-09-11): support DEX profile-cache 복사의 재실행
+  경로에서 0400 파일 권한 오류를 수정했다. profile 파일만 일시적으로
+  재개방 후 다시 봉인하며, 현재 `aosp-core-apps-graphics-acceptance`가
+  변경 없는 Calculator `2+3=5`와 DeskClock Timer 전환을 HWUI+
+  SurfaceFlinger+Metal 경로에서 PASS했다.

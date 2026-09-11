@@ -15360,3 +15360,7 @@ or admission exception was added.
   새 현재 트리에서 실행해 모두 PASS했다. 세션 lifecycle, native owner의
   reverse teardown, provider lease, 입력/프레임 경계가 분리된 단위 계약으로
   검증됨을 기록한다.
+- Checkpoint 1194 (2026-09-11): profile-owned support DEX cache를 반복
+  실행할 때 0400 파일을 안전하게 갱신하도록 권한 전환을 국소화했다.
+  최신 변경 없는 AOSP Calculator/DeskClock acceptance가 각각 계산 결과와
+  Timer 페이지, HWUI·SurfaceFlinger·Metal visible buffer를 모두 재검증했다.

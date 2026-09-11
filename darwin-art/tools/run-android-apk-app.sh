@@ -405,6 +405,10 @@ if [[ -n "$profile_mount" ]]; then
   # cache root.
   support_dex_cache="$profile_mount/system/dex-cache/button-dex"
   mkdir -p "$support_dex_cache"
+  # The cache file is sealed after publication. Re-open only this profile-owned
+  # copy for an idempotent refresh; never relax permissions in the signed app.
+  [[ ! -e "$support_dex_cache/classes.dex" ]] ||
+    chmod u+w "$support_dex_cache/classes.dex"
   cp "$support_dex" "$support_dex_cache/classes.dex"
   chmod 0400 "$support_dex_cache/classes.dex"
   support_dex="$support_dex_cache/classes.dex"
