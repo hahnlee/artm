@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <algorithm>
 #include <atomic>
+#include <cerrno>
 #include <chrono>
 #include <condition_variable>
 #include <cstdlib>
@@ -2983,6 +2984,13 @@ jboolean TransactRemoteBinder(JNIEnv* env, jint control_fd, jint target_id,
     return JNI_FALSE;
   }
   std::unique_lock<std::recursive_mutex> lock(g_wire_mutex);
+  const auto debug_failure = [&](const char* phase) {
+    if (std::getenv("DARWIN_ART_DEBUG_BINDER") != nullptr) {
+      std::cerr << "ART Binder wire: transact failure fd=" << control_fd
+                << " target=" << target_id << " code=" << code
+                << " phase=" << phase << " errno=" << errno << "\n";
+    }
+  };
   if (std::getenv("DARWIN_ART_DEBUG_BINDER") != nullptr) {
     std::cerr << "ART Binder wire: transact fd=" << control_fd
               << " target=" << target_id << " code=" << code
@@ -2998,12 +3006,14 @@ jboolean TransactRemoteBinder(JNIEnv* env, jint control_fd, jint target_id,
       });
       auto current = g_wire_connections.find(control_fd);
       if (current == g_wire_connections.end() || !current->second.ready) {
+        debug_failure("wait-ready-dispatcher");
         return JNI_FALSE;
       }
     } else {
       WireMessage ready;
       if (!ReceiveWireMessage(control_fd, &ready) ||
           ready.header.type != kWireReady) {
+        debug_failure("wait-ready");
         return JNI_FALSE;
       }
       connection.ready = true;
@@ -3021,6 +3031,7 @@ jboolean TransactRemoteBinder(JNIEnv* env, jint control_fd, jint target_id,
   if (!ExportParcel(env, control_fd, JavaParcel(env, data), &request, &binders,
                     &bytes, &descriptors) ||
       !SendWireMessage(control_fd, request, binders, bytes, descriptors)) {
+    debug_failure("send-request");
     return JNI_FALSE;
   }
   // The service owner thread is the sole socket reader. Android Binder calls
@@ -3036,13 +3047,20 @@ jboolean TransactRemoteBinder(JNIEnv* env, jint control_fd, jint target_id,
              current->second.pending_replies.contains(sequence);
     });
     auto current = g_wire_connections.find(control_fd);
-    if (current == g_wire_connections.end()) return JNI_FALSE;
+    if (current == g_wire_connections.end()) {
+      debug_failure("wait-reply-channel-closed");
+      return JNI_FALSE;
+    }
     auto pending = current->second.pending_replies.find(sequence);
-    if (pending == current->second.pending_replies.end()) return JNI_FALSE;
+    if (pending == current->second.pending_replies.end()) {
+      debug_failure("wait-reply-missing");
+      return JNI_FALSE;
+    }
     std::unique_ptr<WireMessage> incoming = std::move(pending->second);
     current->second.pending_replies.erase(pending);
     if (incoming->header.type != kWireReply ||
         incoming->header.status != 0) {
+      debug_failure("wait-reply-status");
       return JNI_FALSE;
     }
     return (flags & kBinderFlagOneWay) != 0 || reply == nullptr ||
@@ -3055,7 +3073,10 @@ jboolean TransactRemoteBinder(JNIEnv* env, jint control_fd, jint target_id,
   // Nested callback transactions are dispatched by the loop before the ACK.
   for (;;) {
     WireMessage incoming;
-    if (!ReceiveWireMessage(control_fd, &incoming)) return JNI_FALSE;
+    if (!ReceiveWireMessage(control_fd, &incoming)) {
+      debug_failure("receive-reply");
+      return JNI_FALSE;
+    }
     if (std::getenv("DARWIN_ART_DEBUG_BINDER") != nullptr) {
       std::cerr << "ART Binder wire: response fd=" << control_fd
                 << " type=" << incoming.header.type
@@ -3070,6 +3091,7 @@ jboolean TransactRemoteBinder(JNIEnv* env, jint control_fd, jint target_id,
     if (incoming.header.type != kWireReply ||
         incoming.header.sequence != request.sequence ||
         incoming.header.status != 0) {
+      debug_failure("receive-reply-status");
       return JNI_FALSE;
     }
     return (flags & kBinderFlagOneWay) != 0 || reply == nullptr ||

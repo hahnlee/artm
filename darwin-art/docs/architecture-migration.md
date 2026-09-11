@@ -14403,3 +14403,9 @@ or admission exception was added.
   실행은 rc=0 뒤 `Crashing due to uncaught Java exception` 로그를 남겼다.
   이 결과는 macOS trust gate 통과나 Chromium 런타임 호환성 완료를 의미하지 않으며,
   해당 런타임 경로는 Astra 원인 분석 대상으로 남긴다.
+
+- Checkpoint 1010 (2026-09-11): Chromium VIEW 경로에 Binder phase/errno 진단을
+  넣고 재실행했다. 정상 child들은 `INTERFACE_TRANSACTION` descriptor를 반환했지만,
+  마지막 실패는 child 준비 전 `wait-ready-dispatcher errno=9 (EBADF)`였다.
+  AOSP 계약상 descriptor transaction 구현 부재가 아니라, host의 service channel
+  startup/cleanup 경합을 다음 수정 대상으로 확정했다.

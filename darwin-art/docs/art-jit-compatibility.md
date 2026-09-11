@@ -9974,3 +9974,9 @@ incomplete and still requires managed caller unwind validation.
   실제 Chromium APK의 Android VIEW intent로 전달한 런타임 실행은 host rc=0이지만
   Chromium child log의 `Crashing due to uncaught Java exception`으로 종료되어,
   외부 브라우저 성공과 Darwin Chromium HTTPS acceptance를 분리해 기록한다.
+
+- Checkpoint 1010 (2026-09-11): Astra 지시에 따라 Binder 단계 진단을 추가하고
+  실제 Chromium VIEW 실행을 재검증했다. `INTERFACE_TRANSACTION` 자체는 앞선
+  child들에서 descriptor 응답이 정상이며, 실패 채널은 child의 `binder=ready` 전에
+  `phase=wait-ready-dispatcher errno=9 (EBADF)`로 종료됐다. 따라서 예외 문구는
+  Binder 미지원이 아니라 service startup/transport 종료 경합을 표시한다.
