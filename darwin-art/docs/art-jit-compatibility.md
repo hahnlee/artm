@@ -10278,3 +10278,9 @@ incomplete and still requires managed caller unwind validation.
   host를 종료해 shutdown 관측 오염을 제거했다. 사용자 소유 `foundation.rs`
   변경은 보존했고, HWUI worker JNI detach 공통 owner 통합은 Astra 검토 후
   다음 gate로 진행한다.
+
+- Checkpoint 1058 (2026-09-11): HWUI render hook·callback·global-ref JNI
+  attachment를 공통 C++ `thread_local` owner로 통합했다. 자체 attach한 worker만
+  TLS destructor에서 detach하고 기존 attachment는 borrow한다. focused test,
+  JNI object audit 및 runtime/host graphics closure audit가 모두 `RC=0`으로
+  통과했다(archive-members=1970, registrar=51, ART-TLS warning=0).

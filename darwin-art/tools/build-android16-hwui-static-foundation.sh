@@ -260,6 +260,7 @@ patch_identity="$(printf '%s\n%s\n%s\n%s\n%s\n%s\n' "$HWUI_SOURCE_MANIFEST_SHA25
   "$DARWIN_REQUIRE_JNI_PATCH_SHA256" \
   "$DARWIN_COMMON_POOL_PATCH_SHA256" \
   "$DARWIN_COMMON_POOL_EXPLICIT_PATCH_SHA256" \
+  "$(shasum -a 256 "$project_root/compat/darwin_hwui_jni_attachment.h" | awk '{print $1}')" \
   | shasum -a 256 | awk '{print $1}')"
 if [[ ! -f "$patched_marker" || "$(<"$patched_marker")" != "$patch_identity" ]]; then
   fresh_shadow="$output_dir/patched-source.new.$$"
@@ -305,6 +306,7 @@ flags=(
   -Wno-inconsistent-missing-override -Wno-abstract-final-class
   -Wno-deprecated-literal-operator -Wno-missing-field-initializers
   -I"$generated_dir/include"
+  -iquote "$project_root/compat"
   -I"$project_root/compat/hwui-android-platform"
   -I"$hwui_source" -I"$hwui_source/platform/host"
   -I"$aosp_root/frameworks/base/libs/androidfw/include"

@@ -229,7 +229,7 @@ fi
 "$ld_bin" -r -arch arm64 \
   -platform_version macos "$sdk_version" "$sdk_version" \
   -syslibroot "$sdk_root" \
-  "${closure_private_extern_flags[@]}" \
+  ${closure_private_extern_flags[@]+"${closure_private_extern_flags[@]}"} \
   "${linker_archives[@]}" -o "$closure_object"
 if [[ "$(file "$closure_object")" != *"Mach-O 64-bit object arm64"* ]]; then
   echo "graphics-closure: relocatable closure is not arm64 Mach-O" >&2
@@ -246,6 +246,10 @@ if [[ "$undefined_count" != "$expected_relocatable_undefined_count" ||
   echo "graphics-closure: relocatable unresolved identity changed" >&2
   echo "  expected-count=$expected_relocatable_undefined_count actual-count=$undefined_count" >&2
   echo "  expected-sha=$expected_relocatable_undefined_sha256 actual-sha=$undefined_sha" >&2
+  if [[ -f "$build_dir/relocatable-undefined-symbols.txt" ]]; then
+    echo "  import delta from last successful audit (removed left, added right):" >&2
+    comm -3 "$build_dir/relocatable-undefined-symbols.txt" "$relocatable_undefined" >&2
+  fi
   exit 3
 fi
 

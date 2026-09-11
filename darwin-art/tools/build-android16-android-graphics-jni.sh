@@ -284,8 +284,9 @@ common_flags=(
   -I"$aosp/external/skia/include/private" -I"$aosp/external/skia/src/core"
   -I"$aosp/external/skia/src/codec"
 )
+common_flags+=( -iquote "$project_root/compat" )
 if [[ "$gpu_mode" == 1 ]]; then
-  common_flags+=( -DDARWIN_ART_HWUI_GPU -iquote "$project_root/compat" )
+  common_flags+=( -DDARWIN_ART_HWUI_GPU )
 else
   common_flags+=( -DHWUI_NULL_GPU )
 fi
@@ -296,7 +297,7 @@ fi
 # objects.
 patch_identity="$(for patch_file in "$critical_patch" "$lazy_native_window_patch" \
     "$thread_detach_patch" "$require_jni_env_patch" "$globalref_jni_patch" \
-    "$hwui_gpu_patch"; do sha256 "$patch_file"; done |
+    "$hwui_gpu_patch" "$project_root/compat/darwin_hwui_jni_attachment.h"; do sha256 "$patch_file"; done |
     shasum -a 256 | awk '{print $1}')"
 
 compile_cached() {

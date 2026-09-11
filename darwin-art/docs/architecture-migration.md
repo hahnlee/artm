@@ -14676,3 +14676,9 @@ or admission exception was added.
   장기 실행 프로세스가 shutdown 측정을 오염시키지 않도록 정리했다. 사용자
   변경 외 소스 수정은 없으며, HWUI worker JNI detach ownership 통합은 Astra
   검토 결과를 반영할 다음 acceptance gate다.
+
+- Checkpoint 1058 (2026-09-11): HWUI JNI attachment ownership을 공통 C++
+  `thread_local` owner로 통합했다. 자체 attach한 worker만 detach하고 기존
+  attachment는 빌리지 않는다. focused ownership test, JNI object audit 및
+  runtime/host graphics closure audit가 모두 PASS(`RC=0`, archive-members=1970,
+  registrar=51, ART-TLS warning=0)했다.

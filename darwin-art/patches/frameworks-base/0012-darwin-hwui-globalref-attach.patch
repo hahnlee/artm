@@ -1,8 +1,13 @@
 diff --git a/jni/GraphicsJNI.h b/jni/GraphicsJNI.h
 --- a/jni/GraphicsJNI.h
 +++ b/jni/GraphicsJNI.h
-@@ -362,1 +362,3 @@
--            LOG_ALWAYS_FATAL("Failed to get JNIEnv for JavaVM: %p", mVm);
-+            if (mVm->AttachCurrentThreadAsDaemon(&env, nullptr) != JNI_OK) {
-+                LOG_ALWAYS_FATAL("Failed to get JNIEnv for JavaVM: %p", mVm);
-+            }
+@@ -2,0 +3,3 @@
++#if defined(__APPLE__)
++#include "darwin_hwui_jni_attachment.h"
++#endif
+@@ -362,0 +366,3 @@
++#if defined(__APPLE__)
++            return darwin_art::hwui::requireEnv(mVm);
++#else
+@@ -363,0 +370 @@
++#endif
