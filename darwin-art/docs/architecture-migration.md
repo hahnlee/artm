@@ -14697,3 +14697,8 @@ or admission exception was added.
 - Checkpoint 1061 (2026-09-11): 최신 JNI owner/runtime 변경 후 Chromium
   lifecycle을 2회 반복해 New-tab=2, JNI-detach-crash=0, service children
   reaped를 확인했다. acceptance 전체가 `RC=0`으로 통과했다.
+
+- Checkpoint 1062 (2026-09-11): Chromium에 `VIEW https://example.com`을
+  전달한 isolated launcher가 `RC=0`으로 종료되고 child startup도 정상이다.
+  URL 탭 상태 문자열은 이번 로그에 없어 화면 로드 완료는 주장하지 않으며,
+  기존 TabState 직접 증거와 별도 gate로 남긴다.

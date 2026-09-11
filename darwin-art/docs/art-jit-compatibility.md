@@ -10301,3 +10301,8 @@ incomplete and still requires managed caller unwind validation.
   lifecycle acceptance를 2회 반복 실행했다. 각 회차에서 New-tab 생성,
   JNI-detach crash 0, service child reaping을 확인했고 전체 결과가 `RC=0`으로
   통과했다. 로그는 `_build/chrome-process-lifecycle-acceptance`에 보존한다.
+
+- Checkpoint 1062 (2026-09-11): Chromium `VIEW https://example.com` isolated
+  launcher가 `RC=0`으로 종료되고 native child startup도 정상이다. 이번 로그에
+  URL 탭 상태 문자열은 없어 화면 로드 완료 acceptance로 승격하지 않고,
+  기존 TabState 직접 증거를 유지한다.
