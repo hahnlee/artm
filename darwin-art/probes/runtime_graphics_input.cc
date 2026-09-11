@@ -1408,6 +1408,63 @@ int32_t dispatch_motion_event(GraphicsState* state, JNIEnv* env, jobject root,
     enqueued = darwin_art::DispatchFrameworkInputEvent(
         env, state->pointer_dispatch_view_root, event, &framework_handled);
     consumed = framework_handled ? JNI_TRUE : JNI_FALSE;
+    // Opt-in lifecycle diagnostics for real APKs. ViewRoot owns the gesture
+    // target in this path, so inspect the hit view after each terminal edge
+    // without changing dispatch semantics or forcing performClick().
+    if (std::getenv("DARWIN_ART_DEBUG_INPUT_STATE") != nullptr &&
+        (action == 0u || action == 1u)) {
+      jobject state_hit = find_clickable_view_at(env, dispatch_root, local_x, local_y);
+      jclass state_view_class = env->FindClass("android/view/View");
+      jmethodID is_pressed =
+          state_view_class == nullptr
+              ? nullptr
+              : env->GetMethodID(state_view_class, "isPressed", "()Z");
+      jmethodID is_focused =
+          state_view_class == nullptr
+              ? nullptr
+              : env->GetMethodID(state_view_class, "isFocused", "()Z");
+      jmethodID has_click_listener =
+          state_view_class == nullptr
+              ? nullptr
+              : env->GetMethodID(state_view_class, "hasOnClickListeners", "()Z");
+      jfieldID perform_click_runnable =
+          state_view_class == nullptr
+              ? nullptr
+              : env->GetFieldID(state_view_class, "mPerformClick",
+                                "Landroid/view/View$PerformClick;");
+      jobject pending_click =
+          state_hit != nullptr && perform_click_runnable != nullptr &&
+                  !env->ExceptionCheck()
+              ? env->GetObjectField(state_hit, perform_click_runnable)
+              : nullptr;
+      if (env->ExceptionCheck()) env->ExceptionClear();
+      std::cerr << "ART Android input state action=" << action
+                << " hit=" << state_hit
+                << " pressed="
+                << (state_hit != nullptr && is_pressed != nullptr &&
+                            !env->ExceptionCheck() &&
+                            env->CallBooleanMethod(state_hit, is_pressed) == JNI_TRUE
+                        ? 1
+                        : 0)
+                << " focused="
+                << (state_hit != nullptr && is_focused != nullptr &&
+                            !env->ExceptionCheck() &&
+                            env->CallBooleanMethod(state_hit, is_focused) == JNI_TRUE
+                        ? 1
+                        : 0)
+                << " click_listener="
+                << (state_hit != nullptr && has_click_listener != nullptr &&
+                            !env->ExceptionCheck() &&
+                            env->CallBooleanMethod(state_hit, has_click_listener) == JNI_TRUE
+                        ? 1
+                        : 0)
+                << " pending_click=" << (pending_click != nullptr ? 1 : 0)
+                << " consumed=" << (consumed == JNI_TRUE ? 1 : 0) << "\n";
+      if (env->ExceptionCheck()) env->ExceptionClear();
+      if (pending_click != nullptr) env->DeleteLocalRef(pending_click);
+      if (state_hit != nullptr) env->DeleteLocalRef(state_hit);
+      if (state_view_class != nullptr) env->DeleteLocalRef(state_view_class);
+    }
   }
   if (env->ExceptionCheck()) {
     if (std::getenv("DARWIN_ART_DEBUG_INPUT_LATENCY") != nullptr) {

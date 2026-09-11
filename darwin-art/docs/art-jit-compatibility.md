@@ -11066,6 +11066,12 @@ incomplete and still requires managed caller unwind validation.
   GPU/SurfaceFlinger 검증이 PASS했다(`run.2nus3h`). 따라서 인라이닝을
   끄면 해결되는 결정적 codegen 문제는 확인되지 않았고, 간헐 실패는
   cold startup 또는 callback lifecycle race 후보로 유지한다.
+- Checkpoint 1205 (2026-09-11): `DARWIN_ART_DEBUG_INPUT_STATE=1` 계측을
+  추가하고 JIT-on Chromium 게이트를 재실행했다(`run.4aMzGR`, PASS,
+  target-states=10). 두 탭 모두 `consumed=1`, UP 시점 `pressed=1`,
+  `pending_click=1`이 관측되어 ViewRoot 입력과 click 예약은 정상임을
+  확인했다. 실패 재현 시 `performClick` 이후 coordinator/TabGrid attach
+  단계만 비교할 수 있다.
 - Checkpoint 1203 (2026-09-11): `DARWIN_ART_JIT_TRACE=1`로 같은 Chromium
   게이트를 재현한 결과 JIT on에서도 실제 `TabGridView`가 hit되고
   `target-states=10`으로 PASS했다(`run.NAy3z0`). 첫 tap hold는 19.505ms,

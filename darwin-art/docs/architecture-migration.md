@@ -15410,6 +15410,11 @@ or admission exception was added.
   TabGridView와 10개 합성 상태를 통과했다(`run.2nus3h`). JIT codegen을
   전역으로 우회할 근거는 없으며, 실패 재현 시 UP 이후 `performClick`,
   focus/pressed 상태와 coordinator attach 순서를 직접 기록해야 한다.
+- Checkpoint 1205 (2026-09-11): Android ViewRoot 입력 경계에 opt-in 상태
+  계측을 넣고 JIT-on Chromium을 검증했다(`run.4aMzGR`, PASS). DOWN/UP
+  모두 소비됐고 UP 직전 target의 pressed 및 pending click runnable이
+  유지된 채 TabGrid 전환이 완료됐다. 다음 실패 분석은 입력 전달이 아니라
+  click callback 이후 Chrome coordinator attach/lifecycle 순서에 집중한다.
 - Checkpoint 1203 (2026-09-11): JIT trace 실행에서는 변경 없는 Chromium의
   탭 전환이 다시 PASS했다(`run.NAy3z0`, 실제 TabGridView, 합성 상태 10개).
   동일 JIT-on에서 실패한 `run.Zeu1Pa`와 함께 좌표/hold/GPU 출력 문제는
