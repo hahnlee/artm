@@ -10094,3 +10094,9 @@ incomplete and still requires managed caller unwind validation.
   libunity.so, libil2cpp.so의 ELF 로드, IL2CPP `JNI_OnLoad`, Unity ARM64 초기화를
   확인했다. `RC=0`과 window add까지 도달했지만 JobScheduler NPE와 AndroidKeyStore
   미지원은 남아 게임 화면/플레이 acceptance는 보류한다.
+
+- Checkpoint 1030 (2026-09-11): `audit-jit-memory.sh`를 실행해 signed
+  MAP_JIT의 nested thread-local W^X와 concurrent execution=2209를 확인했다.
+  protected-write/execute-while-writing negative 모드는 의도된 SIGBUS(쉘 상태
+  138)로 보호 fault gate를 통과했다. 스크립트의 `Bus error: 10` 출력은 실패가
+  아니라 negative 증거이며 JIT memory ledger를 PASS로 기록한다.

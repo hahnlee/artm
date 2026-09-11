@@ -14513,3 +14513,8 @@ or admission exception was added.
   JNI_OnLoad, Unity 초기화를 확인했다. 실행은 `RC=0`/window add까지 진행됐으나
   JobScheduler·AndroidKeyStore 계약 부족이 남아 실제 게임 플레이 acceptance는
   보류한다.
+
+- Checkpoint 1030 (2026-09-11): signed MAP_JIT memory audit에서 nested W^X와
+  concurrent execution=2209를 통과했다. 두 negative 실행의 SIGBUS(상태 138)는
+  보호 위반이 차단됐다는 의도된 결과로 확인했으며, JIT memory 기능별 증거를
+  ledger에 추가했다.
