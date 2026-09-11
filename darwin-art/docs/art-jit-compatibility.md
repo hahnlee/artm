@@ -10512,3 +10512,11 @@ incomplete and still requires managed caller unwind validation.
   현재 해당 테스트는 boot/JAR checksum mismatch로 실행 전 차단된 상태라 최신
   PASS/FAIL로 승격하지 않는다. 실행 중 rebuild·환경변수·timeout은 아직 identity에
   포함되지 않는 잔여 경계다.
+
+- Checkpoint 1094 (2026-09-11): framework-compat JAR와 이틀 전 boot image의
+  세대 불일치(`boot-framework-compat.oat` checksum mismatch)를 확인한 뒤,
+  현재 11개 bootclasspath로 공식 `build-android16-boot-image`를 재실행해
+  33개 ART/OAT/VDex 산출물을 원자적으로 교체했다. fresh `004-SignalTest`가
+  `passed`했고, 이어 `--resume --parallel 4 --limit 20`에서 현재 runtime
+  identity 기준 첫 20개 corpus가 모두 `passed`(일부는 동일 identity resume)했다.
+  이는 historical SIGABRT를 최신 실패로 재사용하지 않는 현재 acceptance 증거다.
