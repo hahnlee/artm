@@ -10543,3 +10543,8 @@ incomplete and still requires managed caller unwind validation.
   실행 중임을 확인했다. ledger는 1,076개 모두 `passed`이며, 그중 267개가
   현재 runtime identity로 갱신됐다. 잔여 항목은 legacy 결과를 재사용하지 않고
   순차적으로 재실행 중이므로 완료 판정은 보류한다.
+
+- Checkpoint 1099 (2026-09-11): corpus refresh 프로세스의 생존을 재확인했다.
+  1,076개 ledger 결과는 계속 모두 `passed`이며, current runtime identity로
+  갱신된 항목은 290개다. 전체 identity 통일 전이므로 JIT corpus 최종 완료는
+  아직 선언하지 않는다.
