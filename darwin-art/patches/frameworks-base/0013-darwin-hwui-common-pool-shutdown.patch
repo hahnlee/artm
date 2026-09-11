@@ -47,7 +47,7 @@
      }
      {
          std::unique_lock lock(mLock);
-@@ -52,6 +52,18 @@
+@@ -52,6 +52,21 @@
      }
  }
  
@@ -64,7 +64,10 @@
 +
  CommonPool& CommonPool::instance() {
      static CommonPool pool;
-+    g_darwin_common_pool = &pool;
++    {
++        std::lock_guard lock(g_darwin_common_pool_lock);
++        g_darwin_common_pool = &pool;
++    }
      return pool;
 @@ -68,8 +80,18 @@
  void CommonPool::enqueue(Task&& task) {

@@ -10607,3 +10607,8 @@ incomplete and still requires managed caller unwind validation.
   static foundation 재빌드와 graphics-link audit가 통과했으며, 새 runtime identity에서
   `689-zygote-jit-deopt`, `728-imt-conflict-zygote`, `980-redefine-object`를 포함한
   corpus 1,076/1,076이 모두 `passed`다.
+
+- Checkpoint 1112 (2026-09-11): Astra가 지적한 종료 경합을 반영해 CommonPool
+  marker를 mutex로 보호하고 shutdown owner를 `std::call_once`로 단일화했다. HWUI
+  foundation 재빌드 및 graphics-link audit가 다시 통과했고, 세 zygote/JIT 회귀
+  테스트가 새 링크 산출물에서 모두 `passed`했다.
