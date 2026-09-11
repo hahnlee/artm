@@ -14069,6 +14069,13 @@ or admission exception was added.
   외부 네트워크 콘텐츠 렌더링은 완료로 간주하지 않는다. 별도 프로세스
   잔여 host도 정리했다.
 
+- Checkpoint 1073 (2026-09-11): Astra가 새 app-data에서 외부
+  `https://example.com`을 재실행해 최종 SurfaceFlinger IOSurface에
+  `Example Domain` 본문이 렌더링됨을 확인했다. Chromium netlog의 main-frame
+  GET은 HTTP 200/HTTP2/TLS1.3이며 인증서 `cert_status=0`, known-root였다.
+  이전 desktop 캡처의 빈 화면은 앱 실패 증거가 아니라 다른 창/팝업이
+  가린 상태였고, 창 단독 캡처 분리는 별도 개선 과제로 남긴다.
+
 - Checkpoint 1069 (2026-09-11): 최신 JNI/HWUI 변경 후 AOSP Calculator와
   DeskClock graphics acceptance가 `RC=0`으로 통과했다. Calculator `2+3=5`,
   DeskClock Timer, HWUI+SurfaceFlinger+Metal 공통 경로를 재확인했다.

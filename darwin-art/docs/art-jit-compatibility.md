@@ -9554,6 +9554,12 @@ incomplete and still requires managed caller unwind validation.
   빈 영역으로 남았고 `Example Domain`/navigation commit 로그도 없어,
   네트워크 페이지 렌더링은 아직 미검증으로 기록한다.
 
+- Checkpoint 1073 (2026-09-11): Astra가 새 app-data에서 외부
+  `https://example.com`을 재현하고 최종 SurfaceFlinger IOSurface 캡처에서
+  `Example Domain` 본문을 확인했다. netlog는 main-frame GET, HTTP 200,
+  HTTP/2 및 TLS 1.3, `cert_status=0`/known-root를 기록했다. 따라서
+  Chromium 네트워크·renderer·Metal 합성 경로는 실제 콘텐츠까지 동작한다.
+
 - Checkpoint 938 (2026-09-10): 변경 없는 Blue Archive 1.93.454564를
   최신 runtime으로 15초 실행했다. `libmain.so`·`libil2cpp.so` graph
   로드, Unity RegisterNatives 309건 및 후속 등록 세트, Unity 초기화와
