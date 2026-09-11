@@ -10612,3 +10612,8 @@ incomplete and still requires managed caller unwind validation.
   marker를 mutex로 보호하고 shutdown owner를 `std::call_once`로 단일화했다. HWUI
   foundation 재빌드 및 graphics-link audit가 다시 통과했고, 세 zygote/JIT 회귀
   테스트가 새 링크 산출물에서 모두 `passed`했다.
+
+- Checkpoint 1113 (2026-09-11): 전체 `tools/audit-art-jit.sh`를 새 링크 산출물로
+  재실행해 `RC=0`을 확인했다. ARM64 intrinsics, compiled/JNI/GC/예외 경로,
+  VarHandle 및 invoke-polymorphic/custom, 배열·문자열·CRC·Memory 경로와
+  compiled/native exit hooks, VM shutdown이 모두 PASS 증거를 남겼다.
