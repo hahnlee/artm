@@ -1550,6 +1550,27 @@ mod tests {
         assert!(replacement[&0x12000].jit_capable);
     }
 
+    #[test]
+    fn borrowed_range_registration_rejects_duplicate_envelopes() {
+        let _serial = JIT_TEST_LOCK.lock().unwrap();
+        let provider = Arc::new(Provider::new().unwrap());
+        let _activation = provider.activate().unwrap();
+        let address = 0x4000_0000 as *mut c_void;
+        let length = 0x1000;
+        assert_eq!(
+            darwin_art_bionic_vm_register_borrowed_range(address, length),
+            0
+        );
+        assert_eq!(
+            darwin_art_bionic_vm_register_borrowed_range(address, length),
+            -1
+        );
+        assert_eq!(
+            darwin_art_bionic_vm_unregister_borrowed_range(address, length),
+            0
+        );
+    }
+
     #[cfg(target_arch = "aarch64")]
     #[test]
     fn emulated_rwx_changes_faulting_host_page() {

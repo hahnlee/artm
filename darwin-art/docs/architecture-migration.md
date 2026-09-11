@@ -15502,3 +15502,6 @@ or admission exception was added.
 - Checkpoint 1224 (2026-09-11): borrowed ELF range 등록을 보정해 동일한
   시작 주소 envelope 중복을 `EEXIST`로 fail-closed 처리했다. facade 4개
   unit test 및 workspace check가 PASS했고 관련 컴파일 경고가 제거됐다.
+- Checkpoint 1225 (2026-09-11): 동일 borrowed ELF envelope 중복 등록을
+  `EEXIST`로 거부하는 회귀 테스트를 추가했다. facade 5개 테스트와
+  format/diff 검사가 PASS해 ownership 계약의 fail-closed 경계를 고정했다.

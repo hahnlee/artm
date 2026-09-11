@@ -11169,3 +11169,6 @@ incomplete and still requires managed caller unwind validation.
   중복 envelope를 AOSP errno 계약에 맞춰 `EEXIST`로 거부하고 불필요한
   mapping lock을 제거했다. facade 단위 테스트 4개와 `cargo check
   --workspace`가 PASS했으며 이전 unused/dead-code 경고도 해소됐다.
+- Checkpoint 1225 (2026-09-11): 동일 borrowed envelope의 중복 등록을
+  `EEXIST`로 거부하는 회귀 테스트를 추가했다. 등록→중복→unregister
+  순서를 포함한 facade 단위 테스트 5개와 format/diff 검사가 모두 PASS했다.
