@@ -14607,3 +14607,8 @@ or admission exception was added.
   `JNI-detach-crash=0`, `service-children=reaped`, `RC=0`을 확인했다. 실행
   후 프로필 `mnt/run/app.*`도 0개로 유지되어 임시 root 누수와 반복 종료 경계가
   함께 회귀하지 않음을 검증했다.
+
+- Checkpoint 1046 (2026-09-11): stale system-root prune에 owner PID marker
+  (`.darwin-art-owner-pid`)를 기록하도록 보강했다. 오래된 root도 owner가
+  생존하면 삭제하지 않으며, 비정상 종료로 owner가 사라진 root만 회수한다.
+  신규 Chromium 실행은 `RC=0`이고 실행 후 `mnt/run/app.*`가 0개였다.

@@ -407,8 +407,16 @@ prune_stale_system_roots() {
   [[ -d "$run_root" ]] || return 0
   while IFS= read -r -d '' stale_root; do
     # The system tree is sealed while the app runs. A killed host cannot run
-    # the EXIT trap, so reopen only roots older than a day before removing;
-    # current launches are never touched.
+    # the EXIT trap, so reopen only roots older than a day before removing.
+    # A recorded owner PID is authoritative for a live launch; never delete
+    # an old root while its owner is still alive.
+    owner_file="$stale_root/.darwin-art-owner-pid"
+    if [[ -r "$owner_file" ]]; then
+      owner_pid="$(sed -n '1p' "$owner_file")"
+      if [[ "$owner_pid" =~ ^[0-9]+$ ]] && kill -0 "$owner_pid" 2>/dev/null; then
+        continue
+      fi
+    fi
     chmod -R u+w "$stale_root" 2>/dev/null || true
     rm -r -- "$stale_root" 2>/dev/null || true
   done < <(find "$run_root" -maxdepth 1 -type d -name 'app.*' -mmin +1440 -print0)
@@ -419,6 +427,7 @@ if [[ -n "$profile_mount" ]]; then
 else
   system_root="$(mktemp -d "${TMPDIR:-/tmp}/darwin-art-apk-system-root.XXXXXX")"
 fi
+printf '%s\n' "$$" >"$system_root/.darwin-art-owner-pid"
 icon_file=""
 cleanup_system_root() {
   chmod -R u+w "$system_root" 2>/dev/null || true

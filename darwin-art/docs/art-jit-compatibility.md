@@ -10203,3 +10203,8 @@ incomplete and still requires managed caller unwind validation.
   `iterations=2`, `new-tab=2`, `JNI-detach-crash=0`, `service-children=reaped`,
   `RC=0`이며 실행 후 `mnt/run/app.*`는 0개였다. 따라서 host 종료 후 임시
   system root 회수와 반복 native-thread lifecycle이 함께 유지된다.
+
+- Checkpoint 1046 (2026-09-11): stale system-root prune에 owner PID marker
+  (`.darwin-art-owner-pid`)를 추가했다. 24시간 이상 된 root라도 owner가 살아
+  있으면 보존하고, SIGKILL로 남은 owner 없는 root만 회수한다. 신규 Chromium
+  짧은 실행은 `RC=0`, 실행 후 root `0개`로 확인됐다.
