@@ -15438,3 +15438,8 @@ or admission exception was added.
   원본 로그/프레임을 재검증했다. Notice 전후 OCR, nonblank frame,
   Cancel DOWN/UP consumed=1이 모두 PASS했다. 다운로드·로그인·실제
   게임플레이는 계정/서버 의존성이 있어 별도 미완료 항목으로 유지한다.
+- Checkpoint 1210 (2026-09-11): Chromium acceptance 실패 로그에서 첫
+  입력 전 `ChromeChildSurface` 생성/게시가 0회였음을 확인했다. PASS
+  실행들은 같은 구간에 child surface를 갖고 있었다. 다음은 host가
+  실제 renderer-surface readiness를 관측한 후 입력을 시작하도록 하는
+  Android식 startup/lifecycle 계약 검토이며, JIT 예외 처리는 하지 않는다.

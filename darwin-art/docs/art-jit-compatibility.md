@@ -11097,3 +11097,9 @@ incomplete and still requires managed caller unwind validation.
   Notice 전후 OCR 및 nonblank post-UP frame 조건이 모두 PASS했다
   (`_build/bluearchive-cancel-verification/run.kmMKlu`). 계정 로그인과
   서버 의존 게임플레이까지의 acceptance로 확대하지 않는다.
+- Checkpoint 1210 (2026-09-11): Chromium JIT-on 실패 `run.Zeu1Pa`를
+  pass 실행들과 다시 비교했다. 실패 시 첫 tap 이전에
+  `ChromeChildSurface`가 한 번도 게시되지 않았고, pass 실행들은 동일
+  시점에 child surface를 게시했다. 따라서 두 번째 좌표/hold 문제가
+  아니라 renderer child-surface readiness race로 범위를 좁혔다. 임의의
+  JIT 우회나 강제 performClick은 추가하지 않는다.
