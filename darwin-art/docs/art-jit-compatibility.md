@@ -10549,6 +10549,11 @@ incomplete and still requires managed caller unwind validation.
   갱신된 항목은 290개다. 전체 identity 통일 전이므로 JIT corpus 최종 완료는
   아직 선언하지 않는다.
 
+- Checkpoint 1103 (2026-09-11): 동일 corpus refresh 프로세스가 계속 살아
+  있으며 current runtime identity 갱신 수가 412개로 증가했다. 전체 1,076개
+  결과 status는 모두 `passed`지만 identity 혼합 상태이므로 최종 acceptance는
+  여전히 보류한다.
+
 - Checkpoint 1100 (2026-09-11): 현재 identity corpus refresh 프로세스가
   10분 이상 생존하고 CPU를 사용하며 계속 진행 중임을 확인했다. ledger는
   1,076개 모두 `passed`, current identity 갱신은 299개다. 프로세스를 재시작하거나
