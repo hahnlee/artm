@@ -10686,3 +10686,7 @@ incomplete and still requires managed caller unwind validation.
 - Checkpoint 1127 (2026-09-11): 동일 fresh corpus 핸들을 재확인했으며 약 3분
   이상 8개 worker가 계속 진행 중이다. 완료 전 ledger의 기존 혼합 행은 유효한
   current-identity 증거로 사용하지 않는다.
+
+- Checkpoint 1128 (2026-09-11): controlled fresh corpus가 약 5분째 동일
+  프로세스에서 진행 중이다. 중간 ledger는 기존 행과 새 행이 함께 보이는
+  부분 갱신 상태이므로, 프로세스 종료와 최종 identity 재계산 전에는 판정하지 않는다.
