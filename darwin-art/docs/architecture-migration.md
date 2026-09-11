@@ -15020,3 +15020,8 @@ or admission exception was added.
   mount의 변경 없는 APK를 자동 발견하도록 경로를 보강한 뒤 두 iteration을
   `PASS`했다(new-tab=2, JNI-detach-crash=0, service-children=reaped). 기존
   `_build/installed-apps`와 현재 profile store 양쪽을 지원해 재현 실행 경계를 고정했다.
+
+- Checkpoint 1121 (2026-09-11): 현재 profile store의 Blue Archive base+split APK를
+  런타임 변경 없이 30초 실행하고 Unity/IL2CPP native 경로와 GPU 진단 프레임을
+  수집했다(exit=0, diagnostic PNG 15장). 포인터 테스트 훅은 실행 로그에 기록됐지만
+  이 캡처만으로 게임 UI 입력 소비나 계정 이후 콘텐츠를 acceptance로 주장하지 않는다.
