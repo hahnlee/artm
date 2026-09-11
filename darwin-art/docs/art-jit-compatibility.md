@@ -10901,6 +10901,13 @@ incomplete and still requires managed caller unwind validation.
   못했으므로 Cancel DOWN/UP acceptance는 여전히 미검증이다. 산출물은
   `_build/bluearchive-physical.TAg22f/`에 있다.
 
+- Checkpoint 1173 (2026-09-11): 현재 runtime에서 `tools/audit-art-jit.sh`를
+  재실행했으나 JIT Code Cache의 bounded pair allocation이
+  `no fitting Darwin JIT metadata gap`으로 exhausted되어 실패했다. Nterp,
+  graphics, shutdown 단계는 통과했지만 empty-checkpoint contention fixture가
+  실행되지 않았다. 앱 acceptance의 개별 JIT 통과와 분리해 이 allocator
+  workload 실패를 Astra에 우선 진단 요청했다.
+
 - Checkpoint 1170 (2026-09-11, corrected): Blue Archive의 이전 검정
   first-frame 진단은 thread-local sigchain 수정 전 historical 결과다. 최신
   runtime `8cbfe9de…624d`로 변경 없는 base+arm64 split을 재실행해
