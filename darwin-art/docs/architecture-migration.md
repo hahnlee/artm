@@ -14917,3 +14917,8 @@ or admission exception was added.
   1,076개 ledger 결과는 계속 모두 `passed`이며, current runtime identity로
   갱신된 항목은 290개다. 전체 identity 통일 전이므로 JIT corpus 최종 완료는
   아직 선언하지 않는다.
+
+- Checkpoint 1100 (2026-09-11): 현재 identity corpus refresh 프로세스가
+  10분 이상 생존하고 CPU를 사용하며 계속 진행 중임을 확인했다. ledger는
+  1,076개 모두 `passed`, current identity 갱신은 299개다. 프로세스를 재시작하거나
+  병렬도를 바꾸지 않고 동일 실행을 유지한다.
