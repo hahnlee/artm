@@ -14461,3 +14461,9 @@ or admission exception was added.
   incremental graphics audit는 통과했으며 실제 `example.com` 5초 실행은
   `RC=0`, GPU loop 정상 종료(`frames_presented=1`)였다. 부모/자식 오류 귀속을
   섞지 않도록 다음 단계는 장시간 pointer lifecycle의 별도 재현이다.
+
+- Checkpoint 1020 (2026-09-11): 실제 Chromium APK에 물리 포인터 시퀀스를 주고
+  12초 lifecycle을 단일 실행했다. `RC=0`, `gpu-loop exit status=0
+  frames_presented=7`, terminate service cleanup 성공을 확인했으며 Binder
+  dispatcher 실패나 Java fatal은 없었다. 반복 acceptance 스크립트의 정체는
+  단일 런 결과와 분리해 프로파일/빌드 잔여 프로세스 정리 후 재검증한다.

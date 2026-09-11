@@ -10037,3 +10037,10 @@ incomplete and still requires managed caller unwind validation.
   5초 런은 `RC=0`, `gpu-loop exit status=0 frames_presented=1`로 완료됐고 새
   실패 phase는 발생하지 않았다. status=27은 재현되지 않아 다음 acceptance에서
   장시간 pointer lifecycle과 자식 종료 경합을 분리해 재현한다.
+
+- Checkpoint 1020 (2026-09-11): 변경 없는 Chromium APK에 물리 포인터 시퀀스
+  `0,0,0;315,610,6000;180,100,500`을 전달한 12초 lifecycle 런이 `RC=0`으로
+  완료됐다. `gpu-loop exit status=0 frames_presented=7` 및 terminate-mode
+  service cleanup `ok=true`를 확인했고, 새 Binder dispatcher/READY 실패와
+  uncaught/fatal marker는 없었다. 이전 90초 acceptance 스크립트 정체는 빌드/공유
+  프로파일 잔여 프로세스 영향 가능성이 있어 단일 런 증거와 분리한다.
