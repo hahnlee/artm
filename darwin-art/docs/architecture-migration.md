@@ -15316,3 +15316,7 @@ or admission exception was added.
 - Checkpoint 1182 (2026-09-11): Blue Archive의 CUA 미등록 원인은 LSUIElement
   shim과 별도 daemon host 분리로 확인됐다. 실제 host executable을 소유하는
   `.app` bundle과 OS 입력 경로 검증이 필요하며, APK 변경은 하지 않는다.
+- Checkpoint 1183 (2026-09-11): Blue Archive 물리 입력 경로는 실제
+  `darwin-art-host`가 아닌 shim/daemon 구조 때문에 앱 identity가 끊긴다.
+  Host.app을 실제 executable owner로 만들고 NSRunningApplication으로 검증하는
+  작업이 다음 단계다.

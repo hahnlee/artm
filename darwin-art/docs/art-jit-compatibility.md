@@ -10958,3 +10958,7 @@ incomplete and still requires managed caller unwind validation.
   APK shim이 실제 창 owner가 아닌 daemon launcher를 실행하는 구조로 확정했다.
   실제 `darwin-art-host`를 CFBundleExecutable로 갖는 Host.app 패키징과
   NSRunningApplication/CUA identity 검증이 다음 acceptance 작업이다.
+- Checkpoint 1183 (2026-09-11): Astra 리뷰로 Blue Archive 창 identity 구조를
+  확인했다. shim의 LSUIElement/daemon 분리 때문에 CUA가 실제 host PID를
+  소유하지 못한다. runtime/APK 변경 없이 Host.app 패키징을 다음 acceptance
+  구현으로 지정했다.
