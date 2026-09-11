@@ -9560,6 +9560,13 @@ incomplete and still requires managed caller unwind validation.
   HTTP/2 및 TLS 1.3, `cert_status=0`/known-root를 기록했다. 따라서
   Chromium 네트워크·renderer·Metal 합성 경로는 실제 콘텐츠까지 동작한다.
 
+- Checkpoint 1074 (2026-09-11): 현재 HEAD에서 `audit-art-jit.sh`를 재실행해
+  `RC=0`을 확인했다. Nterp, compiled arithmetic/GC, VarHandle,
+  invoke-polymorphic/custom, OSR/deopt, typed fields, native exit hooks 및
+  전체 VM shutdown 단계가 모두 PASS했다. AOSP core-apps graphics
+  acceptance도 Calculator `2+3=5`, DeskClock Timer, HWUI+
+  SurfaceFlinger+Metal 경로로 `RC=0`이었다.
+
 - Checkpoint 938 (2026-09-10): 변경 없는 Blue Archive 1.93.454564를
   최신 runtime으로 15초 실행했다. `libmain.so`·`libil2cpp.so` graph
   로드, Unity RegisterNatives 309건 및 후속 등록 세트, Unity 초기화와

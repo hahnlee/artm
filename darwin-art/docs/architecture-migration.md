@@ -14076,6 +14076,13 @@ or admission exception was added.
   이전 desktop 캡처의 빈 화면은 앱 실패 증거가 아니라 다른 창/팝업이
   가린 상태였고, 창 단독 캡처 분리는 별도 개선 과제로 남긴다.
 
+- Checkpoint 1074 (2026-09-11): 현재 HEAD의 JIT 기능 ledger를
+  `audit-art-jit.sh`로 재검증해 `RC=0`으로 통과했다. shutdown 단계와
+  native-thread/JNI 계약을 포함한 Nterp·compiled·GC·VarHandle·invoke·
+  OSR/deopt 항목이 모두 PASS했다. AOSP core-apps graphics acceptance도
+  Calculator 계산 결과 `5`, DeskClock Timer와 공통 GPU 경로를 `RC=0`으로
+  확인했다.
+
 - Checkpoint 1069 (2026-09-11): 최신 JNI/HWUI 변경 후 AOSP Calculator와
   DeskClock graphics acceptance가 `RC=0`으로 통과했다. Calculator `2+3=5`,
   DeskClock Timer, HWUI+SurfaceFlinger+Metal 공통 경로를 재확인했다.
