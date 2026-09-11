@@ -10553,3 +10553,8 @@ incomplete and still requires managed caller unwind validation.
   10분 이상 생존하고 CPU를 사용하며 계속 진행 중임을 확인했다. ledger는
   1,076개 모두 `passed`, current identity 갱신은 299개다. 프로세스를 재시작하거나
   병렬도를 바꾸지 않고 동일 실행을 유지한다.
+
+- Checkpoint 1101 (2026-09-11): 동일 corpus refresh 프로세스를 계속 관찰했다.
+  ledger 1,076개는 모두 `passed`이며 current runtime identity 갱신 항목이
+  338개로 증가했다. 디스크 여유는 75GiB, refresh ledger는 36MiB로 확인되어
+  저장공간 압박 없이 실행을 유지한다.
