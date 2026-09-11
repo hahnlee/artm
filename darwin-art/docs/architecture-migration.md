@@ -14661,3 +14661,9 @@ or admission exception was added.
   AOSP ordering/span 계약만 검사하도록 변경했다. ordinary/fragmented layout
   smoke, 20회 relocation, incremental graphics-link audit가 모두 `RC=0`으로
   통과했다.
+
+- Checkpoint 1055 (2026-09-11): acceptance-only JIT fixture를 해제한 상태에서
+  변경 없는 Calculator APK(debuggable=1)를 실제 launcher로 실행해 `RC=0`을
+  확인했다. 앱 실행 전 fixture assertion으로 오인했던 status=119는 재현되지
+  않았고 MAP_JIT 주소 불일치도 관찰되지 않았다. optimized JIT와 debuggable
+  APK 실행 gate는 분리해 유지한다.

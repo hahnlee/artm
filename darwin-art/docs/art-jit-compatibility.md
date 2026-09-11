@@ -10262,3 +10262,9 @@ incomplete and still requires managed caller unwind validation.
   kernel-selected mapping(`nullptr`, start=0)으로 바꾸고 실제 ordering/uint32
   span만 검증한다. ordinary·fragmented smoke, 20회 relocation 실행 및
   incremental graphics-link audit가 모두 `RC=0`으로 통과했다.
+
+- Checkpoint 1055 (2026-09-11): `DARWIN_ART_JIT_ACCEPTANCE_ONLY`를 제거한
+  변경 없는 Calculator APK(debuggable=1)를 실제 launcher로 재실행했다.
+  JIT fixture가 앱 실행을 가로채지 않고 host가 `RC=0`으로 종료했으며, 이전
+  MAP_JIT 주소 불일치 로그는 재현되지 않았다. optimized compiler fixture와
+  debuggable APK 실행은 서로 다른 acceptance 계약으로 유지한다.
