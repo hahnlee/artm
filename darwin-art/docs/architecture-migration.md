@@ -15374,3 +15374,7 @@ or admission exception was added.
   성립하지 않아 실패했다. 이 결과는 verifier 완화 근거가 아니며, 기존
   default profile의 타 앱 Surface를 PID/layer 기준으로 제외하는 설계가
   필요하다는 제약을 기록한다.
+- Checkpoint 1197 (2026-09-11): 현재 host의 인자 파서와 runtime bootstrap에
+  JIT on/off 선택 계약이 존재하지 않는 것을 소스 기준으로 확인했다.
+  `DARWIN_ART_JIT=0`을 유효한 A/B 결과로 취급하지 않으며, AOSP식
+  RuntimeArgumentMap 옵션과 isolated pixel collector를 먼저 구현한다.

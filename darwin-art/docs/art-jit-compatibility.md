@@ -11023,3 +11023,8 @@ incomplete and still requires managed caller unwind validation.
   SurfaceFlinger를 게시하지 못해 support DEX class load status=5로 종료됐다.
   따라서 이 방식은 현재 acceptance 경로로 채택하지 않고, 기본 profile 오염
   제거와 JIT A/B를 별도 harness로 설계해야 한다.
+- Checkpoint 1197 (2026-09-11): host/runtime 소스를 추적해 현재 CLI와
+  `RuntimeArgumentMap` 연결부에 `DARWIN_ART_JIT` 또는 동등한 interpreter
+  전환 옵션이 없음을 확인했다. 따라서 환경 변수 주입만으로 JIT A/B를
+  주장하지 않고, 다음 구현은 AOSP runtime option을 명시적으로 연결하는
+  작업으로 남긴다.
