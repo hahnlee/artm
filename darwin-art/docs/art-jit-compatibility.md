@@ -10224,3 +10224,8 @@ incomplete and still requires managed caller unwind validation.
   `getEncoded()`로 노출하지 않는다. framework compat 빌드 PASS를 재확인했고
   변경 없는 Blue Archive base+split 실행은 `RC=0`·Unity ARM64 초기화 정상이다.
   실제 다중 프로세스 재사용 acceptance는 다음 단계다.
+
+- Checkpoint 1049 (2026-09-11): 영속 keystore 변경 후 `cargo test -p
+  darwin-art-host`가 8+2개 테스트 모두 통과했고, graphics link incremental
+  audit 및 JIT MAP_JIT smoke도 종료 상태 0이었다. 현재 변경 사항은
+  cross-process alias acceptance를 추가하기 전까지 빌드/host 계약을 유지한다.

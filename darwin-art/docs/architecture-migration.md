@@ -14625,3 +14625,8 @@ or admission exception was added.
   추가했으며 opaque key의 `getEncoded()` 비노출은 유지된다. framework compat
   빌드 PASS와 변경 없는 Blue Archive base+split `RC=0`·Unity 초기화를
   재확인했다. 다중 프로세스 재사용 acceptance는 다음 단계로 남긴다.
+
+- Checkpoint 1049 (2026-09-11): 영속 keystore 변경 후 `cargo test -p
+  darwin-art-host`의 10개 테스트가 모두 PASS했고 graphics link incremental
+  audit/JIT MAP_JIT smoke도 status 0으로 완료됐다. 다음 단계는 앱 프로세스와
+  isolated service 사이의 실제 alias 재사용 acceptance 추가다.
