@@ -10243,6 +10243,13 @@ incomplete and still requires managed caller unwind validation.
   유지됐다. Calendar/Blue Archive 및 실제 cross-process keystore 재사용은
   별도 acceptance gate로 남아 있다.
 
+- Checkpoint 1053 (2026-09-11): `android-window-menu-acceptance.sh`를 전체
+  재실행해 Calculator History/외부 dismiss/resize, Calendar Day/Week/Month,
+  Chromium New-tab 및 Android popup ViewRoot/InputChannel 경로가 `RC=0`으로
+  통과했다. 다만 Calculator 로그에 JIT code-cache 예약 주소 불일치
+  (`mapped ... instead of ...`)가 관찰되어, 메뉴 acceptance와 JIT 성능 증거는
+  분리하고 다음 단계에서 MAP_JIT 예약 실패를 진단한다.
+
 - Checkpoint 1052 (2026-09-11): `android-keystore-cross-process-acceptance.sh`를
   추가해 별도 JVM 두 개가 동일한 앱 데이터 루트의 `AndroidKeyStore` alias를
   생성·재로드하고 동일 HMAC(`d0968585…a0e68`)을 산출하는 것을 확인했다.

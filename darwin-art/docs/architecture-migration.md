@@ -14643,6 +14643,12 @@ or admission exception was added.
   통과했다. Calendar/Blue Archive와 cross-process keystore alias 재사용은
   다음 acceptance gate다.
 
+- Checkpoint 1053 (2026-09-11): 전체 window-menu acceptance가 `RC=0`으로
+  통과했다. Calculator History/외부 dismiss/resize, Calendar Day/Week/Month,
+  Chromium New-tab과 Android popup ViewRoot/InputChannel을 모두 확인했다.
+  Calculator에서 JIT code-cache 예약 주소 불일치 로그가 있어 이 성공을 JIT
+  성능 증거로 사용하지 않고, MAP_JIT 예약 실패를 별도 과제로 분리했다.
+
 - Checkpoint 1052 (2026-09-11): 두 개의 독립 JVM으로 AndroidKeyStore
   cross-process acceptance를 실행했다. 첫 프로세스가 생성한 alias를 두 번째
   프로세스가 같은 앱 데이터 루트에서 재로드했고 HMAC 결과가 일치했으며,
