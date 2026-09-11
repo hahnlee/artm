@@ -10810,3 +10810,7 @@ incomplete and still requires managed caller unwind validation.
   505 passed/6 failed, identity `eb468bf1…` 단일성을 유지한다. 병렬 실행은
   계속 중이며 실패 행은 동일 6개로 유지되어, 종료 뒤 `--resume --parallel 1`
   재검증을 수행한다.
+
+- Checkpoint 1154 (2026-09-11): fresh ledger가 561/1,076개까지 진행되어
+  555 passed/6 failed, identity `eb468bf1…` 단일성을 유지한다. 실행 핸들은
+  여전히 살아 있으며, 완료 후 병렬 실패 행을 순차 재검증한다.
