@@ -14811,6 +14811,12 @@ or admission exception was added.
   Blue Archive에서 `nativeRender` 1,055회/exception 0과 Notice 다운로드 UI가
   실제 scanout에 표시됐다. 중앙 물리 입력도 DOWN/UP consumed=1로 전달됐다.
 
+- Checkpoint 1085 (2026-09-11): thread-local signal mask 수정 후 native graph
+  472 inputs/digest `a4d40645…717b96`, ART JIT audit `RC=0`, AOSP core-apps
+  graphics acceptance `RC=0`을 재확인했다. 변경 없는 Blue Archive도 실제
+  Notice UI까지 렌더링됐으며, Confirm 이후 대용량 리소스 다운로드와 로그인
+  이후 게임플레이는 아직 acceptance 범위 밖이다.
+
 - Checkpoint 1066 (2026-09-11): 최신 JNI/HWUI 및 MAP_JIT 변경 후 ART JIT
   audit를 재실행해 Nterp, compiled/GC, VarHandle, invoke, Surface,
   MediaCodec, W^X 및 shutdown lifecycle 전체가 `RC=0`으로 통과했다.

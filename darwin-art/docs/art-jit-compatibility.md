@@ -10444,3 +10444,10 @@ incomplete and still requires managed caller unwind validation.
   0으로 유지되고 probe가 PASS했다. 공식 rebuilt runtime에서 변경 없는 Blue
   Archive를 15초 실행해 `nativeRender` 1,055회 반환, exception 0, 실제 Notice
   다운로드 UI scanout을 확인했다. 중앙 DOWN/UP도 consumed=1이었다.
+
+- Checkpoint 1085 (2026-09-11): `pthread_sigmask` thread-local 수정 후 최신
+  graph audit가 472 inputs/digest `a4d40645…717b96`로 PASS했고, ART JIT
+  audit도 `RC=0`으로 shutdown destroy-vm까지 완료했다. AOSP core-apps
+  acceptance는 Calculator `2+3=5`, DeskClock Timer 및 HWUI→SurfaceFlinger→
+  Metal을 재확인했다. Blue Archive는 nativeRender 1,055회와 실제 Notice UI를
+  표시했지만 Confirm 이후 다운로드/게임플레이는 별도 미검증이다.
