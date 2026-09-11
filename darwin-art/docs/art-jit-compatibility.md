@@ -10743,3 +10743,7 @@ incomplete and still requires managed caller unwind validation.
 - Checkpoint 1140 (2026-09-11): corpus가 약 24분째 진행 중이며 current
   identity 행이 993개까지 갱신됐다. 남은 구 identity 행은 실행 완료 뒤 fresh
   ledger 분리 검증 전까지 최종 증거로 사용하지 않는다.
+
+- Checkpoint 1141 (2026-09-11): fresh corpus가 약 26분째 실행 중이며 current
+  identity 행이 1,010개까지 갱신됐다. 실패 5건은 동일 allocator 범위 오류로
+  남아 있고, 나머지 구 identity 행은 세션 완료 후에만 재검증한다.
