@@ -10306,3 +10306,8 @@ incomplete and still requires managed caller unwind validation.
   launcher가 `RC=0`으로 종료되고 native child startup도 정상이다. 이번 로그에
   URL 탭 상태 문자열은 없어 화면 로드 완료 acceptance로 승격하지 않고,
   기존 TabState 직접 증거를 유지한다.
+
+- Checkpoint 1063 (2026-09-11): Chromium HTTPS/WebGL E2E acceptance를
+  시작했으나 `mkcert` 인증서의 macOS system trust 설치가 없어 스크립트가
+  `RC=69`로 안전 중단됐다. 런타임 실패가 아니며, 키체인 trust 설치 후
+  페이지 로드·입력·WebGL·다운로드·target=_blank gate를 재실행해야 한다.

@@ -14702,3 +14702,8 @@ or admission exception was added.
   전달한 isolated launcher가 `RC=0`으로 종료되고 child startup도 정상이다.
   URL 탭 상태 문자열은 이번 로그에 없어 화면 로드 완료는 주장하지 않으며,
   기존 TabState 직접 증거와 별도 gate로 남긴다.
+
+- Checkpoint 1063 (2026-09-11): Chromium HTTPS/WebGL E2E는 `mkcert` root가
+  macOS system trust store에 설치되지 않아 `RC=69`로 중단됐다. 이는 runtime
+  오류가 아닌 키체인 전제조건이며, trust 설치 후 실제 페이지·WebGL·입력·
+  다운로드·새 탭 검증을 다시 수행해야 한다.
