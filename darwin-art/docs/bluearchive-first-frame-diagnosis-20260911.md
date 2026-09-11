@@ -117,6 +117,32 @@ signal submission, not execution or acknowledgment of the guest handler.
 
 ## Next concrete regression/fix boundary
 
+### Rejected special-handler mask experiment (14:37 KST)
+
+The blocked mask `0xfffef857` matches ART FaultManager's special-handler mask
+(all signals except ABRT/BUS/FPE/ILL/SEGV, with unmaskable KILL/STOP removed).
+This fingerprint motivates examining the ART fault chain, but does not prove
+that its mask-changing operation leaked across the kernel return boundary.
+Pinned AOSP `sigchain.cc` also returns immediately when a special handler
+returns true, relying on signal return to restore the interrupted mask.
+
+A one-line experiment moved Darwin's `sigprocmask(previous_mask)` before the
+handled return. The real guest signal 100-cycle probe and official incremental
+closure both passed, but Blue Archive regressed to an earlier startup stall
+(CPU approximately 99%, no nativeRender entry and no scanout artifact). Its
+15-second visible-window timer was never reached. PID 72684 did not exit after
+TERM and was explicitly KILLed; exit 137 is not an acceptance success. Log:
+`/tmp/bluearchive-special-mask-run.log`. The source experiment was immediately
+reverted. Baseline artifact rebuild log:
+`/tmp/bluearchive-special-mask-revert-build.log`.
+
+Do not retain that reorder as a fix. `previous_mask` at this location is the
+dispatcher-active mask, not necessarily the interrupted mask from ucontext.
+A next focused test must distinguish direct kernel delivery from ordinary
+function chaining and assert the interrupted mask at that exact boundary,
+including a real condition-variable waiter and ART-handled faults. The generic
+GC-only signal-cycle test does not exercise the ART special-handler branch.
+
 Build a two-cycle guest signal test using the actual process-state trampoline:
 worker waits on the provider condition variable; suspend handler posts an
 ack semaphore and waits in sigsuspend for restart; repeat suspend/resume and
