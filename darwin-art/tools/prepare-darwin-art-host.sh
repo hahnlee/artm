@@ -39,6 +39,10 @@ if [[ "$mode" == "packaged" ]]; then
     echo "packaged Darwin ART host lacks the Android x18 task ABI: $host" >&2
     exit 70
   }
+  has_development_entitlement || {
+    echo "packaged Darwin ART host lacks the allow-jit entitlement: $host" >&2
+    exit 71
+  }
   codesign --verify --strict "$host"
   exit 0
 fi

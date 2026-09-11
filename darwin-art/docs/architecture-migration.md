@@ -15353,3 +15353,6 @@ or admission exception was added.
   DEX를 복사하고 system-server/app 양쪽에 그 경로를 전달한다. 실제 Blue
   Archive 실행에서 profile cache에만 `classes.vdex`가 생겼고, Manager 전체
   deep signature는 실행 전후 불변으로 검증됐다.
+- Checkpoint 1192 (2026-09-11): Host 실행 준비 계약에 JIT entitlement 검사를
+  추가해, x18 ABI와 실행 권한이 함께 보장되지 않으면 packaged launch를
+  거부하도록 했다. 재빌드·prepare·entitlement·deep codesign 검증을 PASS했다.

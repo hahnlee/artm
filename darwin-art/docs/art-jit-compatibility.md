@@ -10998,3 +10998,7 @@ incomplete and still requires managed caller unwind validation.
   launcher가 profile 소유 `mnt/system/dex-cache/button-dex/classes.dex`를
   사용하도록 변경했고, 실제 실행 후 `classes.vdex`가 profile cache에만
   생성됐다. 실행 전후 `codesign --verify --deep --strict`가 모두 PASS했다.
+- Checkpoint 1192 (2026-09-11): packaged host 준비 단계가 Android x18 ABI뿐
+  아니라 `com.apple.security.cs.allow-jit` entitlement도 필수 검사하도록
+  강화됐다. Manager 재빌드 후 packaged prepare, entitlement 조회 및 전체
+  deep-sign 검증이 모두 PASS했다.
