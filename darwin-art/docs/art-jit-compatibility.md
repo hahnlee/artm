@@ -10451,3 +10451,8 @@ incomplete and still requires managed caller unwind validation.
   acceptance는 Calculator `2+3=5`, DeskClock Timer 및 HWUI→SurfaceFlinger→
   Metal을 재확인했다. Blue Archive는 nativeRender 1,055회와 실제 Notice UI를
   표시했지만 Confirm 이후 다운로드/게임플레이는 별도 미검증이다.
+
+- Checkpoint 1086 (2026-09-11): Blue Archive 최신 run에서 Notice UI가
+  재현되고 `nativeRender`가 계속 반환됐지만, CUA는 unbundled host를 앱으로
+  인식하지 않아 실제 OS 물리 클릭 자동화는 수행하지 못했다. synthetic 입력의
+  `consumed=1`만 증거로 유지하며, Confirm/Cancel 이후 게임플레이는 미완료다.

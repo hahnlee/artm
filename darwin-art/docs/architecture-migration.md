@@ -14817,6 +14817,11 @@ or admission exception was added.
   Notice UI까지 렌더링됐으며, Confirm 이후 대용량 리소스 다운로드와 로그인
   이후 게임플레이는 아직 acceptance 범위 밖이다.
 
+- Checkpoint 1086 (2026-09-11): Blue Archive Notice UI 재현과 nativeRender
+  반복 반환은 유지됐으나, CUA가 unbundled `darwin-art-host`를 앱으로 노출하지
+  않아 실제 OS 물리 클릭 자동화는 수행하지 못했다. synthetic DOWN/UP
+  `consumed=1`만 기록하고 Confirm/Cancel 이후 게임플레이는 미검증으로 남긴다.
+
 - Checkpoint 1066 (2026-09-11): 최신 JNI/HWUI 및 MAP_JIT 변경 후 ART JIT
   audit를 재실행해 Nterp, compiled/GC, VarHandle, invoke, Surface,
   MediaCodec, W^X 및 shutdown lifecycle 전체가 `RC=0`으로 통과했다.
