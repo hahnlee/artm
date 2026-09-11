@@ -10962,3 +10962,7 @@ incomplete and still requires managed caller unwind validation.
   확인했다. shim의 LSUIElement/daemon 분리 때문에 CUA가 실제 host PID를
   소유하지 못한다. runtime/APK 변경 없이 Host.app 패키징을 다음 acceptance
   구현으로 지정했다.
+- Checkpoint 1184 (2026-09-11): Blue Archive Host.app 구현 지점을 조사했다.
+  `DARAppShimMain`은 profile daemonize를 호출하고, 실제 host command는
+  `run-android-apk-app.sh` 내부에서 구성된다. 따라서 bundle owner를 바꾸려면
+  shim 단독 수정이 아니라 packaged runtime host 경로 override가 필요하다.

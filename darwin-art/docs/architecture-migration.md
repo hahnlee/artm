@@ -15320,3 +15320,7 @@ or admission exception was added.
   `darwin-art-host`가 아닌 shim/daemon 구조 때문에 앱 identity가 끊긴다.
   Host.app을 실제 executable owner로 만들고 NSRunningApplication으로 검증하는
   작업이 다음 단계다.
+- Checkpoint 1184 (2026-09-11): Host.app 패키징은 Manager의 shim 생성부와
+  launcher script가 분리된 구조라 단순 LSUIElement 변경으로 해결되지 않는다.
+  실제 host command를 bundle executable로 선택하는 opt-in 경로를 추가해야
+  하며, 현재는 구조 조사 단계다.
