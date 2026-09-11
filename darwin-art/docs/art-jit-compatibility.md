@@ -16,7 +16,13 @@ feature works. A successful compile is not proof of execution or correctness.
 Keep unavoidable macOS address-space/W^X differences in host-specific helpers.
 Do not remove safety gates before their protected contracts have been ported.
 
-## Coverage index (2026-09-05)
+## Coverage index (reviewed 2026-09-11)
+
+The family rows retain the scope of their focused execution tests; broad corpus
+PASS counts do not independently prove every compiled method or optimization.
+The execution-policy, unwind and application rows below supersede the original
+September 5 status. Dated checkpoints preserve historical results, not current
+blockers. In particular, successful Unity initialization is not game UI proof.
 
 | Family | Current evidence | Completion work |
 | --- | --- | --- |
@@ -34,9 +40,9 @@ Do not remove safety gates before their protected contracts have been ported.
 | OSR | Explicit and automatic IJFD OSR, exceptions, live references, moving GC and deopt pass | Nested/irreducible loop and production workload coverage |
 | Inlining/intrinsics | Pinned source audit classifies 36 specialized-HIR + 217 HInvoke entries; specialized-HIR, Unsafe, String, Math, CRC32, Memory, Reference, boxing and typed System.arraycopy families execute in interpreter/baseline/optimized with CC where reference-bearing; byte/int ordinary-call fallbacks are included | Pinned upstream compiler corpus and inlining heuristics |
 | Root literals | Native64 root-slot addresses and compressed payloads pass class/string/MethodType-style use under CC | Exhaustive metadata/native literal inventory |
-| Native unwind metadata | Every ARM64 quick entrypoint now has truthful Mach-O CFI; nonlinear AOSP paths are split into adjacent FDEs without changing code bytes. memcmp16 and ordinary JNI/native assembly retain CFI; two dlsym lookup stubs and the Darwin local/remote unwindstack backend remain | Lower the two lookup stubs, implement Darwin unwindstack maps/register/memory backends, and pass untouched AOSP 137-cfi locally/remotely |
-| Execution policy | Darwin bytecode/method-shape allowlist and duplicate compiler/inliner admission gates removed; AOSP background compilation now reaches boot JNI methods; Thread.currentThread JNI/Baker boundary survives repeated CC stress | Make normal app launch use the production JIT policy and validate broader background compilation |
-| Original apps | Prior Blue Archive loading/input evidence predates this JIT closure | Repeat Blue Archive, Chrome and calculator with unrestricted JIT and no APK changes |
+| Native unwind metadata | September 6 deterministic-CFI checkpoint records untouched AOSP 137-cfi optimized-JIT local/context/thread/remote success and integrated Darwin unwindstack providers | Preserve this regression under current build identity; do not generalize its coverage to arbitrary native binaries |
+| Execution policy | Production JIT is default-on since September 6; Darwin bytecode/method-shape admission gates are removed. September 11 focused audit covers compiled GC, VarHandle, invokes, OSR/deopt and shutdown | Extend method-level execution evidence beyond the existing focused matrix; broader corpus interpreter/jit summaries are not an independent optimized lane |
+| Original apps | September 11 Calculator 2+3=5, DeskClock Timer and Chromium external HTTPS content have real execution/rendering evidence. Current Blue Archive nativeRender stalls in GC acknowledgment and scanout is black | Repeat acceptance on each rebuilt identity. Blue Archive first nonblack game UI plus meaningful input remains open; original base/split APK inputs are currently absent |
 
 ## Validation rules
 
@@ -52,33 +58,32 @@ Do not remove safety gates before their protected contracts have been ported.
 
 ## Next implementation boundary
 
-The local executable matrix passes end-to-end with Baker/ConcurrentCopying and
-no Darwin bytecode or method-shape allowlist. The pinned AOSP intrinsic source
-contract is mechanically classified. Specialized-HIR, Unsafe, all 25 String
-entries, typed System.arraycopy paths, all 43 Math entries, CRC32, Memory,
-Reference and boxing now pass interpreter, baseline and optimized execution.
-The Android fixture compiler now
-uses API 36 core-for-system-modules plus android.jar as its boot API while still
-emitting Java 8 classfiles, preserving signature-polymorphic bytecode and modern
-Android Math APIs. Next run the pinned upstream compiler corpus through a
-generic unmodified-test entrypoint and record unsupported harness features.
-After that is green, enable production app-launch JIT policy and repeat
-unmodified Blue Archive, Chromium and calculator workloads. Native Mach-O
-unwind metadata remains incomplete.
+Close Blue Archive first-frame/interaction acceptance using unchanged original
+APK inputs after restoring their currently missing path. Its black first frame
+is a native IL2CPP GC acknowledgment blocker, not evidence of a JIT opcode gap.
+The actual guest signal trampoline/semaphore/mask regression now passes 100
+suspend/resume cycles (20 repeated runs); this does not prove the game stall is
+fixed. The provider's diagnostic getenv lookup was moved off the signal path.
+Rebuild through the official incremental graphics closure before counting any
+runtime result for that change, and retain APK/runtime identities with evidence.
+
+Continue method-level compiled execution/OSR/deopt/GC accounting separately from
+the broader corpus's interpreter/jit summaries. Production JIT enablement and
+the September 6 deterministic AOSP CFI provider port are completed historical
+boundaries, not work that needs to be restarted.
 
 Read this index and the latest architecture-migration entry when resuming.
 Append dated evidence as work advances; keep this status table current.
 
-## Active execution boundary — 2026-09-10
+## Active execution boundary — 2026-09-11
 
-Astra 전체 리뷰에서 현재 Chromium blocker는 JIT opcode가 아니라 native
-thread lifecycle이다. ART `0188`의 전역 `ThreadExitCallback` auto-detach는
-TLS destructor 경계에서 `attempting to detach thread that is not attached`
-fatal을 재현하므로 정상 해법으로 인정하지 않는다. 다음 단계는 정확한
-thread owner에서 attach 성공 여부를 기록하고 새로 attach한 경우에만 detach하는
-공통 계약, callback drain→worker join→attachment 해제→ART shutdown 순서,
-그리고 모든 HWUI/graphics JNI build가 같은 source/patch manifest를 쓰는지에
-대한 identity 검증이다.
+September 10's Chromium native-thread blocker has an implemented ownership
+boundary: HWUI uses one C++ TLS attachment owner, borrows already-attached JNI
+threads, and joins async workers before libcore/ELF unload and DestroyJavaVM.
+The focused ownership test covers 100 owned workers, borrowed ownership and
+explicit detach; September 11 Calculator/Chromium lifecycle runs report no ART
+TLS-exit warning. Keep this regression and build identity checked. A global ART
+ThreadExitCallback auto-detach remains an invalid replacement for ownership.
 
 Corpus의 1,069 PASS/7 timeout 기록은 유효한 회귀 증거지만 interpreter와
 jit 두 lane의 요약일 뿐 독립적인 optimized lane이나 개별 메서드의 compiled
@@ -10385,3 +10390,9 @@ incomplete and still requires managed caller unwind validation.
   `Learn more` 링크, Android 하단 내비게이션 바가 모두 렌더링되며, 기존 netlog는
   HTTPS 200/HTTP2/TLS1.3을 기록한다. 이번 확인은 APK/런타임 변경 없이 재현한
   렌더링 증거다.
+
+- Checkpoint 1077 (2026-09-11): 최신 HEAD에서 ART JIT audit와 AOSP core-apps
+  graphics acceptance를 재실행해 모두 `RC=0`으로 통과했다. Calculator
+  `2+3=5`, DeskClock Timer, HWUI+SurfaceFlinger+Metal 공통 경로와 shutdown
+  lifecycle을 재확인했다. `audit-native-graph.sh`도 입력 472개, digest
+  `63eeef4f…84943`, runtime 258/graphics-jni 63으로 PASS했다.

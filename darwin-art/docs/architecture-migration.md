@@ -14763,6 +14763,11 @@ or admission exception was added.
   링크 및 Android 하단 바가 정상 표시되고, netlog는 HTTPS 200/HTTP2/TLS1.3을
   증명한다. 외부 페이지 렌더링은 현재 호환성 계층의 재현 가능한 acceptance다.
 
+- Checkpoint 1077 (2026-09-11): JIT 및 AOSP core-apps graphics acceptance를
+  최신 트리에서 재실행했다. Calculator 연산 결과 `2+3=5`, DeskClock Timer,
+  HWUI→SurfaceFlinger→Metal과 VM shutdown이 모두 PASS했다. Native graph도
+  472 inputs/digest `63eeef4f…84943`로 재현 identity를 갱신했다.
+
 - Checkpoint 1066 (2026-09-11): 최신 JNI/HWUI 및 MAP_JIT 변경 후 ART JIT
   audit를 재실행해 Nterp, compiled/GC, VarHandle, invoke, Surface,
   MediaCodec, W^X 및 shutdown lifecycle 전체가 `RC=0`으로 통과했다.
