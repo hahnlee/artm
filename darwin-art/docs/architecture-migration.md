@@ -14844,11 +14844,21 @@ or admission exception was added.
   InputChannel acceptance이며, 물리 클릭·Confirm 다운로드·로그인·게임플레이는
   여전히 별도 미완료다.
 
-- Checkpoint 1091 (2026-09-11): upstream corpus resume의 첫 20개 중 19개는
-  기존 PASS였지만 `004-SignalTest` optimized lane이 compiled `Main.main` 뒤
-  generated-code fault 2회와 unexpected signal 6으로 실패했다. interpreter
-  expected-output은 통과했으며, 이 JIT/signal 경계는 새 미완료 항목으로
-  기록하고 우회·제외 없이 Astra 원인 분석을 진행한다.
+- Checkpoint 1091 (2026-09-11, corrected): upstream corpus `--resume`의 첫
+  20개 결과는 새 실행이 아니라 기존 19 PASS / 1 FAIL 재사용이었다.
+  `004-SignalTest`의 optimized generated-code fault 2회 / signal 6 로그는
+  **9월 10일 07:22** 기록이며 최신 thread-local sigchain 수정의 회귀 증거가
+  아니다. 기존 resume key는 test/runner hash만 비교하고 runtime/host/boot
+  identity를 누락했다. 최신 identity의 단독 fresh 재실행은 Java 진입 전에
+  framework JAR와 boot OAT checksum 불일치(`2992cb00 != 7b9f8bb0`)로
+  dex2oat app artifact 생성을 실패했다(`/tmp/astra-004-signal-repro.log`).
+  따라서 현재 경계는 boot image 재생성 후 fresh 재검증이며, historical
+  fault 원인이나 최신 PASS/FAIL을 아직 단정하지 않는다. 생산 코드 변경 없음.
+
+- Checkpoint 1092 (2026-09-11): corpus ledger의 resume key를 보강해 host,
+  graphics runtime, 공식 native graph 입력, boot `.art/.oat/.vdex` 전체와
+  bootclasspath JAR의 content digest를 함께 기록한다. 기존 digest 없는
+  결과는 재실행되며, limit-1 migration run으로 동작을 확인했다.
 
 - Checkpoint 1066 (2026-09-11): 최신 JNI/HWUI 및 MAP_JIT 변경 후 ART JIT
   audit를 재실행해 Nterp, compiled/GC, VarHandle, invoke, Surface,

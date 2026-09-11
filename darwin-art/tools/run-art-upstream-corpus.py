@@ -46,6 +46,7 @@ class TestResult:
     runner_stderr: str
     artifacts: str
     error: str
+    runtime_identity: str = ""
 
 
 def sha256_file(path: Path) -> str:
@@ -53,6 +54,41 @@ def sha256_file(path: Path) -> str:
     with path.open("rb") as stream:
         for chunk in iter(lambda: stream.read(1024 * 1024), b""):
             digest.update(chunk)
+    return digest.hexdigest()
+
+
+def runtime_identity(root: Path) -> str:
+    """Hash the immutable host/runtime inputs used by every corpus run."""
+    fixed_paths = (
+        root / "target/debug/darwin-art-host",
+        root / "_build/runtime-graphics-link-probe/libdarwin_art_runtime_graphics.dylib",
+        root / "_build/native-graph/build.ninja",
+        root / "_build/native-graph/build.inputs.sha256",
+    )
+    boot_dir = root / "_build/android16-boot-image-darwin"
+    paths = list(fixed_paths)
+    paths.extend(sorted(boot_dir.glob("boot*.art")))
+    paths.extend(sorted(boot_dir.glob("boot*.oat")))
+    paths.extend(sorted(boot_dir.glob("boot*.vdex")))
+    paths.extend((
+        root / "_build/android16-core-oj-compat/core-oj-compat.jar",
+        root / "_prebuilt/android-16/bootclasspath/core-libart.jar",
+        root / "_build/android16-framework-compat/framework-compat.jar",
+        root / "_prebuilt/android-16/bootclasspath/framework-location.jar",
+        root / "_build/bootclasspath/core-icu4j-api36.jar",
+        root / "_build/dex-probe/unsafe-boot-dex/unsafe-boot.jar",
+    ))
+    paths.extend(sorted(
+        (root / "_build/android16-ps16k-r07/extracted").rglob("*.jar")))
+    digest = hashlib.sha256(b"darwin-art-corpus-runtime-v1\0")
+    for path in sorted(set(paths)):
+        relative = path.relative_to(root).as_posix().encode("utf-8")
+        digest.update(relative + b"\0")
+        if path.is_file():
+            digest.update(sha256_file(path).encode("ascii"))
+        else:
+            digest.update(b"missing")
+        digest.update(b"\0")
     return digest.hexdigest()
 
 
@@ -172,6 +208,7 @@ def write_ledgers(ledger_dir: Path, records: dict[str, TestResult]) -> None:
         fieldnames=(
             "test", "input_hash", "runner_hash", "status", "exit_code",
             "runner_stdout", "runner_stderr", "artifacts", "error",
+            "runtime_identity",
         ),
         delimiter="\t",
         lineterminator="\n",
@@ -190,7 +227,7 @@ def _artifact_path(stdout: bytes) -> str:
 
 
 def run_test(root: Path, runner: Path, test: str, result_dir: Path,
-             timeout: float | None) -> TestResult:
+             timeout: float | None, runtime_digest: str) -> TestResult:
     test_input = input_hash(root / "_aosp/art/test" / test)
     runner_digest = sha256_file(runner)
     result_dir.mkdir(parents=True, exist_ok=True)
@@ -238,17 +275,19 @@ def run_test(root: Path, runner: Path, test: str, result_dir: Path,
         runner_stderr=str(stderr_path),
         artifacts=_artifact_path(stdout),
         error=message,
+        runtime_identity=runtime_digest,
     )
 
 
 def _run_parallel(root: Path, runner: Path, tests: list[str], ledger_dir: Path,
                   records: dict[str, TestResult], parallel: int,
-                  fail_fast: bool, timeout: float | None) -> None:
+                  fail_fast: bool, timeout: float | None,
+                  runtime_digest: str) -> None:
     def submit(executor: ThreadPoolExecutor, test: str) -> Future[TestResult]:
         return executor.submit(
             run_test, root, runner, test,
             ledger_dir / "results" / test,
-            timeout)
+            timeout, runtime_digest)
 
     pending = iter(tests)
     active: dict[Future[TestResult], str] = {}
@@ -337,6 +376,7 @@ def main(argv: Iterable[str] | None = None) -> int:
         selected = selected[:args.limit]
     records = load_records(ledger_dir / "summary.json")
     runner_digest = sha256_file(runner)
+    runtime_digest = runtime_identity(root)
     work: list[str] = []
     for test in selected:
         current_hash = input_hash(root / "_aosp/art/test" / test)
@@ -344,6 +384,7 @@ def main(argv: Iterable[str] | None = None) -> int:
         if (args.resume and previous is not None
                 and previous.input_hash == current_hash
                 and previous.runner_hash == runner_digest
+                and previous.runtime_identity == runtime_digest
                 and previous.status in TERMINAL_STATUSES):
             print(f"{test}\tresumed\t{previous.status}")
             continue
@@ -351,7 +392,7 @@ def main(argv: Iterable[str] | None = None) -> int:
     write_ledgers(ledger_dir, records)
     _run_parallel(
         root, runner, work, ledger_dir, records, args.parallel,
-        args.fail_fast, args.timeout)
+        args.fail_fast, args.timeout, runtime_digest)
     write_ledgers(ledger_dir, records)
     selected_results = [records[test] for test in selected if test in records]
     return 0 if all(result.status == "passed" for result in selected_results) \

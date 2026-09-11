@@ -95,6 +95,12 @@ boundaries, not work that needs to be restarted.
   This is now an explicit JIT/signal boundary blocker; no workaround or test
   exclusion has been added.
 
+- Checkpoint 1092 (2026-09-11): upstream corpus ledger resume identity was
+  hardened. Each result now records a content digest covering the host binary,
+  graphics runtime, official native graph inputs, all boot `.art/.oat/.vdex`
+  artifacts and bootclasspath JARs. Legacy records without this digest are
+  re-executed instead of resumed; a limit-1 migration run passed.
+
 Read this index and the latest architecture-migration entry when resuming.
 Append dated evidence as work advances; keep this status table current.
 
