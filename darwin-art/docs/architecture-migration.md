@@ -15489,3 +15489,7 @@ or admission exception was added.
   입력으로 반복 실행해 두 번째 PASS를 확인했다(`run.g8kgk4`, states=10).
   renderer child Surface 게시와 Android 입력 경계가 연속 실행에서 모두
   유지됐으며, 이전 readiness race는 현재 재현되지 않았다.
+- Checkpoint 1221 (2026-09-11): 변경 없는 Chromium APK의
+  `https://example.com/` VIEW 경로를 재검증했다. renderer child Surface가
+  실제 buffer를 게시했고, Android CA 검증 `cert_status=0`인 TLS 1.3/HTTP
+  200 응답과 SurfaceFlinger 본문 픽셀 scanout이 모두 확인됐다.

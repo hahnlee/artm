@@ -11153,3 +11153,7 @@ incomplete and still requires managed caller unwind validation.
   (`_build/chromium-tab-graphics-acceptance/run.g8kgk4`, target-states=10).
   실제 TabSwitcher·TabGrid·card 입력과 child Surface 게시가 반복 성공해
   readiness 경합은 이번 실행에서 재현되지 않았다.
+- Checkpoint 1221 (2026-09-11): Chromium 원본 APK에서 `https://example.com/`
+  실제 VIEW 실행의 진단 산출물을 재검증했다. child Surface 생성·buffer
+  present, TLS 1.3/HTTP 200 및 `cert_status=0`, SurfaceFlinger source의
+  본문 픽셀 전달이 확인됐다(`/tmp/chromium-example-diagnosis.dMBHwo`).
