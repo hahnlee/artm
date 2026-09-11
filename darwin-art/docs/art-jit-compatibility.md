@@ -11109,3 +11109,7 @@ incomplete and still requires managed caller unwind validation.
   GLES+ANGLE+Graphite+Dawn+MoltenVK+AHB+SurfaceFlinger+Metal 경로와
   child Surface 게시도 통과했다. 1210의 readiness 경계는 여전히 간헐적
   실패를 숨기지 않는 별도 gate 후보로 남긴다.
+- Checkpoint 1212 (2026-09-11): `tools/test-hwui-jni-attachment.sh`를
+  재실행해 native-thread/JNI ownership 계약을 확인했다. 결과는
+  `owned=100 borrowed=1 explicit-detach=1 ART-TLS-exit=0` PASS이며,
+  ART TLS 종료가 임의로 detach를 수행하지 않는 AOSP 경계를 유지한다.

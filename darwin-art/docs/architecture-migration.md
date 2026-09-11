@@ -15448,3 +15448,7 @@ or admission exception was added.
   (`run.lqWOa3`, target-states=10). 입력 계약은 renderer surface와
   독립적으로 유지하고, 간헐적인 child-surface 미게시만 host readiness
   사전조건으로 관측하는 방향을 유지한다.
+- Checkpoint 1212 (2026-09-11): JNI attachment ownership probe를
+  `tools/test-hwui-jni-attachment.sh`로 재실행했다. owned thread 100개,
+  borrowed 1개, explicit detach 1개가 PASS했고 `ART-TLS-exit=0`으로
+  TLS destructor가 VM 소유 attachment를 잘못 해제하지 않음을 확인했다.
