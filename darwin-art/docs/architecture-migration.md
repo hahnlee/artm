@@ -15051,3 +15051,7 @@ or admission exception was added.
 - Checkpoint 1126 (2026-09-11): controlled fresh corpus 프로세스가 동일
   invocation에서 8개 worker로 계속 실행 중임을 확인했다. 완료 또는 drift 감지
   전에는 결과를 해석하거나 identity PASS로 승격하지 않는다.
+
+- Checkpoint 1127 (2026-09-11): 동일 fresh corpus 핸들을 재확인했으며 약 3분
+  이상 8개 worker가 계속 진행 중이다. 완료 전 ledger의 기존 혼합 행은 유효한
+  current-identity 증거로 사용하지 않는다.
