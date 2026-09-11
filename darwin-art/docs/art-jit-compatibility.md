@@ -10284,3 +10284,8 @@ incomplete and still requires managed caller unwind validation.
   TLS destructor에서 detach하고 기존 attachment는 borrow한다. focused test,
   JNI object audit 및 runtime/host graphics closure audit가 모두 `RC=0`으로
   통과했다(archive-members=1970, registrar=51, ART-TLS warning=0).
+
+- Checkpoint 1059 (2026-09-11): JNI owner 통합 후 실제 변경 없는 Calculator를
+  `DARWIN_ART_DEBUG_JNI_ATTACH=1`로 실행했다. RenderThread와 hwuiTask0/1이
+  owned attach로 생성되고 host는 `RC=0`으로 종료했으며 `Native thread exiting
+  without ... DetachCurrentThread`, fatal signal, run_request failure는 0건이었다.

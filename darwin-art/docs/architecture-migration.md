@@ -14682,3 +14682,8 @@ or admission exception was added.
   attachment는 빌리지 않는다. focused ownership test, JNI object audit 및
   runtime/host graphics closure audit가 모두 PASS(`RC=0`, archive-members=1970,
   registrar=51, ART-TLS warning=0)했다.
+
+- Checkpoint 1059 (2026-09-11): JNI owner 통합 후 변경 없는 Calculator를
+  실제 실행해 RenderThread/hwuiTask0/1의 owned attach와 `RC=0` 종료를
+  확인했다. ART detach 경고, fatal signal, run_request failure는 관찰되지
+  않았다.
