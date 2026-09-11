@@ -10690,3 +10690,7 @@ incomplete and still requires managed caller unwind validation.
 - Checkpoint 1128 (2026-09-11): controlled fresh corpus가 약 5분째 동일
   프로세스에서 진행 중이다. 중간 ledger는 기존 행과 새 행이 함께 보이는
   부분 갱신 상태이므로, 프로세스 종료와 최종 identity 재계산 전에는 판정하지 않는다.
+
+- Checkpoint 1129 (2026-09-11): corpus 핸들이 약 6분째 살아 있고 8개 worker가
+  순차적으로 진행 중이다. 현재 summary는 1,075 passed/1 failed의 부분 상태이며,
+  기존 identity 행이 남아 있으므로 완료 전 current-identity 판정을 하지 않는다.
