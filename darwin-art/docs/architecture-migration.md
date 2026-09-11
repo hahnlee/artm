@@ -14716,3 +14716,7 @@ or admission exception was added.
 - Checkpoint 1065 (2026-09-11): macOS trust 검증이 계속
   `CSSMERR_TP_NOT_TRUSTED`로 실패해 Chromium HTTPS E2E를 보류했다. 이는
   runtime 결함이 아니라 사용자 키체인 설정 전제조건이다.
+
+- Checkpoint 1066 (2026-09-11): 최신 JNI/HWUI 및 MAP_JIT 변경 후 ART JIT
+  audit를 재실행해 Nterp, compiled/GC, VarHandle, invoke, Surface,
+  MediaCodec, W^X 및 shutdown lifecycle 전체가 `RC=0`으로 통과했다.
