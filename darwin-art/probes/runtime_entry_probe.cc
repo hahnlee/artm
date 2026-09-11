@@ -647,6 +647,12 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
     art::gLogVerbosity.deopt = true;
   }
   options.Set(art::RuntimeArgumentMap::UseJitCompilation, enable_jit);
+  std::cerr << "ART runtime JIT options: usejit=" << (enable_jit ? 1 : 0)
+            << " interpret="
+            << (options.GetOrDefault(art::RuntimeArgumentMap::Interpret) ? 1 : 0)
+            << " explicit_usejit="
+            << (options.Exists(art::RuntimeArgumentMap::UseJitCompilation) ? 1 : 0)
+            << "\n";
   if (std::getenv("DARWIN_ART_UPSTREAM_ZYGOTE") != nullptr) {
     options.Set(art::RuntimeArgumentMap::Zygote, art::Unit{});
     options.Set(art::RuntimeArgumentMap::JITCodeCacheInitialCapacity,
@@ -801,16 +807,6 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
   if (!art::Runtime::Create(std::move(options))) {
     return 1;
   }
-  // Keep an observable parity check between the requested launch contract and
-  // the state ART actually installed. This is intentionally queried after
-  // Runtime::Create, since ParsedOptions is moved into ART at that boundary.
-  std::cerr << "ART runtime JIT: requested=" << (enable_jit ? 1 : 0)
-            << " actual="
-            << (art::Runtime::Current()->UseJitCompilation() ? 1 : 0)
-            << " jit_object=" << (art::Runtime::Current()->GetJit() != nullptr ? 1 : 0)
-            << " compiler_callbacks=" << (art::Runtime::Current()->IsCompiler() ? 1 : 0)
-            << " aot_compiler=" << (art::Runtime::Current()->IsAotCompiler() ? 1 : 0)
-            << "\n";
   // Android's zygote specialization publishes DEBUG_ENABLE_JDWP separately
   // from ApplicationInfo.FLAG_DEBUGGABLE. ART run-tests that attach a limited
   // JVMTI environment use that process capability while deliberately keeping
@@ -890,6 +886,16 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
   if (runtime_start_status != 0) {
     return runtime_start_status;
   }
+  // Registration completes ART's minimal-start phase, including the JIT
+  // creation point. Observe the effective state here rather than immediately
+  // after Runtime::Create, which is intentionally too early for this host.
+  std::cerr << "ART runtime JIT: requested=" << (enable_jit ? 1 : 0)
+            << " actual="
+            << (art::Runtime::Current()->UseJitCompilation() ? 1 : 0)
+            << " jit_object=" << (art::Runtime::Current()->GetJit() != nullptr ? 1 : 0)
+            << " compiler_callbacks=" << (art::Runtime::Current()->IsCompiler() ? 1 : 0)
+            << " aot_compiler=" << (art::Runtime::Current()->IsAotCompiler() ? 1 : 0)
+            << "\n";
   const char* activity_descriptor =
       run_service_process
           ? service_descriptor.c_str()

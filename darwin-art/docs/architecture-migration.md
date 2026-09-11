@@ -15389,3 +15389,9 @@ or admission exception was added.
   AOSP 옵션 전달은 정상이나 detached host에서 JIT 객체 생성이 누락된
   상태이므로, 다음 단계는 runtime bootstrap의 JIT 초기화 계약과
   컴파일러 archive 연결을 분리해 검증하는 것이다.
+- Checkpoint 1200 (2026-09-11): JIT 상태를 Runtime 생성 직후가 아닌
+  registration phase 완료 후 관측하도록 진단 위치를 수정했다. 기본
+  `requested=1 actual=1 jit_object=1`, `-Xusejit:false`의
+  `requested=0 actual=0 jit_object=0`을 확인했다. 따라서 JIT archive/
+  backend 전체 미연결이 아니라 정상 생성 상태이며, 개별 compile 실패는
+  별도 admission/fallback 추적 항목으로 남긴다.

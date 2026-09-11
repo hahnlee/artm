@@ -11040,3 +11040,10 @@ incomplete and still requires managed caller unwind validation.
   확인했다. 따라서 단순 옵션 파싱 문제가 아니라 현재 detached runtime
   인스턴스에 Jit 객체가 생성되지 않는 초기화 문제다. trace에는 compiler
   compile 요청 실패도 있어 JIT backend/컴파일러 연결을 Astra와 별도 조사한다.
+- Checkpoint 1200 (2026-09-11): Astra 리뷰로 진단 시점 오류를 확인했다.
+  `Runtime::Create()` 직후는 JIT 생성 전이므로 actual=0이 정상이며,
+  registration phase의 `FinishMinimalForDarwinProbe()` 이후 재측정했다.
+  기본 실행은 `requested=1 actual=1 jit_object=1`, `-Xusejit:false`는
+  `requested=0 actual=0 jit_object=0`으로 확인되어 JIT on/off 계약이
+  실제 ART 상태와 일치한다. 개별 메서드 compile 실패는 전체 JIT 실패가
+  아닌 method admission/fallback 범위로 분리한다.
