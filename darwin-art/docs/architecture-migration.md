@@ -15251,3 +15251,8 @@ or admission exception was added.
   MotionEvent 입력, 9개 target state 및 GLES→ANGLE→Graphite→Dawn→MoltenVK→
   AHB→SurfaceFlinger→Metal GPU 경로를 확인했다. 산출물은
   `_build/chromium-tab-graphics-acceptance/run.On05lI/`에 있다.
+
+- Checkpoint 1169 (2026-09-11): 변경 없는 VLC APK의
+  `vlc-surface-canvas-acceptance.sh`가 PASS했다. `ANativeWindow` lock/post가
+  각각 3회 발생했고 nativeLockCanvas 오류나 crash 없이 소프트웨어 Canvas
+  경로가 동작했다. 로그는 `/var/folders/t4/qqflgy6n3rgd5dcnv2r4x0nh0000gn/T//darwin-art-vlc-canvas.8NFNTY/vlc.log`에 있다.
