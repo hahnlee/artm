@@ -10088,3 +10088,9 @@ incomplete and still requires managed caller unwind validation.
   JobScheduler NPE, AndroidKeyStore 미지원이 발생했다. 따라서 이를 APK
   acceptance 성공으로 판정하지 않고 native payload/시스템 서비스 호환성 과제로
   Astra 진단을 요청했다.
+
+- Checkpoint 1029 (2026-09-11): 동일 base와 ABI `split-0.apk`를 명시해 Blue
+  Archive를 재실행했다. 설치/resolve가 `native=24`로 PASS했고 libmain.so,
+  libunity.so, libil2cpp.so의 ELF 로드, IL2CPP `JNI_OnLoad`, Unity ARM64 초기화를
+  확인했다. `RC=0`과 window add까지 도달했지만 JobScheduler NPE와 AndroidKeyStore
+  미지원은 남아 게임 화면/플레이 acceptance는 보류한다.

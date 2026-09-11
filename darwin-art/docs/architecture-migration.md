@@ -14507,3 +14507,9 @@ or admission exception was added.
   loop 진입은 확인했으나 `libmain.so` UnsatisfiedLinkError와 JobScheduler NPE,
   AndroidKeyStore 미지원 로그가 발생했다. `RC=0`만으로 acceptance를 닫지 않고,
   APK native payload 및 시스템 서비스 계약을 Astra와 분리 진단한다.
+
+- Checkpoint 1029 (2026-09-11): base+ABI `split-0.apk` 조합으로 Blue Archive를
+  재실행해 native resolver 24개와 libmain/libunity/libil2cpp 로드, IL2CPP
+  JNI_OnLoad, Unity 초기화를 확인했다. 실행은 `RC=0`/window add까지 진행됐으나
+  JobScheduler·AndroidKeyStore 계약 부족이 남아 실제 게임 플레이 acceptance는
+  보류한다.
