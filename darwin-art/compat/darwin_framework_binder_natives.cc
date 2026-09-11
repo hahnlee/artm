@@ -2300,6 +2300,14 @@ bool SendWireMessage(int fd, const WireHeader& header,
 
 bool ReceiveWireMessage(int fd, WireMessage* out) {
   if (out == nullptr) return false;
+  const auto fail = [&](const char* reason, ssize_t received = -1) {
+    if (std::getenv("DARWIN_ART_DEBUG_BINDER") != nullptr) {
+      std::cerr << "ART Binder wire: receive failure fd=" << fd
+                << " reason=" << reason << " received=" << received
+                << " errno=" << errno << "\n";
+    }
+    return false;
+  };
   WireHeader header{};
   iovec vector{&header, sizeof(header)};
   std::vector<uint8_t> control(CMSG_SPACE(kMaxWireObjects * sizeof(int)));
@@ -2317,7 +2325,7 @@ bool ReceiveWireMessage(int fd, WireMessage* out) {
       header.data_size > kMaxWireBytes ||
       header.binder_count > kMaxWireObjects ||
       header.fd_count > kMaxWireObjects) {
-    return false;
+    return fail(received == 0 ? "eof" : "short-or-invalid-header", received);
   }
   std::vector<int> host_descriptors;
   for (cmsghdr* item = CMSG_FIRSTHDR(&message); item != nullptr;
@@ -2332,7 +2340,9 @@ bool ReceiveWireMessage(int fd, WireMessage* out) {
       host_descriptors.push_back(descriptors[index]);
     }
   }
-  if (host_descriptors.size() != header.fd_count) return false;
+  if (host_descriptors.size() != header.fd_count) {
+    return fail("fd-count-mismatch", received);
+  }
   out->header = header;
   out->binders.resize(header.binder_count);
   out->fd_metadata.resize(header.fd_count);
@@ -2347,7 +2357,7 @@ bool ReceiveWireMessage(int fd, WireMessage* out) {
       (out->data.empty() || ReadAll(fd, out->data.data(), out->data.size()));
   if (!received_payload) {
     for (int host_fd : host_descriptors) (void)close(host_fd);
-    return false;
+    return fail("payload-eof-or-short", received);
   }
   for (size_t index = 0; index < host_descriptors.size(); ++index) {
     const int host_fd = host_descriptors[index];
@@ -2369,7 +2379,7 @@ bool ReceiveWireMessage(int fd, WireMessage* out) {
            ++remaining) {
         (void)close(host_descriptors[remaining]);
       }
-      return false;
+      return fail("fd-import", received);
     }
     out->file_descriptors.push_back(guest_fd);
   }
@@ -2734,7 +2744,13 @@ void RunRemoteBinderDispatcher(JavaVM* vm, int fd, uint64_t generation) {
   }
   for (;;) {
     auto incoming = std::make_unique<WireMessage>();
-    if (!ReceiveWireMessage(fd, incoming.get())) break;
+    if (!ReceiveWireMessage(fd, incoming.get())) {
+      if (std::getenv("DARWIN_ART_DEBUG_BINDER") != nullptr) {
+        std::cerr << "ART Binder wire: dispatcher closing fd=" << fd
+                  << " generation=" << generation << " reason=receive\n";
+      }
+      break;
+    }
     std::lock_guard<std::recursive_mutex> lock(g_wire_mutex);
     auto connection = g_wire_connections.find(fd);
     if (connection == g_wire_connections.end() ||
@@ -2754,6 +2770,10 @@ void RunRemoteBinderDispatcher(JavaVM* vm, int fd, uint64_t generation) {
     }
     if (incoming->header.type != kWireTransaction ||
         !DispatchWireTransaction(env, fd, incoming.get())) {
+      if (std::getenv("DARWIN_ART_DEBUG_BINDER") != nullptr) {
+        std::cerr << "ART Binder wire: dispatcher closing fd=" << fd
+                  << " generation=" << generation << " reason=dispatch\n";
+      }
       break;
     }
   }
@@ -2988,7 +3008,7 @@ jboolean TransactRemoteBinder(JNIEnv* env, jint control_fd, jint target_id,
     if (std::getenv("DARWIN_ART_DEBUG_BINDER") != nullptr) {
       std::cerr << "ART Binder wire: transact failure fd=" << control_fd
                 << " target=" << target_id << " code=" << code
-                << " phase=" << phase << " errno=" << errno << "\n";
+                << " phase=" << phase << " (channel state changed)\n";
     }
   };
   if (std::getenv("DARWIN_ART_DEBUG_BINDER") != nullptr) {

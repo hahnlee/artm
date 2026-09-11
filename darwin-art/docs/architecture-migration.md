@@ -14420,3 +14420,8 @@ or admission exception was added.
   service spawn PID/control-fd와 Binder wait phase를 함께 기록했다. instance=20
   child까지 spawn은 성공했으나 준비 전 채널이 EBADF로 닫혔다. descriptor 응답은
   앞선 child들에서 모두 정상이다. 변경은 `88ba146e` 후속 진단으로 반영·푸시했다.
+
+- Checkpoint 1013 (2026-09-11): Binder 진단을 실제 수신 syscall 결과 중심으로
+  정정했다. waiter는 호출자 errno를 사용하지 않고 channel state만 보고하며,
+  dispatcher가 EOF/프로토콜/dispatch 원인을 close 전에 출력한다. child 소유자인
+  Rust manager는 kill 전/후 종료 상태를 기록하고 host 테스트가 통과했다.

@@ -9993,3 +9993,9 @@ incomplete and still requires managed caller unwind validation.
   로 실패했다. 실패 child는 ART heap 초기화까지만 남고 `binder=ready`를 출력하지
   않았다. host spawn 로그를 추가해 spawn 자체 성공을 확인했으며, 다음은 child
   초기화 중 종료 상태/시그널을 수집하는 단계다.
+
+- Checkpoint 1013 (2026-09-11): waiter의 ambient errno 해석을 제거하고,
+  `ReceiveWireMessage`의 실제 recv 결과를 EOF/header/payload/fd-import 사유로
+  dispatcher 스레드에서 기록하도록 정정했다. Rust service manager는 shutdown/reap
+  시 child exit code/signal/core-dump 상태를 기록한다. `cargo test -p darwin-art-host`
+  는 통과했다.

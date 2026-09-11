@@ -7,6 +7,7 @@ use std::os::fd::{AsRawFd, FromRawFd, IntoRawFd, RawFd};
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::net::UnixStream;
 use std::os::unix::process::CommandExt;
+use std::os::unix::process::ExitStatusExt;
 use std::process::{Child, Command};
 use std::sync::Mutex;
 
@@ -20,6 +21,17 @@ unsafe extern "C" {
 
 struct ManagedChild {
     child: Child,
+}
+
+fn debug_child_status(pid: i32, phase: &str, status: &std::process::ExitStatus) {
+    if env::var_os("DARWIN_ART_DEBUG_BINDER").is_some() {
+        eprintln!(
+            "ART Binder host: child pid={pid} phase={phase} code={:?} signal={:?} core_dumped={}",
+            status.code(),
+            status.signal(),
+            status.core_dumped()
+        );
+    }
 }
 
 pub(crate) struct ServiceProcessManager {
@@ -171,7 +183,14 @@ impl ServiceProcessManager {
         let mut first_error = None;
         for (_, mut managed) in children.drain() {
             match managed.child.try_wait() {
-                Ok(Some(_)) => continue,
+                Ok(Some(status)) => {
+                    debug_child_status(
+                        managed.child.id() as i32,
+                        "shutdown-already-exited",
+                        &status,
+                    );
+                    continue;
+                }
                 Ok(None) => {
                     if let Err(error) = managed.child.kill()
                         && first_error.is_none()
@@ -184,10 +203,14 @@ impl ServiceProcessManager {
                 }
                 Err(_) => {}
             }
-            if let Err(error) = managed.child.wait()
-                && first_error.is_none()
-            {
-                first_error = Some(error.to_string());
+            match managed.child.wait() {
+                Ok(status) => {
+                    debug_child_status(managed.child.id() as i32, "shutdown-reaped", &status)
+                }
+                Err(error) if first_error.is_none() => {
+                    first_error = Some(error.to_string());
+                }
+                Err(_) => {}
             }
         }
         first_error.map_or(Ok(()), Err)
@@ -220,10 +243,13 @@ impl ServiceProcessManager {
             }
         }
         for (_, mut managed) in children.drain() {
-            if let Err(error) = managed.child.wait()
-                && first_error.is_none()
-            {
-                first_error = Some(error.to_string());
+            let pid = managed.child.id() as i32;
+            match managed.child.wait() {
+                Ok(status) => debug_child_status(pid, "terminate-reaped", &status),
+                Err(error) if first_error.is_none() => {
+                    first_error = Some(error.to_string());
+                }
+                Err(_) => {}
             }
         }
         first_error.map_or(Ok(()), Err)
