@@ -110,8 +110,15 @@ int AndroidSignal(int host_signal) {
   return 0;
 }
 
+// Resolve this opt-in once, before guest threads can receive signals. getenv
+// takes a libc lock on Darwin: a suspended thread can hold it while the sender
+// needs pthread_kill to deliver the restart signal. Even a disabled diagnostic
+// must not acquire that lock on the signal/mask path.
+const bool kTracePthreadSignals =
+    std::getenv("DARWIN_ART_DEBUG_PTHREAD_SIGNALS") != nullptr;
+
 void TraceSignalMask(const char* phase, uint64_t token) {
-  if (std::getenv("DARWIN_ART_DEBUG_PTHREAD_SIGNALS") == nullptr) return;
+  if (!kTracePthreadSignals) return;
   static std::atomic<unsigned> observed{0};
   if (observed.fetch_add(1) >= 150) return;
   sigset_t mask{};
@@ -1315,7 +1322,7 @@ extern "C" int darwin_art_bionic_pthread_kill(
   std::lock_guard<std::mutex> lock(entry->mutex);
   if (!entry->published || entry->host_exited) return kAndroidEsrch;
   const int status = AndroidError(pthread_kill(entry->host, host_signal));
-  if (std::getenv("DARWIN_ART_DEBUG_PTHREAD_SIGNALS") != nullptr) {
+  if (kTracePthreadSignals) {
     static std::atomic<unsigned> observed{0};
     if (observed.fetch_add(1) < 50) {
       char name[64]{};

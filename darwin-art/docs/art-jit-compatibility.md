@@ -10378,3 +10378,10 @@ incomplete and still requires managed caller unwind validation.
   `security verify-cert`가 계속 `CSSMERR_TP_NOT_TRUSTED`를 반환했다.
   Chromium HTTPS E2E는 키체인 trust 설치 전까지 런타임 acceptance로 승격하지
   않는다.
+
+- Checkpoint 1076 (2026-09-11): Chromium에 `https://example.com/`을 실제
+  외부 URL로 전달해 최신 SurfaceFlinger/Metal 경로에서 재확인했다. 창 캡처
+  `/tmp/chromium-example-normal.P4RM19/window.png`에 `Example Domain` 본문과
+  `Learn more` 링크, Android 하단 내비게이션 바가 모두 렌더링되며, 기존 netlog는
+  HTTPS 200/HTTP2/TLS1.3을 기록한다. 이번 확인은 APK/런타임 변경 없이 재현한
+  렌더링 증거다.
