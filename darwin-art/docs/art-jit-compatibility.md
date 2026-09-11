@@ -11176,3 +11176,8 @@ incomplete and still requires managed caller unwind validation.
   실행해 JNI scalar/reference 반환, GP/FP 독립, Android 8-byte stack,
   shorty/cache identity, W^X rw→rx, multipage 309건 및 aggregate/V 인자
   거부 경계를 모두 PASS했다.
+- Checkpoint 1227 (2026-09-11): headless `libdarwin_art_runtime.dylib`의
+  기존 파일 hash는 읽었지만 현재 native graph에는 해당 target edge가
+  없어 Ninja materialize/query 기반 byte identity를 증명할 수 없었다.
+  graphics dylib와 달리 headless 최종 artifact를 graph 소유 target으로
+  승격하는 작업을 명시적 남은 gap으로 유지한다.

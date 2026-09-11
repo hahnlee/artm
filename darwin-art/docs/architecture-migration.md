@@ -15508,3 +15508,7 @@ or admission exception was added.
 - Checkpoint 1226 (2026-09-11): JNI trampoline 전용 ABI 감사를 재실행했다.
   scalar/ref 반환, GP/FP·stack 규약, cache identity, W^X 전환,
   multipage 및 aggregate/V 거부가 모두 PASS해 native 호출 경계를 고정했다.
+- Checkpoint 1227 (2026-09-11): headless runtime dylib는 현재 graph가
+  직접 생산하지 않아 기존 파일 hash만으로는 reproducible identity를
+  입증할 수 없음을 확인했다. graphics target과 동일한 Ninja 소유 edge와
+  warm 재현 검증을 추가하는 것이 1단계의 남은 build-contract gap이다.
