@@ -11028,3 +11028,10 @@ incomplete and still requires managed caller unwind validation.
   전환 옵션이 없음을 확인했다. 따라서 환경 변수 주입만으로 JIT A/B를
   주장하지 않고, 다음 구현은 AOSP runtime option을 명시적으로 연결하는
   작업으로 남긴다.
+- Checkpoint 1198 (2026-09-11): AOSP `RuntimeArgumentMap`의 명시 옵션을
+  보존하면서 `DARWIN_ART_JIT`를 충돌 검증하는 우선순위 수정과
+  `Runtime::Create` 후 requested/actual JIT 관측 로그를 추가했다.
+  incremental graphics-link audit는 PASS했다. `-Xusejit:false`는
+  requested=0/actual=0으로 종료되고, `DARWIN_ART_JIT=1`과의 충돌은
+  명시적으로 거부된다. 기본 실행은 requested=1이지만 actual=0으로
+  관측되어 JIT 생성 경로는 아직 별도 조사 대상이며 완료로 간주하지 않는다.

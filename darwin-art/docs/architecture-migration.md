@@ -15378,3 +15378,9 @@ or admission exception was added.
   JIT on/off 선택 계약이 존재하지 않는 것을 소스 기준으로 확인했다.
   `DARWIN_ART_JIT=0`을 유효한 A/B 결과로 취급하지 않으며, AOSP식
   RuntimeArgumentMap 옵션과 isolated pixel collector를 먼저 구현한다.
+- Checkpoint 1198 (2026-09-11): launcher가 AOSP runtime option을 덮어쓰지
+  않도록 JIT 기본값/환경값 우선순위를 수정하고 Runtime 생성 직후 실제
+  `UseJitCompilation()`을 기록한다. incremental graphics-link audit PASS,
+  `-Xusejit:false` requested/actual=0 및 env/AOSP 옵션 충돌 거부를 확인했다.
+  기본 requested=1에서 actual=0이므로 host JIT backend 초기화 원인은
+  다음 단계에서 Astra 리뷰와 함께 추적한다.

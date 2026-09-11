@@ -617,16 +617,30 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
   // differential tests and diagnostics; applications do not need a
   // Darwin-specific hardware/JIT flag.
   const char* jit_mode = std::getenv("DARWIN_ART_JIT");
-  bool enable_jit = true;
+  // Preserve AOSP ParsedOptions (`-Xint`, `-Xusejit:false`, ...). The
+  // previous unconditional true default erased those values before
+  // Runtime::Create().
+  // The detached launcher historically defaults to JIT enabled, while an
+  // explicit AOSP option (for example -Xusejit:false) must remain authoritative.
+  bool enable_jit = options.Exists(art::RuntimeArgumentMap::UseJitCompilation)
+                        ? options.GetOrDefault(art::RuntimeArgumentMap::UseJitCompilation)
+                        : true;
   if (jit_mode != nullptr) {
+    bool requested_jit = enable_jit;
     if (std::strcmp(jit_mode, "1") == 0) {
-      enable_jit = true;
+      requested_jit = true;
     } else if (std::strcmp(jit_mode, "0") == 0) {
-      enable_jit = false;
+      requested_jit = false;
     } else {
       std::cerr << "ART runtime: invalid JIT mode " << jit_mode << "\n";
       return 55;
     }
+    if (options.Exists(art::RuntimeArgumentMap::UseJitCompilation) &&
+        enable_jit != requested_jit) {
+      std::cerr << "ART runtime: conflicting JIT mode option\n";
+      return 56;
+    }
+    enable_jit = requested_jit;
   }
   if (enable_jit && std::getenv("DARWIN_ART_JIT_TRACE") != nullptr) {
     art::gLogVerbosity.jit = true;
@@ -787,6 +801,12 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
   if (!art::Runtime::Create(std::move(options))) {
     return 1;
   }
+  // Keep an observable parity check between the requested launch contract and
+  // the state ART actually installed. This is intentionally queried after
+  // Runtime::Create, since ParsedOptions is moved into ART at that boundary.
+  std::cerr << "ART runtime JIT: requested=" << (enable_jit ? 1 : 0)
+            << " actual="
+            << (art::Runtime::Current()->UseJitCompilation() ? 1 : 0) << "\n";
   // Android's zygote specialization publishes DEBUG_ENABLE_JDWP separately
   // from ApplicationInfo.FLAG_DEBUGGABLE. ART run-tests that attach a limited
   // JVMTI environment use that process capability while deliberately keeping
