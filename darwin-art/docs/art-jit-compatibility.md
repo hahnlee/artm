@@ -10137,3 +10137,8 @@ incomplete and still requires managed caller unwind validation.
   runtime=258, graphics-jni=63, icu=458, cached-tu=809, phases=12이며
   직접 소스 invalidation과 GCC depfile 경로를 확인했다. graph digest는
   `7096089a…380751`로 유지되고 audit 종료 상태는 0이다.
+
+- Checkpoint 1037 (2026-09-11): 변경 없는 AOSP Calculator와 DeskClock APK
+  graphics acceptance를 재실행했다. Calculator `2+3=5`, DeskClock Timer,
+  HWUI+SurfaceFlinger+Metal 공통 경로가 모두 PASS(RC=0)했다. Calendar의
+  직접 Day/Week/Month/window-remove 증거는 checkpoint 1027을 유지한다.

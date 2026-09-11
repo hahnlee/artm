@@ -14550,3 +14550,8 @@ or admission exception was added.
   (`runtime=258`, `graphics-jni=63`, `icu=458`, `cached-tu=809`, `phases=12`).
   직접 소스 invalidation과 GCC depfile 기반 증분 경로까지 확인해 단일 graph
   identity 검증을 audit 명령으로 재현 가능하게 했다.
+
+- Checkpoint 1037 (2026-09-11): 변경 없는 Calculator·DeskClock graphics
+  acceptance를 재실행해 Calculator `2+3=5`, DeskClock Timer 및
+  HWUI+SurfaceFlinger+Metal 공통 경로를 RC=0으로 확인했다. Calendar 직접
+  acceptance(Day/Week/Month/window remove)는 checkpoint 1027 증거를 유지한다.
