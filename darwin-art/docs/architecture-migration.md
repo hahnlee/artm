@@ -15047,3 +15047,7 @@ or admission exception was added.
   runtime identity 안정성을 2초 간격으로 재확인했다(`26ba01e4…` 동일). drift
   guard가 적용된 전체 corpus fresh 재실행을 parallel=8로 시작했으며, 완료 전
   ledger를 최종 증거로 승격하지 않는다.
+
+- Checkpoint 1126 (2026-09-11): controlled fresh corpus 프로세스가 동일
+  invocation에서 8개 worker로 계속 실행 중임을 확인했다. 완료 또는 drift 감지
+  전에는 결과를 해석하거나 identity PASS로 승격하지 않는다.
