@@ -10730,3 +10730,7 @@ incomplete and still requires managed caller unwind validation.
   interpreter PASS 후 동일한 `Darwin JIT data/code mappings exceed uint32 offset
   range`로 optimized compilation status=123을 기록했다. 이는 벡터/BCE 의미론
   실패가 아니라 공통 allocator 경계 재현 증거이며, corpus 세션은 계속 유지한다.
+
+- Checkpoint 1138 (2026-09-11): controlled fresh corpus가 약 21분째 진행 중이며
+  `642-fp-callees`까지 동일 identity로 재실행됐다. 현재 공통 MAP_JIT 범위 실패가
+  4건으로 누적되었고, 세션 종료 전에는 allocator 수정이나 결과 승격을 하지 않는다.
