@@ -15466,3 +15466,8 @@ or admission exception was added.
   gcc depfiles, warm no-op, direct-source invalidation이 모두 PASS했다.
   따라서 단일 graph 입력 identity는 재현되지만, 최종 dylib/archive의
   byte-for-byte identity는 별도 검증 항목으로 남아 있다.
+- Checkpoint 1216 (2026-09-11): graphics runtime dylib를 Ninja로 한 번
+  materialize한 뒤 같은 target을 다시 질의했다. SHA-256
+  `8ac19af9…4ac18e109`가 유지되고 후속 실행은 `no work to do`였다.
+  따라서 현재 graph 입력에 대한 최종 dylib byte identity가 재현됨을
+  확인했다.

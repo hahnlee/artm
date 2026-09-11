@@ -11128,3 +11128,8 @@ incomplete and still requires managed caller unwind validation.
   ICU 458, cached TU 809, archives 8, phases 12를 확인했고 depfile 기반
   warm no-op 및 direct-source invalidation이 PASS했다. 재현 가능한 graph
   identity 증거를 갱신했으며 최종 링크 byte hash는 별도 산출물로 유지한다.
+- Checkpoint 1216 (2026-09-11): native graph의 graphics dylib target을
+  warm rebuild/query했다. `_build/runtime-graphics-link-probe/
+  libdarwin_art_runtime_graphics.dylib` SHA-256이 전후 동일한
+  `8ac19af9…4ac18e109`였고, 두 번째 Ninja 질의는 `no work to do`였다.
+  현재 입력에서 최종 산출물 byte identity와 warm 재현을 함께 확인했다.
