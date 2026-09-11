@@ -15565,3 +15565,7 @@ or admission exception was added.
   전제(중복 Calculator tap, Calendar 미개방 Spinner)도 Android 실제 창
   계약에 맞게 보정했다. physical keyboard acceptance 전체가 단일 owner
   focused-window 경로로 PASS하고 Calendar process exit도 0이다.
+- Checkpoint 1238 (2026-09-11): Chrome lifecycle acceptance를 2회 반복해
+  service-child와 JNI detach 회수를 확인했고, SolitaireCG의 변경 없는
+  custom View drag도 정상 입력·종료했다. 사용자 지시에 따라 macOS CA
+  trust 설치는 수행하지 않고 Chromium HTTPS fixture gate를 보류한다.

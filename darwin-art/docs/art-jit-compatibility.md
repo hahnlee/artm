@@ -11248,3 +11248,9 @@ incomplete and still requires managed caller unwind validation.
   `android-window-keyboard-acceptance`가 Calculator select/restore,
   Calendar DPAD-select, Chrome DPAD+escape 전부 PASS했으며 Calendar도
   `gpu-loop exit status=0`으로 종료했다.
+- Checkpoint 1238 (2026-09-11): receiver lease 수정 이후 Chrome process
+  lifecycle acceptance를 2회 반복해 새 탭 생성, service-child 회수,
+  JNI detach 및 crash=0을 확인했다. 추가로 SolitaireCG 변경 없는 APK의
+  custom `SolitaireView` drag 입력이 consumed=1로 처리되고 crash=0인 것을
+  확인했다. Chromium HTTPS fixture는 사용자 지시에 따라 CA trust gate를
+  보류하며, 실제 `example.com` 및 tab graphics 증거는 유지한다.
