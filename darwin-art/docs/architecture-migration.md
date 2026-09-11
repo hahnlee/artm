@@ -15079,3 +15079,7 @@ or admission exception was added.
 - Checkpoint 1133 (2026-09-11): fresh corpus 세션이 약 11분째 살아 있고
   active test names가 2000번대까지 진행되었다. drift guard가 유지되는 동안
   중간 summary는 최종 결과로 해석하지 않는다.
+
+- Checkpoint 1134 (2026-09-11): fresh corpus가 약 12분째 실행 중이며
+  2041/2239 계열 항목까지 진행했다. 종료 전 summary는 부분 상태로 유지하고,
+  최종 종료 코드와 identity 분포를 별도로 확인한다.
