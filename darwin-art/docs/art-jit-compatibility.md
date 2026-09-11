@@ -11084,3 +11084,7 @@ incomplete and still requires managed caller unwind validation.
   아니며, 이전 `run.Zeu1Pa` 실패와 함께 startup/lifecycle race 가능성을
   남긴다. 다음은 AOSP `-Xcompiler-option --inline-max-code-units=0`
   no-inline A/B와 callback 상태 계측이다.
+- Checkpoint 1207 (2026-09-11): 현재 HEAD에서 AOSP Calculator/DeskClock
+  graphics acceptance를 재실행해 `Calculator=2+3=5`, DeskClock Timer,
+  HWUI+SurfaceFlinger+Metal 공통 경로를 PASS했다. Chromium은 JIT-on
+  성공/실패가 혼재하므로 callback lifecycle 계측 상태로 계속 추적한다.

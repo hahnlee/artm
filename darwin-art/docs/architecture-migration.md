@@ -15425,3 +15425,7 @@ or admission exception was added.
   동일 JIT-on에서 실패한 `run.Zeu1Pa`와 함께 좌표/hold/GPU 출력 문제는
   배제되고, cold startup 또는 callback lifecycle race를 우선 의심한다.
   no-inline 옵션과 UP 이후 View 상태를 비교 계측한다.
+- Checkpoint 1207 (2026-09-11): AOSP Calculator/DeskClock acceptance를
+  현재 산출물에서 재검증했다. 계산 결과 `2+3=5`, Timer 전환 및
+  HWUI·SurfaceFlinger·Metal 표시가 PASS했다. Calendar와 Blue Archive,
+  Chromium의 결정적 JIT-on acceptance는 아직 남아 있다.
