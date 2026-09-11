@@ -15032,3 +15032,8 @@ or admission exception was added.
   따라서 이를 단일 current identity 1,076/1,076으로 표현하지 않으며, 최신
   shutdown 수정의 focused 3건 PASS와 기존 identity 결과를 분리해 기록한다.
   `audit-art-jit.sh` 자체는 이번 실행에서 RC=0이었다.
+
+- Checkpoint 1123 (2026-09-11): identity 혼합을 해소하기 위해
+  `run-art-upstream-corpus.py --resume --parallel 8`을 현재 산출물 기준으로
+  재실행했다. 프로세스와 8개 worker가 살아 있으며, 완료 전 결과를 PASS로
+  승격하지 않는다.
