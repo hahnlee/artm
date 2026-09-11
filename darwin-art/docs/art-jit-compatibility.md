@@ -11194,3 +11194,9 @@ incomplete and still requires managed caller unwind validation.
   undefined 심볼 허용치 정책을 제거해 모든 link failure를 fail-closed로
   변경했다. 재실행 결과 `undefined=0 exports=15`, artifact identity
   SHA-256 `ef122706…9e060fcb`가 PASS했다.
+- Checkpoint 1230 (2026-09-11): headless 최종 dylib를
+  `headless-runtime-audit` Ninja edge가 직접 소유하도록 승격했다.
+  identity harness가 해당 graph edge를 먼저 clean materialize한 뒤 warm
+  재실행해 동일 SHA-256 `ef122706…9e060fcb`, `undefined=0 exports=15`,
+  두 번째 `ninja: no work to do.`를 확인했다. native graph audit도
+  `headless-artifact=graph-owned`로 PASS했다.

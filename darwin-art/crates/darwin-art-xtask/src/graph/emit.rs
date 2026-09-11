@@ -204,6 +204,7 @@ pub(crate) fn emit_graph(out: &Path) -> io::Result<()> {
     let boringssl_archive_path =
         root.join("_build/system-natives-darwin/libcrypto-boringssl-darwin.a");
     let runtime_library_path = native_output_root.join(GRAPHICS_RUNTIME_LIBRARY);
+    let headless_runtime_library_path = native_output_root.join(HEADLESS_RUNTIME_LIBRARY);
     let surfaceflinger_frontend_archive_path =
         native_output_root.join("surfaceflinger-core/libsurfaceflinger-frontend-darwin.a");
     let surfaceflinger_binder_archive_path =
@@ -275,6 +276,7 @@ pub(crate) fn emit_graph(out: &Path) -> io::Result<()> {
     let system_natives_archive = ninja_path(&system_natives_archive_path);
     let boringssl_archive = ninja_path(&boringssl_archive_path);
     let runtime_library = ninja_path(&runtime_library_path);
+    let headless_runtime_library = ninja_path(&headless_runtime_library_path);
     let surfaceflinger_frontend_archive = ninja_path(&surfaceflinger_frontend_archive_path);
     let surfaceflinger_binder_archive = ninja_path(&surfaceflinger_binder_archive_path);
     let surfaceflinger_gui_archive = ninja_path(&surfaceflinger_gui_archive_path);
@@ -622,6 +624,8 @@ pub(crate) fn emit_graph(out: &Path) -> io::Result<()> {
         graph.push(' ');
         graph.push_str(&ninja_path(&runtime_ready_path));
         graph.push_str(": runtime_bootstrap ");
+        graph.push_str(&bootstrap_cli_target);
+        graph.push(' ');
         graph.push_str(&bootstrap_input_list);
         graph.push('\n');
     }
@@ -630,6 +634,35 @@ pub(crate) fn emit_graph(out: &Path) -> io::Result<()> {
     graph.push(' ');
     graph.push_str(&runtime_archive);
     graph.push('\n');
+
+    // The headless C ABI dylib is a first-class graph artifact as well.  Keep
+    // its producer on the canonical audit path so a stale bootstrap archive
+    // can never be force-loaded behind Ninja's back, and so reproducibility
+    // checks exercise the same edge users build in CI.
+    graph.push_str("rule headless_runtime_audit\n");
+    graph.push_str("  command = cd ");
+    graph.push_str(&shell_quote(&root_for_shell));
+    graph.push_str(" && ");
+    graph.push_str(&bootstrap_cli);
+    graph.push_str(" audit-runtime-link\n");
+    graph.push_str("  description = HEADLESS runtime link/audit\n");
+    graph.push_str("  restat = 1\n\n");
+    graph.push_str("build ");
+    graph.push_str(&headless_runtime_library);
+    graph.push_str(": headless_runtime_audit ");
+    graph.push_str(&runtime_archive);
+    graph.push(' ');
+    graph.push_str(&bootstrap_cli_target);
+    for input in &bootstrap_inputs {
+        graph.push(' ');
+        graph.push_str(&ninja_path(&root.join(input)));
+    }
+    graph.push('\n');
+    graph.push_str("build headless-runtime-audit: phony ");
+    graph.push_str(&bootstrap_cli_target);
+    graph.push(' ');
+    graph.push_str(&headless_runtime_library);
+    graph.push_str("\n\n");
 
     // The standalone interpreter archive is consumed by both runtime-link
     // audits. Keep its Rust orchestration file and dedicated shadow-frame

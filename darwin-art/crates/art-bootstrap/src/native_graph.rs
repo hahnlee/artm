@@ -18,6 +18,7 @@ pub(crate) fn build_native_graph(root: &Path, target: &str) -> Result<()> {
         "graphics-audit"
             | "graphics-bootstrap"
             | "runtime-bootstrap"
+            | "headless-runtime-audit"
             | "graphics-foundation"
             | "foundation"
     ) {

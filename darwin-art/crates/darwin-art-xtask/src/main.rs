@@ -29,6 +29,7 @@ const ICU_STUBDATA_FOUNDATION_ARCHIVE: &str = "icu-foundation/libicuuc-stubdata-
 const ICU_INIT_FOUNDATION_ARCHIVE: &str = "icu-foundation/libandroidicuinit-darwin.a";
 const GRAPHICS_RUNTIME_LIBRARY: &str =
     "runtime-graphics-link-probe/libdarwin_art_runtime_graphics.dylib";
+const HEADLESS_RUNTIME_LIBRARY: &str = "runtime-link-probe/libdarwin_art_runtime.dylib";
 
 const SDK_NAME: &str = "macosx";
 

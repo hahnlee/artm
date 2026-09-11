@@ -57,6 +57,10 @@ fi
 runtime_library_target="$root/_build/runtime-graphics-link-probe/libdarwin_art_runtime_graphics.dylib"
 runtime_query="$($ninja -f "$graph" -t query "$runtime_library_target" 2>&1)"
 grep -q 'target/release/libdarwin_art_runtime.a' <<<"$runtime_query"
+headless_library_target="$root/_build/runtime-link-probe/libdarwin_art_runtime.dylib"
+headless_query="$($ninja -f "$graph" -t query "$headless_library_target" 2>&1)"
+grep -q 'headless_runtime_audit' <<<"$headless_query"
+grep -q 'runtime-bootstrap' <<<"$headless_query"
 
 # Phase edges must remain independently addressable. This is the build-time
 # contract that keeps a graphics-input/framework edit from recompiling the
@@ -176,4 +180,4 @@ grep -q 'no work to do' <<<"$warm_output" || {
 }
 
 audit_seconds=$((SECONDS - audit_start))
-echo "native-graph: PASS runtime=$runtime_cpp graphics-jni=$graphics_cpp icu=$icu_cpp cached-tu=$cached_cpp archives=$cached_archives phases=${#phase_rules[@]} warm=no-op depfiles=gcc invalidation=direct-source phase_materialize_seconds=$phase_seconds warm_query_seconds=$warm_seconds audit_seconds=$audit_seconds"
+echo "native-graph: PASS runtime=$runtime_cpp graphics-jni=$graphics_cpp icu=$icu_cpp cached-tu=$cached_cpp archives=$cached_archives phases=${#phase_rules[@]} headless-artifact=graph-owned warm=no-op depfiles=gcc invalidation=direct-source phase_materialize_seconds=$phase_seconds warm_query_seconds=$warm_seconds audit_seconds=$audit_seconds"

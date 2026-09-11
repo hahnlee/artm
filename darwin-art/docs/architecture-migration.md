@@ -15522,3 +15522,8 @@ or admission exception was added.
   `nm`으로 확인하고, historical undefined 허용 상한을 삭제해 링크 실패를
   항상 오류로 반환한다. 두 번의 identity audit 결과 hash
   `ef122706…9e060fcb`가 일치했다.
+- Checkpoint 1230 (2026-09-11): 최종 headless runtime dylib에
+  `headless_runtime_audit` Ninja rule과 `headless-runtime-audit` phony target을
+  추가해 archive와 dylib 모두 graph ownership 아래 두었다. identity
+  harness의 clean→materialize→warm 순서와 native graph 구조 검증이
+  `headless-artifact=graph-owned`, 동일 hash, warm no-op으로 PASS했다.
