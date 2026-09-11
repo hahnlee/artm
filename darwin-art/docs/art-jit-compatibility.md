@@ -81,6 +81,13 @@ the broader corpus's interpreter/jit summaries. Production JIT enablement and
 the September 6 deterministic AOSP CFI provider port are completed historical
 boundaries, not work that needs to be restarted.
 
+- Checkpoint 1090 (2026-09-11): read-only verifier
+  `verify-bluearchive-cancel-acceptance.sh` was run against the unchanged APK
+  Cancel capture and passed. It validated ordered DOWN/UP, pre-click Notice OCR,
+  nonblank post-click frame without Notice, nativeRender success, and recorded
+  before/after hashes. The result is synthetic InputChannel acceptance only;
+  physical click, Confirm/download, login and gameplay remain open.
+
 Read this index and the latest architecture-migration entry when resuming.
 Append dated evidence as work advances; keep this status table current.
 

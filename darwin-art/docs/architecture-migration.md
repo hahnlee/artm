@@ -14838,6 +14838,12 @@ or admission exception was added.
   data...` 상태로 바뀌었고 nativeRender 1,230회/RC=0이었다. Confirm 다운로드와
   OS 물리 클릭은 수행하지 않았으므로 해당 범위는 별도 미완료다.
 
+- Checkpoint 1090 (2026-09-11): 변경 없는 Blue Archive Cancel 캡처에 대한
+  read-only verifier를 실행해 이벤트 순서, Notice 사전 OCR, 사후 Notice 제거와
+  nonblank scanout, nativeRender 성공을 모두 확인했다. 이는 synthetic
+  InputChannel acceptance이며, 물리 클릭·Confirm 다운로드·로그인·게임플레이는
+  여전히 별도 미완료다.
+
 - Checkpoint 1066 (2026-09-11): 최신 JNI/HWUI 및 MAP_JIT 변경 후 ART JIT
   audit를 재실행해 Nterp, compiled/GC, VarHandle, invoke, Surface,
   MediaCodec, W^X 및 shutdown lifecycle 전체가 `RC=0`으로 통과했다.
