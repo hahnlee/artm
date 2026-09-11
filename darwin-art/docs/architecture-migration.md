@@ -15240,11 +15240,15 @@ or admission exception was added.
   input-channel로 소비되고 native=0, crash=0을 확인했다. 로그는
   `_build/solitaire-game-acceptance/`에 있다.
 
-- Checkpoint 1167 (2026-09-11): Blue Archive 최신 진단 문서를 재검토했다.
-  변경 없는 base+arm64 split은 Unity `nativeRender`의 Boehm GC
-  stop-the-world acknowledgment 대기로 실제 scanout이 검정이며, 신호 전달과
-  입력 소비만으로 acceptance를 선언할 수 없다. 이 native first-frame blocker를
-  Astra에 재검토 요청했고, title/menu acceptance는 미완료로 유지한다.
+- Checkpoint 1167 (2026-09-11, corrected): Blue Archive 진단 문서의
+  thread-local sigchain 수정 전 14:26 기록을 최신 blocker로 오인했다.
+  18:16 fresh 재검증(runtime `8cbfe9de…624d`, 원본 base+arm64 split)은
+  RC=0, nativeRender 정상 반환 1,204회, 진단 PNG 14장이며 마지막 프레임에서
+  실제 Notice/654.38 MB 다운로드 안내/Cancel/Confirm을 확인했다.
+  `_build/bluearchive-current.J9Jxq6/`가 현재 증거다. GC ack black blocker는
+  재현되지 않아 생산 코드를 수정하지 않았다. 이번 tap은 consumed=1이지만
+  사전 프레임에 Notice가 없으므로 Cancel dismiss를 새로 증명하지 않는다.
+  물리 버튼·Confirm 다운로드·로그인·게임플레이는 여전히 미검증이다.
 
 - Checkpoint 1168 (2026-09-11): 변경 없는 공식 Chrome APK의
   `chromium-tab-graphics-acceptance.sh`가 PASS했다. 실제 Button/Grid View와

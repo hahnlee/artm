@@ -10887,3 +10887,12 @@ incomplete and still requires managed caller unwind validation.
   `vlc-surface-canvas-acceptance.sh`가 PASS했다. `ANativeWindow` lock/post가
   각각 3회 발생했고 nativeLockCanvas 오류나 crash 없이 소프트웨어 Canvas
   경로가 동작했다. 로그는 `/var/folders/t4/qqflgy6n3rgd5dcnv2r4x0nh0000gn/T//darwin-art-vlc-canvas.8NFNTY/vlc.log`에 있다.
+
+- Checkpoint 1170 (2026-09-11, corrected): Blue Archive의 이전 검정
+  first-frame 진단은 thread-local sigchain 수정 전 historical 결과다. 최신
+  runtime `8cbfe9de…624d`로 변경 없는 base+arm64 split을 재실행해
+  nativeRender 정상 반환 1,204회와 14개 scanout, 마지막 Notice/654.38 MB
+  다운로드 안내/Cancel/Confirm 화면을 확인했다. GC ack blocker는 재현되지
+  않았고, 이번 tap은 사전 프레임 상태 때문에 Cancel dismiss 증거로 세지 않는다.
+  상세 산출물은 `_build/bluearchive-current.J9Jxq6/`이며 물리 버튼·Confirm
+  다운로드·로그인·게임플레이는 여전히 미검증이다.

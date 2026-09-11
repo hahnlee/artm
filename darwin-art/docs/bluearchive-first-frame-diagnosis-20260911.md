@@ -2,8 +2,34 @@
 
 ## Result
 
-The current unmodified Blue Archive 1.93.454564 base + arm64 split does **not**
-pass title/menu/interactive-game acceptance. A normal 40-second run exits 0,
+**Current result (18:16 KST): the nativeRender GC acknowledgment / black
+first-frame blocker below is historical, not reproduced by the current
+runtime.** The thread-local sigchain mask fix (`eb90d025`) is present. A fresh
+unchanged base + arm64 split run with a 15-second requested window exited 0,
+returned normally from nativeRender 1,204 times, and captured 14 scanouts.
+The final `scanout-000014.png` visibly shows the game's Notice, the 654.38 MB
+essential-file download prompt, and Cancel/Confirm controls; mean=0.578154,
+standard deviation=0.227205. No new runtime patch was needed.
+
+Current evidence:
+
+- Runtime SHA-256: `8cbfe9de1038e39bcda5f1c8ed87104b7083e223ee2c2a491e86f1a35c47624d`.
+- Prepared host SHA-256: `eea5168a5cb4c391eb1e286e557ec6b5d11f27cc178740061adeb32cc46dfa6d`.
+- Log and PNG directory: `_build/bluearchive-current.J9Jxq6/`.
+- Log SHA-256: `22dd8166c734c64a68cd42f4f5a1fed33282c94ad4e9c2a69054383b83681954`.
+- Synthetic Android (514,504) DOWN/UP consumed=1, hold=81,793us. The
+  pre-input frame already shows "Resetting the game data...", so this run
+  does **not** independently prove a Cancel-dismiss transition. The earlier
+  verified Cancel evidence remains in `docs/art-jit-compatibility.md`.
+
+Physical-button input, Confirm/download, login and gameplay remain unverified.
+Do not change semaphore acknowledgments or thread suspension based solely on
+the superseded logs below. A new current-identity reproduction is required.
+
+## Historical result before the thread-local sigchain fix
+
+The pre-fix unmodified Blue Archive 1.93.454564 base + arm64 split did **not**
+pass title/menu/interactive-game acceptance. A normal 40-second run exited 0,
 but its actual composed 1280x720 scanout is entirely black. Unity initialization,
 Vulkan creation, CoreAudio output and a successful host exit are not proof of
 game UI progress.
