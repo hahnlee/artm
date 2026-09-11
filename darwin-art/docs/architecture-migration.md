@@ -14601,3 +14601,9 @@ or admission exception was added.
   신규 짧은 Chromium 실행은 `RC=0`, root count `0→0`이었다. UKM SQLite
   `disk I/O error`는 여유 공간 증거상 용량 부족으로 확정하지 않고 VFS/locking
   조사를 남긴다.
+
+- Checkpoint 1045 (2026-09-11): 현재 cleanup wrapper와 Looper callback 계측
+  상태에서 Chromium lifecycle gate를 재실행해 `iterations=2`, `new-tab=2`,
+  `JNI-detach-crash=0`, `service-children=reaped`, `RC=0`을 확인했다. 실행
+  후 프로필 `mnt/run/app.*`도 0개로 유지되어 임시 root 누수와 반복 종료 경계가
+  함께 회귀하지 않음을 검증했다.

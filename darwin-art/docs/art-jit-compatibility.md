@@ -10197,3 +10197,9 @@ incomplete and still requires managed caller unwind validation.
   `remaining=0`으로 정리했다. 신규 실행은 `RC=0`, root count `0→0`을
   확인했다. UKM의 SQLite `disk I/O error`는 용량 부족으로 단정하지 않고
   VFS/locking 원인 조사를 별도 과제로 유지한다.
+
+- Checkpoint 1045 (2026-09-11): cleanup wrapper와 callback trace가 포함된
+  현재 HEAD에서 Chromium lifecycle gate를 재실행했다. 결과는
+  `iterations=2`, `new-tab=2`, `JNI-detach-crash=0`, `service-children=reaped`,
+  `RC=0`이며 실행 후 `mnt/run/app.*`는 0개였다. 따라서 host 종료 후 임시
+  system root 회수와 반복 native-thread lifecycle이 함께 유지된다.
