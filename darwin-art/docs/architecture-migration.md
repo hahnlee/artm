@@ -14655,3 +14655,9 @@ or admission exception was added.
   opaque key 비노출과 삭제 후 backend 정리까지 PASS했다. AndroidCAStore의
   선택적 native bridge가 없어도 AndroidKeyStore 서비스가 초기화되도록 provider
   경계를 분리했다.
+
+- Checkpoint 1054 (2026-09-11): MAP_JIT fallback이 metadata 끝 주소를 exact
+  hint로 잘못 전달하던 문제를 수정해 kernel-selected 주소를 허용하고 실제
+  AOSP ordering/span 계약만 검사하도록 변경했다. ordinary/fragmented layout
+  smoke, 20회 relocation, incremental graphics-link audit가 모두 `RC=0`으로
+  통과했다.

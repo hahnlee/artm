@@ -8,3 +8,4 @@ clang++ -std=c++20 -O2 -Wall -Wextra -Werror \
 codesign --force --sign - --options runtime \
   --entitlements "$root/config/darwin-art-host.entitlements" "$build/jit-layout-smoke"
 "$build/jit-layout-smoke"
+"$build/jit-layout-smoke" --fragmented

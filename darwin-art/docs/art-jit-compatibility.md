@@ -10256,3 +10256,9 @@ incomplete and still requires managed caller unwind validation.
   `getEncoded()==null` opaque 계약과 삭제 후 빈 backend도 검증했다. 선택적
   AndroidCAStore native bridge가 없는 host에서도 keystore provider가 독립적으로
   초기화되도록 LinkageError 경계를 추가했다.
+
+- Checkpoint 1054 (2026-09-11): Astra가 지적한 MAP_JIT fallback 결함을 수정했다.
+  `MapFileAtAddress`의 expected address를 metadata 끝으로 강제하던 경로를
+  kernel-selected mapping(`nullptr`, start=0)으로 바꾸고 실제 ordering/uint32
+  span만 검증한다. ordinary·fragmented smoke, 20회 relocation 실행 및
+  incremental graphics-link audit가 모두 `RC=0`으로 통과했다.
