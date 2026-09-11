@@ -15245,3 +15245,9 @@ or admission exception was added.
   stop-the-world acknowledgment 대기로 실제 scanout이 검정이며, 신호 전달과
   입력 소비만으로 acceptance를 선언할 수 없다. 이 native first-frame blocker를
   Astra에 재검토 요청했고, title/menu acceptance는 미완료로 유지한다.
+
+- Checkpoint 1168 (2026-09-11): 변경 없는 공식 Chrome APK의
+  `chromium-tab-graphics-acceptance.sh`가 PASS했다. 실제 Button/Grid View와
+  MotionEvent 입력, 9개 target state 및 GLES→ANGLE→Graphite→Dawn→MoltenVK→
+  AHB→SurfaceFlinger→Metal GPU 경로를 확인했다. 산출물은
+  `_build/chromium-tab-graphics-acceptance/run.On05lI/`에 있다.
