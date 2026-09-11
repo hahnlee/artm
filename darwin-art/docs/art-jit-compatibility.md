@@ -10576,6 +10576,12 @@ incomplete and still requires managed caller unwind validation.
   전체 1,076개 결과는 모두 `passed`, current runtime identity 갱신 수는
   890개로 증가했다. 남은 186개는 동일 실행에서 계속 재검증한다.
 
+- Checkpoint 1109 (2026-09-11): current-identity corpus refresh 중
+  `689-zygote-jit-deopt`와 `728-imt-conflict-zygote`가 처음으로 `SIGABRT`
+  (signal 6, 두 테스트 모두 runtime identity `20c39afc…`)로 실패했다.
+  이는 전체 결과의 최신 실패이므로 historical 결과와 분리해 Astra 원인 검토를
+  요청했다. refresh 프로세스는 아직 살아 있어 나머지 항목은 계속 실행 중이다.
+
 - Checkpoint 1100 (2026-09-11): 현재 identity corpus refresh 프로세스가
   10분 이상 생존하고 CPU를 사용하며 계속 진행 중임을 확인했다. ledger는
   1,076개 모두 `passed`, current identity 갱신은 299개다. 프로세스를 재시작하거나
