@@ -10216,3 +10216,11 @@ incomplete and still requires managed caller unwind validation.
   변경 없는 Blue Archive base+split 15초 실행은 `RC=0`, Unity ARM64 초기화
   정상, AndroidKeyStore/JobScheduler 예외·fatal marker 없음이었다. 다중 프로세스
   영속 keystore backend는 아직 남은 과제다.
+
+- Checkpoint 1048 (2026-09-11): AndroidKeyStore HMAC material을 profile/app
+  데이터 루트의 `keystore/android-keystore-hmac-v1`에 원자적 temp+rename으로
+  저장·로드하도록 확장했다. 앱 프로세스와 isolated service가 같은 profile
+  alias를 재사용할 수 있는 기반이며, provider는 raw key bytes를
+  `getEncoded()`로 노출하지 않는다. framework compat 빌드 PASS를 재확인했고
+  변경 없는 Blue Archive base+split 실행은 `RC=0`·Unity ARM64 초기화 정상이다.
+  실제 다중 프로세스 재사용 acceptance는 다음 단계다.

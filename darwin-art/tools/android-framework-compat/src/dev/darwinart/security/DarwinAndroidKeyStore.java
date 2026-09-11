@@ -1,6 +1,9 @@
 package dev.darwinart.security;
 
 import java.io.IOException;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.security.Key;
@@ -18,6 +21,8 @@ import java.util.Date;
 import java.util.Enumeration;
 import java.util.Map;
 import java.util.HashMap;
+import java.util.ArrayList;
+import java.util.List;
 import javax.crypto.MacSpi;
 import javax.crypto.KeyGeneratorSpi;
 import javax.crypto.SecretKey;
@@ -27,8 +32,81 @@ import java.security.spec.AlgorithmParameterSpec;
 /** Explicit AndroidKeyStore boundary; no host key material is exposed. */
 public final class DarwinAndroidKeyStore extends KeyStoreSpi {
     private static final Map<String, SecretKey> KEYS = new HashMap<>();
-    static synchronized SecretKey key(String alias) { return KEYS.get(alias); }
-    static synchronized void put(String alias, SecretKey key) { KEYS.put(alias, key); }
+    private static boolean loaded;
+    private static File backingFile() {
+        String root = System.getenv("DARWIN_ART_APK_APP_DATA_DIR");
+        if (root == null || root.length() == 0) return null;
+        return new File(new File(root, "keystore"), "android-keystore-hmac-v1");
+    }
+    private static synchronized void loadPersistent() {
+        if (loaded) return;
+        loaded = true;
+        File file = backingFile();
+        if (file == null || !file.isFile()) return;
+        try {
+            FileInputStream input = new FileInputStream(file);
+            byte[] bytes = new byte[(int) Math.min(file.length(), 1 << 20)];
+            int count = input.read(bytes);
+            input.close();
+            if (count <= 0) return;
+            String[] records = new String(bytes, 0, count, "UTF-8").split("\\n");
+            for (String record : records) {
+                int separator = record.indexOf('=');
+                if (separator <= 0) continue;
+                byte[] material = decodeHex(record.substring(separator + 1));
+                if (material != null && material.length != 0) {
+                    KEYS.put(record.substring(0, separator), new HmacKey(material));
+                }
+            }
+        } catch (Exception ignored) { }
+    }
+    private static synchronized void persist() {
+        File file = backingFile();
+        if (file == null) return;
+        File parent = file.getParentFile();
+        if (parent == null) return;
+        parent.mkdirs();
+        File temporary = new File(parent, file.getName() + ".tmp-" + Long.toHexString(System.nanoTime()));
+        try {
+            FileOutputStream output = new FileOutputStream(temporary);
+            for (Map.Entry<String, SecretKey> entry : KEYS.entrySet()) {
+                SecretKey value = entry.getValue();
+                if (value instanceof HmacKey) {
+                    output.write(entry.getKey().getBytes("UTF-8"));
+                    output.write('=');
+                    output.write(encodeHex(((HmacKey) value).material()).getBytes("UTF-8"));
+                    output.write('\n');
+                }
+            }
+            output.close();
+            if (!temporary.renameTo(file)) temporary.delete();
+        } catch (Exception ignored) {
+            temporary.delete();
+        }
+    }
+    private static String encodeHex(byte[] bytes) {
+        char[] digits = "0123456789abcdef".toCharArray();
+        char[] result = new char[bytes.length * 2];
+        for (int i = 0; i < bytes.length; i++) {
+            int value = bytes[i] & 0xff;
+            result[i * 2] = digits[value >>> 4];
+            result[i * 2 + 1] = digits[value & 15];
+        }
+        return new String(result);
+    }
+    private static byte[] decodeHex(String value) {
+        if ((value.length() & 1) != 0) return null;
+        byte[] result = new byte[value.length() / 2];
+        for (int i = 0; i < result.length; i++) {
+            int high = Character.digit(value.charAt(i * 2), 16);
+            int low = Character.digit(value.charAt(i * 2 + 1), 16);
+            if (high < 0 || low < 0) return null;
+            result[i] = (byte) ((high << 4) | low);
+        }
+        return result;
+    }
+    static synchronized SecretKey key(String alias) { loadPersistent(); return KEYS.get(alias); }
+    static synchronized void put(String alias, SecretKey key) { loadPersistent(); KEYS.put(alias, key); persist(); }
     @Override public Key engineGetKey(String alias, char[] password) { return key(alias); }
     @Override public Certificate[] engineGetCertificateChain(String alias) { return null; }
     @Override public Certificate engineGetCertificate(String alias) { return null; }
@@ -46,16 +124,21 @@ public final class DarwinAndroidKeyStore extends KeyStoreSpi {
         throw new KeyStoreException("AndroidKeyStore certificate import is unsupported on Darwin");
     }
     @Override public synchronized void engineDeleteEntry(String alias) throws KeyStoreException {
+        loadPersistent();
         KEYS.remove(alias);
+        persist();
     }
     @Override public synchronized Enumeration<String> engineAliases() {
+        loadPersistent();
         return Collections.enumeration(new java.util.ArrayList<>(KEYS.keySet()));
     }
     @Override public synchronized boolean engineContainsAlias(String alias) {
+        loadPersistent();
         return KEYS.containsKey(alias);
     }
-    @Override public synchronized int engineSize() { return KEYS.size(); }
+    @Override public synchronized int engineSize() { loadPersistent(); return KEYS.size(); }
     @Override public synchronized boolean engineIsKeyEntry(String alias) {
+        loadPersistent();
         return KEYS.containsKey(alias);
     }
     @Override public boolean engineIsCertificateEntry(String alias) { return false; }
@@ -67,9 +150,11 @@ public final class DarwinAndroidKeyStore extends KeyStoreSpi {
     @Override public void engineLoad(InputStream stream, char[] password)
             throws IOException, NoSuchAlgorithmException, CertificateException {
         if (stream != null) throw new IOException("AndroidKeyStore is not importable");
+        loadPersistent();
     }
     @Override public synchronized KeyStore.Entry engineGetEntry(String alias,
             KeyStore.ProtectionParameter protection) {
+        loadPersistent();
         SecretKey value = KEYS.get(alias);
         return value == null ? null : new KeyStore.SecretKeyEntry(value);
     }

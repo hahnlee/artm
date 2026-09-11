@@ -14618,3 +14618,10 @@ or admission exception was added.
   빌드 PASS 후 변경 없는 Blue Archive base+split 15초 실행에서 `RC=0`, Unity
   ARM64 초기화 정상, AndroidKeyStore/JobScheduler 예외와 fatal marker 없음이
   확인됐다. 프로세스 간 영속 keystore backend는 아직 미완료다.
+
+- Checkpoint 1048 (2026-09-11): AndroidKeyStore HMAC material을 profile/app
+  데이터 루트의 `keystore/android-keystore-hmac-v1`에 원자적 temp+rename으로
+  저장·로드하도록 확장했다. 앱/isolated service 간 alias 재사용 기반을
+  추가했으며 opaque key의 `getEncoded()` 비노출은 유지된다. framework compat
+  빌드 PASS와 변경 없는 Blue Archive base+split `RC=0`·Unity 초기화를
+  재확인했다. 다중 프로세스 재사용 acceptance는 다음 단계로 남긴다.
