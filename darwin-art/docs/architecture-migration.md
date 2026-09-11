@@ -15336,3 +15336,7 @@ or admission exception was added.
   항목은 확인됐으나 macOS 메모리 부족 경고 및 접근성 권한 모달이 입력을
   가로막았다. 이 상태에서 물리 클릭을 주장하지 않고, 리소스/권한 정리 후
   Host.app owner 검증을 다시 수행한다.
+- Checkpoint 1188 (2026-09-11): 화면상 Manager는 정상이나 native
+  accessibility action API가 이 세션에 노출되지 않아 실행 버튼을 자동
+  클릭하지 못했다. Host.app 구현 자체와 실제 창 owner/Cancel 검증을 분리해
+  기록한다.

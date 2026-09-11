@@ -10979,3 +10979,7 @@ incomplete and still requires managed caller unwind validation.
   ChatGPT 접근성 권한 대화상자가 전면에 있어 Blue Archive 실행 입력을
   안전하게 진행하지 않았다. 외부 창을 정리한 뒤 Host owner acceptance를
   재개해야 한다.
+- Checkpoint 1188 (2026-09-11): Manager 프로세스는 계속 실행 중이고 Host.app
+  bundle은 존재하지만, CUA/AppleScript 조작 계층에서 실행 버튼을 호출할
+  수 있는 API가 현재 노출되지 않았다. 실제 Blue Archive 입력 acceptance는
+  조작 경로가 확보될 때까지 보류한다.
