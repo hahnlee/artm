@@ -11161,3 +11161,7 @@ incomplete and still requires managed caller unwind validation.
   rustfmt 불일치를 기능 변경 없이 정리했다. `cargo fmt --all -- --check`
   와 `git diff --check`가 모두 PASS해 현재 acceptance/audit 코드의
   포맷 무결성을 확인했다.
+- Checkpoint 1223 (2026-09-11): 사용자 변경 중인 `foundation.rs`를
+  건드리지 않고 `cargo check --workspace`를 실행해 전체 Rust workspace가
+  성공적으로 빌드됨을 확인했다(42.29s). `bionic-vm-facade`의 기존
+  unused/dead-code 경고 3개는 남아 있어 별도 정리 항목으로 기록한다.

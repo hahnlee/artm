@@ -15496,3 +15496,6 @@ or admission exception was added.
 - Checkpoint 1222 (2026-09-11): graphics link audit 검사 코드의
   rustfmt 불일치만 정리했다. 동작은 변경하지 않았으며 전체 workspace
   format check와 diff check가 PASS했다.
+- Checkpoint 1223 (2026-09-11): 전체 Rust workspace `cargo check`가
+  42.29초 만에 PASS했다. 사용자 소유 `foundation.rs`는 보존했으며,
+  `bionic-vm-facade`의 기존 unused/dead-code 경고 3개만 남아 있다.
