@@ -14523,3 +14523,9 @@ or admission exception was added.
   로그를 추가하고 audit가 armed-phase를 검증하도록 했다. positive concurrent
   execution=2647 및 두 expected SIGBUS gate가 통과해 음성 결과의 원인 귀속
   증거를 강화했다.
+
+- Checkpoint 1032 (2026-09-11): JIT 전체 audit 재실행에서 empty-checkpoint
+  contention(`checkpoint_us=141`, `lock_us=500485`), Nterp, Surface 및
+  MediaCodec gate와 기능별 acceptance가 모두 PASS(RC=0)했다. Chromium
+  `VIEW https://example.com` 실행은 프로세스/윈도우 RC=0까지 갔으나 기존 탭
+  복원만 관찰되어 URL 전달 경로는 별도 acceptance로 남겼다.

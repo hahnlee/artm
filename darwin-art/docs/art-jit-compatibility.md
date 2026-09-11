@@ -10106,3 +10106,10 @@ incomplete and still requires managed caller unwind validation.
   반드시 확인하도록 보강했다. positive concurrent execution=2647 및 두
   expected SIGBUS gate가 통과했으며, fault-site PC 귀속 전 단계의 명시적
   armed 증거를 확보했다.
+
+- Checkpoint 1032 (2026-09-11): `audit-art-jit.sh` 재실행에서
+  empty-checkpoint contention이 `checkpoint_us=141`, `lock_us=500485`로
+  출력되고 Nterp, Surface lockCanvas, MediaCodec output-surface 및 전체 JIT
+  acceptance가 PASS했다(RC=0). Chromium에 `VIEW https://example.com`을
+  전달한 실행은 RC=0였지만 Chrome 탭 복원만 관찰되어 URL 네비게이션
+  acceptance는 아직 닫지 않는다.
