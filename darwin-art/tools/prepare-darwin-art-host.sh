@@ -16,8 +16,13 @@ locked="${3:-}"
 if [[ "$locked" != "--locked" ]]; then
   # Cargo may replace the shared host after package installation. Serialize
   # the atomic ABI/signature update so concurrent app launches never execute
-  # an intermediate file.
-  exec lockf -k "$host.x18.lock" "$0" "$host" "$mode" --locked
+  # an intermediate file. Keep the lock outside an app bundle: a lock file
+  # next to Contents/MacOS/darwin-art-host becomes a sealed resource and
+  # invalidates the nested Host.app signature.
+  lock_root="${DARWIN_ART_LOCK_ROOT:-${TMPDIR:-/tmp}}"
+  lock_name="$(printf '%s' "$host" | cksum | awk '{print $1}')"
+  exec lockf -k "$lock_root/darwin-art-host-x18.$lock_name.lock" \
+    "$0" "$host" "$mode" --locked
 fi
 
 root="$(cd "$(dirname "$0")/.." && pwd)"

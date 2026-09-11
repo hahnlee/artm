@@ -15344,3 +15344,7 @@ or admission exception was added.
   `prepare-darwin-art-host` missing에서 Blue Archive native host 생성까지
   진행됐다. 현재 기존 lease/PID가 재사용되어 Host.app bundle owner 검증은
   아직 확정하지 않았다.
+- Checkpoint 1190 (2026-09-11): packaged Host.app 실행 파일에도 x18 ABI를
+  적용하고, bundle sealed-resource를 오염시키던 인접 lock 파일을 TMPDIR
+  lock으로 변경했다. Manager 재빌드와 deep codesign 검증이 PASS했고,
+  Blue Archive 실행 프로세스가 `dev.darwinart.host` Host.app 소유로 확인됐다.

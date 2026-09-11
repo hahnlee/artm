@@ -10988,3 +10988,8 @@ incomplete and still requires managed caller unwind validation.
   실제로 재개되어 Notice/Confirm 화면과 native host PID가 생성됐지만, 기존
   daemon lease가 남아 Host.app owner 교체 여부는 새 프로세스 정리 후 다시
   확인해야 한다.
+- Checkpoint 1190 (2026-09-11): Host.app 복사본에도 Android x18 task ABI를
+  선언하도록 Manager 빌드를 보완했다. 앱 번들 내부 lock 파일이 sealed
+  resource를 깨뜨리던 문제를 확인해 lock을 TMPDIR 외부 경로로 이동했다.
+  재빌드/codesign 검증과 packaged prepare 검증이 PASS했으며, 실제 실행 PID
+  53868의 bundleID가 `dev.darwinart.host`이고 Host.app 경로임을 확인했다.

@@ -41,6 +41,10 @@ mkdir -p "$host_app/Contents/MacOS"
 cp "$source_root/HostInfo.plist" "$host_app/Contents/Info.plist"
 cp "$project_root/target/release/darwin-art-host" "$host_app/Contents/MacOS/darwin-art-host"
 chmod +x "$host_app/Contents/MacOS/darwin-art-host"
+# The embedded Host.app is the executable launched by installed apps.  Preserve
+# the Android task x18 ABI on this copy as well as on the runtime payload copy.
+"$project_root/tools/declare-darwin-x18-abi.sh" \
+  "$host_app/Contents/MacOS/darwin-art-host"
 copy_file() {
   local source="$1"
   local destination="$runtime/$2"
