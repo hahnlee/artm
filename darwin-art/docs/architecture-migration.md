@@ -15415,6 +15415,11 @@ or admission exception was added.
   모두 소비됐고 UP 직전 target의 pressed 및 pending click runnable이
   유지된 채 TabGrid 전환이 완료됐다. 다음 실패 분석은 입력 전달이 아니라
   click callback 이후 Chrome coordinator attach/lifecycle 순서에 집중한다.
+- Checkpoint 1206 (2026-09-11): ViewRoot 입력 경계에 opt-in 상태 계측을
+  추가했다. `DARWIN_ART_DEBUG_INPUT_STATE=1`일 때만 target 상태를
+  출력하므로 Android dispatch 계약과 runtime 비용은 유지된다. 다음
+  Chromium 실패 재현에서 callback 예약 이후 coordinator attach가 실제로
+  진행되는지 비교한다.
 - Checkpoint 1203 (2026-09-11): JIT trace 실행에서는 변경 없는 Chromium의
   탭 전환이 다시 PASS했다(`run.NAy3z0`, 실제 TabGridView, 합성 상태 10개).
   동일 JIT-on에서 실패한 `run.Zeu1Pa`와 함께 좌표/hold/GPU 출력 문제는

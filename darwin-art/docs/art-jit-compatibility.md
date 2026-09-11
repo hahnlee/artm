@@ -11072,6 +11072,11 @@ incomplete and still requires managed caller unwind validation.
   `pending_click=1`이 관측되어 ViewRoot 입력과 click 예약은 정상임을
   확인했다. 실패 재현 시 `performClick` 이후 coordinator/TabGrid attach
   단계만 비교할 수 있다.
+- Checkpoint 1206 (2026-09-11): `runtime_graphics_input.cc`에
+  `DARWIN_ART_DEBUG_INPUT_STATE` opt-in 진단을 추가해 ViewRoot enqueue
+  직후 target의 pressed/focus/click-listener/pending-runnable 상태를
+  기록한다. production 입력 의미는 변경하지 않는다. 현재 PASS 실행
+  `run.4aMzGR`에서 두 탭의 consumed/pressed/pending 상태를 확보했다.
 - Checkpoint 1203 (2026-09-11): `DARWIN_ART_JIT_TRACE=1`로 같은 Chromium
   게이트를 재현한 결과 JIT on에서도 실제 `TabGridView`가 hit되고
   `target-states=10`으로 PASS했다(`run.NAy3z0`). 첫 tap hold는 19.505ms,
