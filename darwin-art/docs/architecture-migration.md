@@ -14707,3 +14707,8 @@ or admission exception was added.
   macOS system trust store에 설치되지 않아 `RC=69`로 중단됐다. 이는 runtime
   오류가 아닌 키체인 전제조건이며, trust 설치 후 실제 페이지·WebGL·입력·
   다운로드·새 탭 검증을 다시 수행해야 한다.
+
+- Checkpoint 1064 (2026-09-11): mkcert 인증서가 keychain에 있어도
+  `security verify-cert`가 `CSSMERR_TP_NOT_TRUSTED`를 반환했다. Chromium HTTPS
+  E2E는 runtime 오류가 아닌 macOS trust 미설치로 `RC=69` 중단됐으며,
+  `mkcert -install` 후 페이지/WebGL/입력/다운로드/새 탭 gate를 재실행한다.

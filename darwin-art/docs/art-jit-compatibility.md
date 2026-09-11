@@ -10311,3 +10311,8 @@ incomplete and still requires managed caller unwind validation.
   시작했으나 `mkcert` 인증서의 macOS system trust 설치가 없어 스크립트가
   `RC=69`로 안전 중단됐다. 런타임 실패가 아니며, 키체인 trust 설치 후
   페이지 로드·입력·WebGL·다운로드·target=_blank gate를 재실행해야 한다.
+
+- Checkpoint 1064 (2026-09-11): mkcert root가 keychain에 존재하지만
+  `security verify-cert`가 `CSSMERR_TP_NOT_TRUSTED`를 반환해 Chromium HTTPS
+  E2E가 다시 `RC=69`로 중단됐다. 이는 runtime 실패가 아닌 macOS trust 설정
+  전제조건이며, 사용자가 `mkcert -install`을 완료한 뒤 재실행해야 한다.
