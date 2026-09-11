@@ -15083,3 +15083,7 @@ or admission exception was added.
 - Checkpoint 1134 (2026-09-11): fresh corpus가 약 12분째 실행 중이며
   2041/2239 계열 항목까지 진행했다. 종료 전 summary는 부분 상태로 유지하고,
   최종 종료 코드와 identity 분포를 별도로 확인한다.
+
+- Checkpoint 1135 (2026-09-11): fresh corpus가 약 14분째 실행 중이며
+  2243/2259 계열 테스트까지 진행했다. 동일 세션을 유지하고 종료 시점의
+  drift guard 결과와 실패 항목만 authoritative evidence로 수집한다.
