@@ -10456,3 +10456,8 @@ incomplete and still requires managed caller unwind validation.
   재현되고 `nativeRender`가 계속 반환됐지만, CUA는 unbundled host를 앱으로
   인식하지 않아 실제 OS 물리 클릭 자동화는 수행하지 못했다. synthetic 입력의
   `consumed=1`만 증거로 유지하며, Confirm/Cancel 이후 게임플레이는 미완료다.
+
+- Checkpoint 1087 (2026-09-11): Cancel 좌표를 포함한 15초 synthetic sequence는
+  런타임 `RC=0`과 nativeRender 반복 반환으로 종료됐지만, 이번 실행 로그에는
+  명시적인 consumed/UI-dismiss 증거가 없어 Cancel 동작을 acceptance로 승격하지
+  않았다. Notice 표시까지의 증거와 실제 물리 입력 자동화 제약은 그대로다.

@@ -14822,6 +14822,11 @@ or admission exception was added.
   않아 실제 OS 물리 클릭 자동화는 수행하지 못했다. synthetic DOWN/UP
   `consumed=1`만 기록하고 Confirm/Cancel 이후 게임플레이는 미검증으로 남긴다.
 
+- Checkpoint 1087 (2026-09-11): Cancel 좌표 synthetic sequence를 15초 실행해
+  `RC=0`과 nativeRender 반복 반환은 확인했으나, consumed/UI-dismiss 로그가
+  없어 Cancel 상호작용 성공을 주장하지 않는다. 실제 OS 물리 클릭 자동화도
+  unbundled host 제약으로 여전히 미완료다.
+
 - Checkpoint 1066 (2026-09-11): 최신 JNI/HWUI 및 MAP_JIT 변경 후 ART JIT
   audit를 재실행해 Nterp, compiled/GC, VarHandle, invoke, Surface,
   MediaCodec, W^X 및 shutdown lifecycle 전체가 `RC=0`으로 통과했다.
