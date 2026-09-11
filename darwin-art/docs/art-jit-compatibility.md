@@ -10854,3 +10854,8 @@ incomplete and still requires managed caller unwind validation.
   `mkcert -install`은 관리자 비밀번호가 필요해 자동 설치할 수 없었고,
   신뢰 우회 없이 blocker로 남겼다. 사용자 환경에서 한 번 설치하면
   `tools/chromium-android-acceptance/run.sh`를 그대로 재개할 수 있다.
+
+- Checkpoint 1164 (2026-09-11): 변경 없는 AOSP Calculator와 DeskClock에 대해
+  `tools/aosp-core-apps-graphics-acceptance.sh`가 PASS했다. Calculator의
+  실제 `2+3=5` 결과, DeskClock의 Timer 페이지 전환, HWUI·SurfaceFlinger·Metal
+  visible buffer publish를 확인했으며 로그는 `_build/aosp-core-apps-graphics-acceptance/`에 있다.
