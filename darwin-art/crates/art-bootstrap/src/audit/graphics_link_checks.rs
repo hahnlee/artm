@@ -289,10 +289,10 @@ pub(super) fn validate_graphics_runtime_link(
     // final map records android16-graphics-runtime-closure.o instead of each
     // archive member. The closure audit already pins the Android HWUI member
     // manifest; here retain the owner check while accepting that provenance.
-    let has_aosp_renderthread_owner =
-        link_map_contents.contains("(renderthread_RenderThread.cpp.o)")
-            || (link_map_contents.contains("android16-graphics-runtime-closure.o")
-                && all_symbols.contains("RenderThread"));
+    let has_aosp_renderthread_owner = link_map_contents
+        .contains("(renderthread_RenderThread.cpp.o)")
+        || (link_map_contents.contains("android16-graphics-runtime-closure.o")
+            && all_symbols.contains("RenderThread"));
     if !has_aosp_renderthread_owner
         || link_map_contents.contains("(platform_host_renderthread_RenderThread.cpp.o)")
     {
