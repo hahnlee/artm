@@ -15094,3 +15094,8 @@ or admission exception was added.
   임의주소 fallback은 AOSP 계약을 보장하지 않으므로 제거하지 않고, 실행 중인
   corpus를 중단하거나 새 빌드하지 않은 채 주소 계측과 bounded pair allocator를
   다음 수정 경계로 확정했다.
+
+- Checkpoint 1137 (2026-09-11): 진행 중 corpus에서 `582-checker-bce-length`도
+  interpreter PASS 후 동일한 `Darwin JIT data/code mappings exceed uint32 offset
+  range`로 optimized compilation status=123을 기록했다. 이는 벡터/BCE 의미론
+  실패가 아니라 공통 allocator 경계 재현 증거이며, corpus 세션은 계속 유지한다.
