@@ -11254,3 +11254,8 @@ incomplete and still requires managed caller unwind validation.
   custom `SolitaireView` drag 입력이 consumed=1로 처리되고 crash=0인 것을
   확인했다. Chromium HTTPS fixture는 사용자 지시에 따라 CA trust gate를
   보류하며, 실제 `example.com` 및 tab graphics 증거는 유지한다.
+- Checkpoint 1239 (2026-09-11): 전체 `cargo test --workspace`가 실패 없이
+  통과했다. 이미 PASS한 앱 acceptance는 반복 실행하지 않고, Blue Archive는
+  변경 없는 APK의 첫 화면 및 Cancel 입력까지만 증명된 상태로 남겼다.
+  계정·서버가 필요한 실제 gameplay 한 세션과 Chromium HTTPS fixture(CA
+  trust)는 별도 환경 의존 항목이며 완료로 과장하지 않는다.
