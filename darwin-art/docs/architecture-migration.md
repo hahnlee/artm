@@ -15554,3 +15554,8 @@ or admission exception was added.
   graphics acceptance는 변경 없는 APK에서 실제 button/grid와 물리 입력
   상태를 확인하며 전체 GPU compatibility stack을 통과했다. 남은 Chromium
   항목은 mkcert CA 신뢰 설치가 필요한 HTTPS fixture E2E이다.
+- Checkpoint 1236 (2026-09-11): JIT memory, JNI attachment ownership,
+  trampoline ABI 및 profile lifecycle 감사를 재검증했다. ART JIT 전체
+  기능별 실행(Nterp/compiled/JNI/GC/예외/필드/inline/class-init/type/loop/
+  OSR)이 PASS했으며, 보호 페이지 negative phase의 SIGBUS는 감사가 요구하는
+  실패 경계로 판정됐다.

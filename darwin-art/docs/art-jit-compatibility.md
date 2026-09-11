@@ -11233,3 +11233,10 @@ incomplete and still requires managed caller unwind validation.
   headless target, warm no-op을 확인했다. 변경 없는 Chromium tab graphics
   acceptance도 실제 button/grid view, 10개 input target state 및
   GLES·ANGLE·Graphite·Dawn·MoltenVK·AHB·SurfaceFlinger·Metal 경로로 PASS했다.
+- Checkpoint 1236 (2026-09-11): JIT 기능별 ledger를 재실행했다. signed
+  MAP_JIT nested W^X(동시 실행 2425), JNI attachment/trampoline ABI,
+  profile daemon lifecycle가 모두 PASS했고, ART audit에서 Nterp, compiled
+  arithmetic, post-GC calls, JNI reference, exceptions, fields, inline,
+  unresolved fields, class initialization, type checks, loops, OSR(정수·wide·
+  exception·reference·automatic)를 통과했다. negative W^X phase의 SIGBUS는
+  보호 fault oracle로 기대된 결과다.
