@@ -14928,6 +14928,11 @@ or admission exception was added.
   491개로 증가했다. 실행을 중단하지 않고 남은 legacy 결과를 동일 순서로
   재검증한다.
 
+- Checkpoint 1105 (2026-09-11): 전체 corpus refresh 프로세스가 15분 이상
+  정상 실행 중임을 확인했다. 1,076개 결과는 모두 `passed`이며 current
+  runtime identity 갱신 수가 565개로 증가했다. 남은 항목은 동일 실행에서
+  계속 갱신한다.
+
 - Checkpoint 1100 (2026-09-11): 현재 identity corpus refresh 프로세스가
   10분 이상 생존하고 CPU를 사용하며 계속 진행 중임을 확인했다. ledger는
   1,076개 모두 `passed`, current identity 갱신은 299개다. 프로세스를 재시작하거나
