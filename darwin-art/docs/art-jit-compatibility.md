@@ -10936,3 +10936,8 @@ incomplete and still requires managed caller unwind validation.
   Darwin에서 MAP_FIXED를 유발해 MAP_JIT 계약을 깨뜨릴 수 있음을 확인했다.
   metadata만 별도 PROT_NONE reservation으로 확보한 뒤 소유권을 이전하는
   설계가 확정됐으며, 실제 코드 적용 전 상태다.
+- Checkpoint 1178 (2026-09-11): metadata-first PROT_NONE reservation과
+  reservation 소유권 이전을 0040 패치에 적용하고 graphics bootstrap을
+  재생성했다. audit는 reservation commit 경로에서 여전히
+  `KERN_INVALID_ADDRESS`를 보고해, 0039의 Darwin reservation remap 구현과
+  통합 검증이 다음 과제로 남았다.

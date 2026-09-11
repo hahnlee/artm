@@ -15298,3 +15298,6 @@ or admission exception was added.
   전달하지 않고, metadata에만 PROT_NONE reservation을 만든 뒤
   `MapAnonymous(..., &reservation)`으로 소유권을 넘기는 방향을 Astra 리뷰로
   확정했다. 구현과 audit 재검증이 남아 있다.
+- Checkpoint 1178 (2026-09-11): metadata-first reservation 설계를 0040에
+  적용하고 bootstrap은 통과했다. JIT audit는 reservation commit에서
+  `KERN_INVALID_ADDRESS`가 남아 0039 remap 경로와의 통합 수정이 필요하다.

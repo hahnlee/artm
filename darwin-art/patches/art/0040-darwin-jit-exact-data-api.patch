@@ -1,142 +1,78 @@
 diff --git a/runtime/jit/jit_memory_region.cc b/runtime/jit/jit_memory_region.cc
 --- a/runtime/jit/jit_memory_region.cc
 +++ b/runtime/jit/jit_memory_region.cc
-@@ -20,6 +20,11 @@
- #if defined(__APPLE__)
- #include <pthread.h>
- #include <sys/mman.h>
-+#include <mach/mach_init.h>
-+#include <mach/mach_vm.h>
-+#include <mach/mach_port.h>
-+#include <mach-o/dyld.h>
-+#include <mach-o/loader.h>
- #endif
- #include <android-base/unique_fd.h>
- #include <log/log.h>
-@@ -122,10 +123,125 @@
-     if (!exec_pages.IsValid()) {
-       *error_msg = "Failed to create Darwin MAP_JIT code cache: " + error_str;
-       return false;
-     }
+@@ -103,37 +103,37 @@
+-    // XNU rejects MAP_JIT|MAP_FIXED (EINVAL), so allocate executable memory
+-    // first without a reservation. A non-JIT metadata mapping is then hinted
+-    // below it; the complete pair is checked against ART's uint32 offset
+-    // contract before either view is published.
+-    std::string name = exec_cache_name + "-rwx";
+-    exec_pages = MemMap::MapFileAtAddress(nullptr,
+-                                          exec_capacity,
+-                                 kProtRWX,
+-                                 MAP_PRIVATE | MAP_ANON | MAP_JIT,
+-                                 -1,
+-                                 /* start= */ 0,
+-                                 /* low_4gb= */ false,
+-                                          name.c_str(),
+-                                          /* reuse= */ false,
+-                                          nullptr,
+-                                          &error_str);
+-    if (!exec_pages.IsValid()) {
+-      *error_msg = "Failed to create Darwin MAP_JIT code cache: " + error_str;
+-      return false;
+-    }
 -    data_pages = MemMap::MapAnonymous(data_cache_name.c_str(), nullptr,
 -                                      data_capacity, kProtRW, false, false,
 -                                      nullptr, &error_str);
-+    const size_t rounded_data = RoundUp(data_capacity, MemMap::GetPageSize());
-+    constexpr size_t kPairAttempts = 16;
-+    bool mapped_pair = false;
-+    for (size_t attempt = 0; attempt != kPairAttempts; ++attempt) {
-+      if (attempt != 0) {
-+        exec_pages.Reset();
-+        data_pages.Reset();
-+        exec_pages = MemMap::MapFileAtAddress(nullptr, exec_capacity, kProtRWX,
-+                                              MAP_PRIVATE | MAP_ANON | MAP_JIT, -1,
-+                                              /* start= */ 0, /* low_4gb= */ false,
-+                                              name.c_str(), /* reuse= */ false, nullptr,
-+                                              &error_str);
-+        if (!exec_pages.IsValid()) break;
-+      }
-+    const uintptr_t exec_base = reinterpret_cast<uintptr_t>(exec_pages.Begin());
-+    const uintptr_t exec_limit_end = reinterpret_cast<uintptr_t>(exec_pages.End());
-+    // Mach-O PIE images extend __PAGEZERO by the ASLR slide.  Derive the
-+    // actual lower bound instead of treating 4GiB as universally available.
-+    uintptr_t pagezero_end = UINT64_C(0x100000000);
-+    const mach_header_64* image = reinterpret_cast<const mach_header_64*>(
-+        _dyld_get_image_header(0));
-+    if (image != nullptr && image->magic == MH_MAGIC_64) {
-+      const uint8_t* command = reinterpret_cast<const uint8_t*>(image) +
-+                               sizeof(mach_header_64);
-+      const intptr_t slide = _dyld_get_image_vmaddr_slide(0);
-+      for (uint32_t i = 0; i < image->ncmds; ++i) {
-+        const load_command* lc = reinterpret_cast<const load_command*>(command);
-+        if (lc->cmdsize < sizeof(load_command)) break;
-+        if (lc->cmd == LC_SEGMENT_64 && lc->cmdsize >= sizeof(segment_command_64)) {
-+          const segment_command_64* segment =
-+              reinterpret_cast<const segment_command_64*>(command);
-+          if (segment->vmaddr == 0 && segment->filesize == 0 && segment->vmsize > 0 &&
-+              segment->initprot == VM_PROT_NONE && segment->maxprot == VM_PROT_NONE &&
-+              strncmp(segment->segname, "__PAGEZERO", sizeof(segment->segname)) == 0) {
-+            const uint64_t end = segment->vmsize + (slide > 0 ? static_cast<uint64_t>(slide) : 0);
-+            if (end > pagezero_end) pagezero_end = static_cast<uintptr_t>(end);
-+          }
-+        }
-+        command += lc->cmdsize;
-+      }
-+    }
-+    uintptr_t free_candidate = 0;
-+    const uintptr_t lower = std::max(pagezero_end,
-+                                     exec_limit_end > UINT32_MAX ? exec_limit_end - UINT32_MAX : 0u);
-+    mach_vm_address_t cursor = RoundUp(lower, MemMap::GetPageSize());
-+    const mach_vm_address_t limit = exec_base;
-+    error_str = "no fitting Darwin JIT metadata gap exec_base=" +
-+                std::to_string(exec_base) + " exec_end=" + std::to_string(exec_limit_end) +
-+                " data=" + std::to_string(rounded_data);
-+    for (size_t regions = 0; regions != 4096 && cursor < limit; ++regions) {
-+      mach_vm_address_t region = cursor;
-+      mach_vm_size_t region_size = 0;
-+      vm_region_basic_info_data_64_t info{};
-+      mach_msg_type_number_t count = VM_REGION_BASIC_INFO_COUNT_64;
-+      mach_port_t object = MACH_PORT_NULL;
-+      const kern_return_t status = mach_vm_region(
-+          mach_task_self(), &region, &region_size, VM_REGION_BASIC_INFO_64,
-+          reinterpret_cast<vm_region_info_t>(&info), &count, &object);
-+      if (object != MACH_PORT_NULL) {
-+        (void)mach_port_deallocate(mach_task_self(), object);
-+      }
-+      if (status != KERN_SUCCESS) {
-+        error_str = "Darwin JIT VM region query failed";
-+        break;
-+      }
-+      if (region > limit) {
-+        if (limit - cursor >= rounded_data) {
-+          free_candidate = cursor;
-+          data_pages = MemMap::MapAnonymousExact(data_cache_name.c_str(),
-+                                                 reinterpret_cast<uint8_t*>(free_candidate),
-+                                                 data_capacity, kProtRW, &error_str);
-+        }
-+        break;
-+      }
-+      if (region > cursor && region - cursor >= rounded_data) {
-+        free_candidate = RoundDown(region - rounded_data, MemMap::GetPageSize());
-+        data_pages = MemMap::MapAnonymousExact(data_cache_name.c_str(),
-+                                               reinterpret_cast<uint8_t*>(free_candidate),
-+                                               data_capacity, kProtRW, &error_str);
-+        if (data_pages.IsValid()) break;
-+      }
-+      if (region_size == 0 || region > UINTPTR_MAX - region_size) {
-+        error_str = "invalid Darwin JIT VM region extent";
-+        break;
-+      }
-+      cursor = RoundUp(region + region_size, MemMap::GetPageSize());
-+    }
-+    if (data_pages.IsValid()) {
-+      const uintptr_t data_begin = reinterpret_cast<uintptr_t>(data_pages.Begin());
-+      const uintptr_t data_end = reinterpret_cast<uintptr_t>(data_pages.End());
-+      const uintptr_t exec_end = reinterpret_cast<uintptr_t>(exec_pages.End());
-+      if (data_begin <= exec_base && data_end <= exec_base &&
-+          exec_end - data_begin <= UINT32_MAX) {
-+        mapped_pair = true;
-+        break;
-+      }
-+      error_str = "Darwin JIT pair outside uint32 range attempt=" +
-+                  std::to_string(attempt) + " data=" + std::to_string(data_begin) +
-+                  ".." + std::to_string(data_end) + " exec=" +
-+                  std::to_string(exec_base) + ".." + std::to_string(exec_end);
-+      data_pages.Reset();
-+    }
-+    exec_pages.Reset();
-+    }
-+    if (!mapped_pair) {
-+      data_pages.Reset();
-+      exec_pages.Reset();
-+      *error_msg = "Darwin JIT pair allocation exhausted: " + error_str;
+-    if (!data_pages.IsValid()) {
+-      exec_pages.Reset();
+-      *error_msg = "Failed to map Darwin JIT data cache: " + error_str;
+-      return false;
+-    }
+-    const uintptr_t data_begin = reinterpret_cast<uintptr_t>(data_pages.Begin());
+-    const uintptr_t exec_begin = reinterpret_cast<uintptr_t>(exec_pages.Begin());
+-    const uintptr_t exec_end = reinterpret_cast<uintptr_t>(exec_pages.End());
+-    if (data_begin > exec_begin || exec_end - data_begin > UINT32_MAX) {
+-      data_pages.Reset();
+-      exec_pages.Reset();
+-      *error_msg = "Darwin JIT data/code mappings exceed uint32 offset range";
+-      return false;
+-    }
++    // Reserve metadata first. MAP_JIT must not consume a MemMap reservation:
++    // that API adds MAP_FIXED, which XNU rejects for MAP_JIT mappings.
++    std::string name = exec_cache_name + "-rwx";
++    MemMap reservation = MemMap::MapAnonymous(
++        "Darwin JIT metadata reservation", nullptr, data_capacity, PROT_NONE,
++        false, false, nullptr, &error_str);
++    if (!reservation.IsValid()) {
++      *error_msg = "Darwin JIT metadata reservation failed: " + error_str;
 +      return false;
 +    }
-+    if (!data_pages.IsValid() || !exec_pages.IsValid()) {
-+      exec_pages.Reset();
-+      data_pages.Reset();
-+      *error_msg = "Failed to map Darwin JIT data cache: " + error_str;
++    exec_pages = MemMap::MapFileAtAddress(
++        nullptr, exec_capacity, kProtRWX, MAP_PRIVATE | MAP_ANON | MAP_JIT,
++        -1, 0, false, name.c_str(), false, nullptr, &error_str);
++    if (!exec_pages.IsValid()) {
++      *error_msg = "Darwin MAP_JIT after reservation failed: " + error_str;
 +      return false;
 +    }
-     if (!data_pages.IsValid()) {
-       exec_pages.Reset();
-       *error_msg = "Failed to map Darwin JIT data cache: " + error_str;
++    const uintptr_t data_begin = reinterpret_cast<uintptr_t>(reservation.Begin());
++    const uintptr_t data_end = reinterpret_cast<uintptr_t>(reservation.End());
++    const uintptr_t exec_begin = reinterpret_cast<uintptr_t>(exec_pages.Begin());
++    const uintptr_t exec_end = reinterpret_cast<uintptr_t>(exec_pages.End());
++    if (data_end > exec_begin || exec_end < data_begin ||
++        exec_end - data_begin > UINT32_MAX) {
++      *error_msg = "Darwin JIT reserved pair out of range data=" +
++          std::to_string(data_begin) + ".." + std::to_string(data_end) +
++          " exec=" + std::to_string(exec_begin) + ".." + std::to_string(exec_end);
++      return false;
++    }
++    // MAP_FIXED is safe here: only our owned non-JIT reservation is replaced.
++    // On success MemMap transfers ownership from reservation into data_pages.
++    data_pages = MemMap::MapAnonymous(
++        data_cache_name.c_str(), reservation.Begin(), data_capacity, kProtRW,
++        false, false, &reservation, &error_str);
++    if (!data_pages.IsValid()) {
++      *error_msg = "Darwin JIT reserved metadata commit failed: " + error_str;
++      return false;
++    }
