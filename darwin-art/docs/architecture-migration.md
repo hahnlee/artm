@@ -14712,3 +14712,7 @@ or admission exception was added.
   `security verify-cert`가 `CSSMERR_TP_NOT_TRUSTED`를 반환했다. Chromium HTTPS
   E2E는 runtime 오류가 아닌 macOS trust 미설치로 `RC=69` 중단됐으며,
   `mkcert -install` 후 페이지/WebGL/입력/다운로드/새 탭 gate를 재실행한다.
+
+- Checkpoint 1065 (2026-09-11): macOS trust 검증이 계속
+  `CSSMERR_TP_NOT_TRUSTED`로 실패해 Chromium HTTPS E2E를 보류했다. 이는
+  runtime 결함이 아니라 사용자 키체인 설정 전제조건이다.

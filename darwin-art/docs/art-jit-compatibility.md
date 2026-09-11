@@ -10316,3 +10316,8 @@ incomplete and still requires managed caller unwind validation.
   `security verify-cert`가 `CSSMERR_TP_NOT_TRUSTED`를 반환해 Chromium HTTPS
   E2E가 다시 `RC=69`로 중단됐다. 이는 runtime 실패가 아닌 macOS trust 설정
   전제조건이며, 사용자가 `mkcert -install`을 완료한 뒤 재실행해야 한다.
+
+- Checkpoint 1065 (2026-09-11): trust 상태를 재확인했지만
+  `security verify-cert`가 계속 `CSSMERR_TP_NOT_TRUSTED`를 반환했다.
+  Chromium HTTPS E2E는 키체인 trust 설치 전까지 런타임 acceptance로 승격하지
+  않는다.
