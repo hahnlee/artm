@@ -10865,3 +10865,8 @@ incomplete and still requires managed caller unwind validation.
   Day/Week/Month 전환, Chrome 새 탭, Android popup의 ViewRoot/InputChannel/
   SurfaceFlinger 경로를 변경 없는 APK로 검증했다. 로그는
   `_build/android-window-menu-acceptance/run.m2KTpu/`에 있다.
+
+- Checkpoint 1166 (2026-09-11): 변경 없는 SolitaireCG APK의 게임 acceptance가
+  PASS했다. `SolitaireView` 커스텀 View에서 실제 DOWN/MOVE 드래그가
+  input-channel로 소비되고 native=0, crash=0을 확인했다. 로그는
+  `_build/solitaire-game-acceptance/`에 있다.
