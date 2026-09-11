@@ -10673,3 +10673,8 @@ incomplete and still requires managed caller unwind validation.
   identity가 다시 섞이는 현상을 Astra와 확인했다. 잘못된 귀속을 막기 위해 runner가
   각 완료 batch 전에 runtime identity를 재계산하고 시작값과 다르면 추가 ledger
   기록 없이 중단하도록 수정했다. `tools/test_art_upstream_corpus.py` 9개는 통과했다.
+
+- Checkpoint 1125 (2026-09-11): 잔여 build/host 프로세스가 없는 상태에서
+  runtime identity 안정성을 2초 간격으로 재확인했다(`26ba01e4…` 동일). drift
+  guard가 적용된 전체 corpus fresh 재실행을 parallel=8로 시작했으며, 완료 전
+  ledger를 최종 증거로 승격하지 않는다.
