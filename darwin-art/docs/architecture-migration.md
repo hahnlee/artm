@@ -14827,6 +14827,11 @@ or admission exception was added.
   없어 Cancel 상호작용 성공을 주장하지 않는다. 실제 OS 물리 클릭 자동화도
   unbundled host 제약으로 여전히 미완료다.
 
+- Checkpoint 1088 (2026-09-11): 변경 없는 AOSP Calendar APK를 최신 runtime에서
+  10초 실행해 `RC=0`, Nterp PASS, 720×1280 SurfaceView GPU shared IOSurface
+  경로를 확인했다. Calendar 기본 실행과 합성 경로는 회귀가 없으며, 세부 뷰
+  전환 입력은 별도 acceptance로 유지한다.
+
 - Checkpoint 1066 (2026-09-11): 최신 JNI/HWUI 및 MAP_JIT 변경 후 ART JIT
   audit를 재실행해 Nterp, compiled/GC, VarHandle, invoke, Surface,
   MediaCodec, W^X 및 shutdown lifecycle 전체가 `RC=0`으로 통과했다.

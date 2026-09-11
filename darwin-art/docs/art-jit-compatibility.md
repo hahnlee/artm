@@ -10461,3 +10461,9 @@ incomplete and still requires managed caller unwind validation.
   런타임 `RC=0`과 nativeRender 반복 반환으로 종료됐지만, 이번 실행 로그에는
   명시적인 consumed/UI-dismiss 증거가 없어 Cancel 동작을 acceptance로 승격하지
   않았다. Notice 표시까지의 증거와 실제 물리 입력 자동화 제약은 그대로다.
+
+- Checkpoint 1088 (2026-09-11): 변경 없는 AOSP Calendar APK를 최신
+  thread-local signal runtime에서 10초 재실행했다. Activity/SurfaceView가
+  720×1280 GPU shared IOSurface를 사용하고 Nterp acceptance가 통과했으며,
+  런처는 `RC=0`으로 종료했다. 이번 실행은 Calendar 표시·graphics 회귀 증거이며
+  Day/Week/Month 조작의 최신 물리 입력 증거는 별도로 남긴다.
