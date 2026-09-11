@@ -10182,6 +10182,10 @@ incomplete and still requires managed caller unwind validation.
   정체 자체는 런타임 persistence 회귀로 남겨 두며, timeout/강제 종료로 숨기지
   않는다.
 
+- Checkpoint 1068 (2026-09-11): HWUI/JNI ownership 변경 후 `cargo test -q -p
+  darwin-art-host`를 재실행했다. host crate의 8개+2개 테스트 및 전체 test
+  target이 모두 통과했다(`0 failed`).
+
 - Checkpoint 1067 (2026-09-11): JNI/HWUI ownership 및 MAP_JIT 변경을 반영한
   `audit-native-graph.sh`가 `RC=0`으로 통과했다. 입력 472개, runtime=258,
   graphics-jni=63, ICU=458, cached TU=809, archive=8, phases=12이며 graph

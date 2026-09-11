@@ -14725,3 +14725,7 @@ or admission exception was added.
   `RC=0`으로 통과했다. 입력 472개와 graph digest
   `8bd43dce…3298e`, runtime=258, graphics-jni=63, ICU=458, cached TU=809,
   archives=8, phases=12를 확인해 재현 build identity를 갱신했다.
+
+- Checkpoint 1068 (2026-09-11): 최신 HWUI/JNI 변경 후 `cargo test -q -p
+  darwin-art-host`가 8개와 2개 테스트 묶음을 포함해 전체 `0 failed`로
+  통과했다.
