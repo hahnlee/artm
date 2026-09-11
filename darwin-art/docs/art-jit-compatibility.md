@@ -11002,3 +11002,8 @@ incomplete and still requires managed caller unwind validation.
   아니라 `com.apple.security.cs.allow-jit` entitlement도 필수 검사하도록
   강화됐다. Manager 재빌드 후 packaged prepare, entitlement 조회 및 전체
   deep-sign 검증이 모두 PASS했다.
+- Checkpoint 1193 (2026-09-11): `cargo test -p darwin-art-runtime`의 28개
+  lifecycle/native-owner/provider 테스트와 `cargo test -p darwin-art-host`의
+  10개 입력·프레임·graphics acceptance 테스트가 모두 PASS했다. 이 결과는
+  native attachment ownership 및 reverse shutdown 계약의 Rust 단위 증거를
+  새 빌드 상태에서 재확인한 것이다.

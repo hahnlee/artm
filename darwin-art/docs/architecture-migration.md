@@ -15356,3 +15356,7 @@ or admission exception was added.
 - Checkpoint 1192 (2026-09-11): Host 실행 준비 계약에 JIT entitlement 검사를
   추가해, x18 ABI와 실행 권한이 함께 보장되지 않으면 packaged launch를
   거부하도록 했다. 재빌드·prepare·entitlement·deep codesign 검증을 PASS했다.
+- Checkpoint 1193 (2026-09-11): runtime 28개와 host 10개의 Rust 테스트를
+  새 현재 트리에서 실행해 모두 PASS했다. 세션 lifecycle, native owner의
+  reverse teardown, provider lease, 입력/프레임 경계가 분리된 단위 계약으로
+  검증됨을 기록한다.
