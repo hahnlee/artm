@@ -10005,3 +10005,10 @@ incomplete and still requires managed caller unwind validation.
   `binder=ready` 전 ART 초기화에서 멈췄고, parent fatal 직후 모든 기존 채널도 EOF가
   됐다. 따라서 EBADF/FD 고갈 가설은 폐기하고, 동기 descriptor 조회가 child startup
   지연을 fatal로 전파하는지 Astra에 재검토 요청했다.
+
+- Checkpoint 1015 (2026-09-11): Astra 권고에 따라 원격 endpoint 생성 실패를
+  `bindService`의 정상적인 `false` 결과로 변환하고 이미 spawn한 child/channel을
+  정리했다. framework compat DEX를 재생성한 뒤 `example.com` VIEW를 재실행해
+  3개 child가 모두 `binder=ready`/descriptor 응답을 완료했고, Chromium의
+  `uncaught Java exception`은 관찰되지 않았다. 미연결 child의 15초 self-timeout은
+  별도 lifecycle 동작으로 기록한다.

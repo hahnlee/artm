@@ -14431,3 +14431,9 @@ or admission exception was added.
   parent의 `RemoteServiceBinder` 생성자 동기 descriptor 조회가 지연을
   `IllegalStateException`으로 승격하는 구조인지 Astra 검토를 요청했다. AOSP
   BinderProxy의 lazy descriptor semantics를 기준으로 다음 수정 여부를 결정한다.
+
+- Checkpoint 1015 (2026-09-11): child endpoint descriptor 조회 실패가 Java fatal로
+  번지지 않도록 isolated/remote `bindService` 경로에서 예외를 잡아 `false`를
+  반환하고 spawn 리소스를 해제했다. framework compat DEX 재빌드 후 실제 Chromium
+  `example.com` VIEW 실행은 child 3개 모두 ready/descriptor 응답과 정상 종료를
+  보였으며 fatal marker가 사라졌다. AOSP식 ready 전 bind 실패 전파를 확인했다.

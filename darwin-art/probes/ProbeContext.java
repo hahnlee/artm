@@ -531,7 +531,16 @@ public final class ProbeContext extends ContextWrapper {
                         "could not spawn isolated Service " + component);
                 return false;
             }
-            IBinder binder = new RemoteServiceBinder(child[0], child[1]);
+            final IBinder binder;
+            try {
+                binder = new RemoteServiceBinder(child[0], child[1]);
+            } catch (RuntimeException error) {
+                android.util.Log.w("DarwinServiceBridge",
+                        "isolated Service endpoint failed before ready: " + component
+                                + " instance=" + isolatedInstanceName, error);
+                nativeReleaseRemoteService(child[0], child[1]);
+                return false;
+            }
             BoundServiceRecord bound = new BoundServiceRecord(
                     component, null, binder, child[0], child[1], isolatedInstanceName,
                     processName);
@@ -575,7 +584,15 @@ public final class ProbeContext extends ContextWrapper {
                         "could not spawn remote Service " + component);
                 return false;
             }
-            IBinder binder = new RemoteServiceBinder(child[0], child[1]);
+            final IBinder binder;
+            try {
+                binder = new RemoteServiceBinder(child[0], child[1]);
+            } catch (RuntimeException error) {
+                android.util.Log.w("DarwinServiceBridge",
+                        "remote Service endpoint failed before ready: " + component, error);
+                nativeReleaseRemoteService(child[0], child[1]);
+                return false;
+            }
             serviceConnections.put(connection, new BoundServiceRecord(
                     component, null, binder, child[0], child[1], null, processName));
             android.util.Log.i("DarwinServiceBridge",
