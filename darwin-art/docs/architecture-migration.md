@@ -14493,3 +14493,12 @@ or admission exception was added.
   두 회차 모두 새 탭 메뉴 이벤트와 window remove를 확인하고 crash marker가
   없음을 검증했다. 두 로그의 모든 service child PID는 현재 생존하지 않는다.
   따라서 종료 fence·직렬화 회수의 반복 acceptance 조건은 충족했다.
+
+- Checkpoint 1026 (2026-09-11): AOSP Calculator/DeskClock 변경 없는 APK를 실제
+  실행해 graphics acceptance PASS를 얻었다. Calculator `2+3=5` 연산 결과와
+  HWUI→SurfaceFlinger→Metal buffer, DeskClock Timer 공통 경로를 확인했으며
+  로그는 `_build/aosp-core-apps-graphics-acceptance`에 남겼다.
+
+- Checkpoint 1027 (2026-09-11): AOSP Calendar 변경 없는 APK를 실제 실행해
+  `RC=0`, Day/Week/Month 텍스트 전환과 window remove를 검증했다. 최신 debug
+  로그는 `/tmp/darwin-art-calendar-debug.h6swmU`에 보존하며 fatal/uncaught는 없다.

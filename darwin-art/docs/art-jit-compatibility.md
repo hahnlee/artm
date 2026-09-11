@@ -10071,3 +10071,13 @@ incomplete and still requires managed caller unwind validation.
   fatal crash marker=0이며 로그에 등장한 모든 service child PID가 종료됐다.
   셸 세션의 최종 PASS 문자열은 수집되지 않았지만 acceptance 조건 자체는 모두
   충족되어 child-reaping 반복 증거를 확보했다.
+
+- Checkpoint 1026 (2026-09-11): 변경 없는 AOSP Calculator와 DeskClock APK의
+  graphics acceptance가 PASS했다. Calculator 실제 입력 `2+3`의 결과 `5`와
+  HWUI/SurfaceFlinger/Metal buffer visible 증거, DeskClock Timer 공통 경로를
+  확인했다. 산출 로그는 `_build/aosp-core-apps-graphics-acceptance`에 보존한다.
+
+- Checkpoint 1027 (2026-09-11): 변경 없는 AOSP Calendar APK를 실제 실행해
+  `RC=0`과 Day/Week/Month 전환 텍스트, window remove를 확인했다. 메뉴 acceptance
+  기존 로그와 최신 debug 런 모두 crash marker가 없으며, 최신 산출물은
+  `/tmp/darwin-art-calendar-debug.h6swmU`다.
