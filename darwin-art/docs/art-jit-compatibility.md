@@ -11054,3 +11054,9 @@ incomplete and still requires managed caller unwind validation.
   string/class roots와 native exit hooks가 모두 PASS했다. 종료 단계의
   reverse teardown도 정상 출력됐다. 이로써 JIT 기능 ledger는 남은
   메서드별 admission 실패를 제외하고 acceptance 증거를 확보했다.
+- Checkpoint 1202 (2026-09-11): 동일 Chromium APK와 입력 시퀀스로 JIT A/B를
+  실행했다. `DARWIN_ART_JIT=0`은 실제 JIT off 및 `TabGridView` 전환,
+  target-states=9로 PASS했다(`run.d2frvB`). JIT on은 첫
+  `TabSwitcherButtonView`는 소비했지만 두 번째 입력이 `SuggestionsTileView`로
+  전달되어 게이트가 실패했다(`run.Zeu1Pa`). 이를 그래픽 오염이 아닌
+  JIT-on UI/event 경로 회귀로 분리한다.

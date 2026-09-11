@@ -15401,3 +15401,8 @@ or admission exception was added.
   통과시켰다. 같은 실행에서 native-thread/JNI shutdown reverse 단계도
   완료됐다. 남은 작업은 Chromium/Blue Archive 실제 APK acceptance와
   개별 메서드 compile admission 분석이다.
+- Checkpoint 1202 (2026-09-11): 변경 없는 Chromium을 같은 profile에서 JIT
+  A/B했다. JIT off는 실제 TabGridView와 9개 합성 상태를 통과했고, JIT on은
+  첫 탭 버튼 이후 두 번째 클릭이 SuggestionsTileView에 도달했다. 다음은
+  JIT 컴파일/디옵트가 Chrome UI listener 또는 tab-grid attach에 미치는
+  영향을 Astra 리뷰 후 계측하는 작업이다.
