@@ -11228,3 +11228,8 @@ incomplete and still requires managed caller unwind validation.
   Blue Archive Cancel DOWN/UP OCR verifier가 모두 PASS했다. Chromium E2E는
   여전히 macOS mkcert CA trust preflight에서만 `RC=69`로 중단되며 앱/서버는
   시작되지 않았다(`runtime_started=0`).
+- Checkpoint 1235 (2026-09-11): headless artifact identity audit와 native
+  graph audit를 재실행해 동일 SHA-256 `ef122706…9e060fcb`, graph-owned
+  headless target, warm no-op을 확인했다. 변경 없는 Chromium tab graphics
+  acceptance도 실제 button/grid view, 10개 input target state 및
+  GLES·ANGLE·Graphite·Dawn·MoltenVK·AHB·SurfaceFlinger·Metal 경로로 PASS했다.

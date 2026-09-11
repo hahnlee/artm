@@ -15549,3 +15549,8 @@ or admission exception was added.
   남은 gate는 런타임 동작이 아니라 사용자 macOS trust store에 mkcert CA를
   설치해야 하는 환경 사전조건이며, 현재 harness는 이를 명시적으로
   `BLOCKED_ENV`로 남긴다.
+- Checkpoint 1235 (2026-09-11): reproducible headless dylib identity와 native
+  graph ownership을 다시 검증했고 warm query가 no-op이었다. Chromium tab
+  graphics acceptance는 변경 없는 APK에서 실제 button/grid와 물리 입력
+  상태를 확인하며 전체 GPU compatibility stack을 통과했다. 남은 Chromium
+  항목은 mkcert CA 신뢰 설치가 필요한 HTTPS fixture E2E이다.
