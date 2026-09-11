@@ -10870,3 +10870,9 @@ incomplete and still requires managed caller unwind validation.
   PASS했다. `SolitaireView` 커스텀 View에서 실제 DOWN/MOVE 드래그가
   input-channel로 소비되고 native=0, crash=0을 확인했다. 로그는
   `_build/solitaire-game-acceptance/`에 있다.
+
+- Checkpoint 1167 (2026-09-11): Blue Archive 최신 진단 문서를 재검토했다.
+  변경 없는 base+arm64 split은 Unity `nativeRender`의 Boehm GC
+  stop-the-world acknowledgment 대기로 실제 scanout이 검정이며, 신호 전달과
+  입력 소비만으로 acceptance를 선언할 수 없다. 이 native first-frame blocker를
+  Astra에 재검토 요청했고, title/menu acceptance는 미완료로 유지한다.
