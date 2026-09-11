@@ -14788,6 +14788,11 @@ or admission exception was added.
   15초 실행에서 nativeRender와 검정 scanout을 개선하지 못해 제거했다. 현재
   남은 문제는 실제 signal delivery 경계이며 추측성 우회로 해결을 주장하지 않는다.
 
+- Checkpoint 1081 (2026-09-11): special-fault handled 반환 순서를 바꾸는
+  Darwin 경계 실험은 signal-cycle/build는 통과했지만 Blue Archive startup이
+  `nativeRender` 전에 정체되어 `RC=137`이 됐다. AOSP sigreturn 동작과 일치하지
+  않는 변경이므로 제거했고, 현재 런타임은 검증된 baseline 상태다.
+
 - Checkpoint 1066 (2026-09-11): 최신 JNI/HWUI 및 MAP_JIT 변경 후 ART JIT
   audit를 재실행해 Nterp, compiled/GC, VarHandle, invoke, Surface,
   MediaCodec, W^X 및 shutdown lifecycle 전체가 `RC=0`으로 통과했다.

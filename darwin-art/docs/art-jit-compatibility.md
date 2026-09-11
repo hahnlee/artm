@@ -10419,3 +10419,9 @@ incomplete and still requires managed caller unwind validation.
   명시적 host mask 복원 패치도 15초 게임 실행에서 nativeRender/검정 scanout을
   바꾸지 못했고, 첫 사이클 이전 누락 실행도 관찰돼 해결책으로 입증되지 않았다.
   해당 추측성 패치는 제거하고 계측 결과만 유지한다.
+
+- Checkpoint 1081 (2026-09-11): `darwin_sigchain.cc`의 handled 반환 전 host
+  mask 복원을 강제하는 1줄 실험은 signal-cycle와 build는 통과했지만 Blue
+  Archive가 `nativeRender` 이전 startup에서 CPU 정체되어 `RC=137`로 종료됐다.
+  이는 AOSP의 kernel sigreturn 계약을 바꾸는 해결책으로 입증되지 않아 즉시
+  revert했으며, 공식 소스는 baseline으로 복원했다.
