@@ -10776,3 +10776,8 @@ incomplete and still requires managed caller unwind validation.
 - Checkpoint 1147 (2026-09-11): allocator 수정 후 별도 ledger가 약 2분간
   drift 없이 124개 항목을 `eb468bf1…` identity로 모두 passed 처리했다.
   전체 1,076개 완료 전에는 최종 corpus acceptance로 승격하지 않는다.
+
+- Checkpoint 1148 (2026-09-11): 별도 ledger 재실행이 약 3분째 진행 중이며
+  189개 항목 중 187 passed/2 failed, 모두 identity `eb468bf1…`이다. 기존
+  MAP_JIT 범위 오류는 대표 6개 단독 재실행에서 해소됐고, 새 실패는 종료 후
+  개별 원인을 분리한다.
