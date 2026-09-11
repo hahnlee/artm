@@ -14630,3 +14630,9 @@ or admission exception was added.
   darwin-art-host`의 10개 테스트가 모두 PASS했고 graphics link incremental
   audit/JIT MAP_JIT smoke도 status 0으로 완료됐다. 다음 단계는 앱 프로세스와
   isolated service 사이의 실제 alias 재사용 acceptance 추가다.
+
+- Checkpoint 1050 (2026-09-11): AndroidKeyStore HMAC alias를 profile/app 데이터
+  아래 원자적 파일 backend에 저장·로드하도록 구현했고 framework compat 빌드와
+  변경 없는 Blue Archive base+split 재실행(`RC=0`, Unity ARM64 초기화 정상)을
+  확인했다. host Rust 10개 테스트 및 graphics/JIT smoke도 PASS다. 앱/isolated
+  service의 동일 alias 재사용을 직접 증명하는 acceptance는 남아 있다.

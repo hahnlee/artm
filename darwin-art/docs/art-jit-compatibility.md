@@ -10229,3 +10229,10 @@ incomplete and still requires managed caller unwind validation.
   darwin-art-host`가 8+2개 테스트 모두 통과했고, graphics link incremental
   audit 및 JIT MAP_JIT smoke도 종료 상태 0이었다. 현재 변경 사항은
   cross-process alias acceptance를 추가하기 전까지 빌드/host 계약을 유지한다.
+
+- Checkpoint 1050 (2026-09-11): AndroidKeyStore의 HMAC alias 저장을 profile/app
+  데이터 아래 파일 backend로 확장하고, framework compat 재빌드 PASS를 확인했다.
+  변경 없는 Blue Archive base+split 재실행은 `RC=0`, Unity ARM64 초기화 정상,
+  AndroidKeyStore/JobScheduler 예외 및 fatal marker 없음이었다. host Rust 10개
+  테스트와 graphics link/JIT smoke도 PASS했다. 실제 두 프로세스가 동일 alias를
+  읽는 acceptance는 아직 별도로 닫아야 한다.
