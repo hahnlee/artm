@@ -10634,3 +10634,8 @@ incomplete and still requires managed caller unwind validation.
   `cargo test -p art-bootstrap`(14 tests)가 모두 통과했다. JNI attachment,
   host graphics/input, bootstrap build-contract 회귀를 현재 shutdown/identity
   산출물과 함께 재확인했다.
+
+- Checkpoint 1117 (2026-09-11): `python3 -m unittest -q
+  tools/test_art_upstream_corpus.py` 9개가 통과했고, `audit-native-graph.sh`도
+  runtime=258, graphics-jni=63, ICU=458, cached TU=809, 472 inputs에서
+  duplicate/누락 없이 `PASS`했다. graph digest는 `00b69efe…d8f5f`로 기록됐다.
