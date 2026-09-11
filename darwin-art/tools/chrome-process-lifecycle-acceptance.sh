@@ -20,7 +20,10 @@ cargo build -q --manifest-path "$root/Cargo.toml" -p darwin-art-host
 
 for iteration in 1 2; do
   log="$output/chrome-$iteration.log"
+  app_data="$output/app-data-$iteration"
+  mkdir -p "$app_data"
   env \
+    DARWIN_ART_APP_DATA_ROOT="$app_data" \
     DARWIN_ART_WINDOW_SCALE=2 \
     DARWIN_ART_TEST_POINTER_HOLD_MS=50 \
     DARWIN_ART_DEBUG_POINTER=1 \

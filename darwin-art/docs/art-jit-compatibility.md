@@ -10173,3 +10173,11 @@ incomplete and still requires managed caller unwind validation.
   없음이 확인됐다. 이는 초기화/서비스 blocker가 더 이상 재현되지 않음을
   증명하지만, 로그인·네트워크·실제 전투를 포함한 게임 플레이 acceptance는
   아직 닫지 않는다.
+
+- Checkpoint 1042 (2026-09-11): Chromium lifecycle acceptance가 공유 누적
+  TabState에서 입력 전 native NavigationController를 장시간 점유하는 현상을
+  분리 재현했다. 반복 acceptance를 iteration별 `DARWIN_ART_APP_DATA_ROOT`로
+  격리하도록 수정한 뒤 `iterations=2`, `new-tab=2`, `JNI-detach-crash=0`,
+  `service-children=reaped`로 PASS했다. 공유 데이터 루트의 누적 TabState 복원
+  정체 자체는 런타임 persistence 회귀로 남겨 두며, timeout/강제 종료로 숨기지
+  않는다.

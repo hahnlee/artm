@@ -14580,3 +14580,10 @@ or admission exception was added.
   (12 cores/8192mb)를 확인했고 JobScheduler/AndroidKeyStore 예외와 fatal
   marker는 없었다. 서비스 초기화 blocker는 해소됐지만 로그인·네트워크·전투를
   포함하는 실제 게임 플레이 acceptance는 아직 미완료다.
+
+- Checkpoint 1042 (2026-09-11): Chromium lifecycle acceptance의 공유 데이터
+  루트 누적 TabState 복원 정체를 분리 재현했다. 각 반복을 독립적인
+  `DARWIN_ART_APP_DATA_ROOT`로 실행하도록 gate를 보강했고, 실제 결과는
+  `iterations=2`, `new-tab=2`, `JNI-detach-crash=0`, `service-children=reaped`
+  PASS다. 공유 persistence에서 발생한 입력 전 NavigationController 정체는
+  별도 런타임 회귀로 보존하며 강제 종료로 통과 처리하지 않는다.
