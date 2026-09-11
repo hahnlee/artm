@@ -10059,3 +10059,9 @@ incomplete and still requires managed caller unwind validation.
   host는 window remove 뒤 종료했고 fence 거부가 관찰됐다. 2회차 host는 약
   42초 동안 CPU 100%로 유지되어 child 초기화 중 정체됐고, sample은 macOS 권한
   제한으로 산출되지 않았다. 테스트 host/child만 종료했으며 반복 PASS는 보류한다.
+
+- Checkpoint 1024 (2026-09-11): system_server를 재기동한 뒤 동일 물리 포인터
+  lifecycle을 두 번 연속 실행했다. 두 런 모두 `RC=0`, `gpu-loop exit status=0
+  frames_presented=7`, terminate service cleanup 성공을 기록했고 Binder/Java
+  fatal은 없었다. fence와 release 직렬화가 적용된 반복 경로의 정상 증거로
+  기록한다.

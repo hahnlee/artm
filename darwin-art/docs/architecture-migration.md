@@ -14483,3 +14483,8 @@ or admission exception was added.
   macOS `sample`은 권한 제한으로 실패했고, 해당 실행 트리만 강제 종료했다.
   반복 acceptance 완료 전 2회차 초기화/프로파일 재사용 경로를 Astra와 계속
   분리 진단한다.
+
+- Checkpoint 1024 (2026-09-11): system_server 재기동 후 동일 pointer lifecycle을
+  두 번 연속 실행해 모두 `RC=0`, GPU loop `frames_presented=7`, terminate cleanup
+  성공을 확인했다. service child 종료 경합은 재현되지 않았으며, 안정화된 반복
+  경로의 증거로 기록한다.
