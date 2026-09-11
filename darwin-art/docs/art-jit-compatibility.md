@@ -10596,3 +10596,8 @@ incomplete and still requires managed caller unwind validation.
   재확인했다. 전체 1,076개 결과는 모두 `passed`이며 current runtime identity
   갱신 항목은 370개다. 장시간 테스트가 포함된 AOSP 순서를 유지하고 임의 중단이나
   재시작은 하지 않았다.
+
+- Checkpoint 1110 (2026-09-11): Chromium 호환성 계층에서 `https://example.com/`
+  을 실제 브라우저 탭으로 열어 확인했다. 제목/본문/`Learn more` 링크가 접근성
+  트리에 노출되고 화면에도 정상 렌더링되었다. current-identity corpus refresh는
+  별도 프로세스로 계속 실행 중이며, zygote 종료 경로의 SIGABRT 수정은 아직 남아 있다.
