@@ -45,15 +45,19 @@ public final class DarwinAndroidKeyStore extends KeyStoreSpi {
             throws KeyStoreException {
         throw new KeyStoreException("AndroidKeyStore certificate import is unsupported on Darwin");
     }
-    @Override public void engineDeleteEntry(String alias) throws KeyStoreException {
-        throw new KeyStoreException("AndroidKeyStore is empty on Darwin");
+    @Override public synchronized void engineDeleteEntry(String alias) throws KeyStoreException {
+        KEYS.remove(alias);
     }
-    @Override public Enumeration<String> engineAliases() {
-        return Collections.emptyEnumeration();
+    @Override public synchronized Enumeration<String> engineAliases() {
+        return Collections.enumeration(new java.util.ArrayList<>(KEYS.keySet()));
     }
-    @Override public boolean engineContainsAlias(String alias) { return false; }
-    @Override public int engineSize() { return 0; }
-    @Override public boolean engineIsKeyEntry(String alias) { return false; }
+    @Override public synchronized boolean engineContainsAlias(String alias) {
+        return KEYS.containsKey(alias);
+    }
+    @Override public synchronized int engineSize() { return KEYS.size(); }
+    @Override public synchronized boolean engineIsKeyEntry(String alias) {
+        return KEYS.containsKey(alias);
+    }
     @Override public boolean engineIsCertificateEntry(String alias) { return false; }
     @Override public String engineGetCertificateAlias(Certificate cert) { return null; }
     @Override public void engineStore(OutputStream stream, char[] password)
@@ -64,8 +68,11 @@ public final class DarwinAndroidKeyStore extends KeyStoreSpi {
             throws IOException, NoSuchAlgorithmException, CertificateException {
         if (stream != null) throw new IOException("AndroidKeyStore is not importable");
     }
-    @Override public KeyStore.Entry engineGetEntry(String alias,
-            KeyStore.ProtectionParameter protection) { return null; }
+    @Override public synchronized KeyStore.Entry engineGetEntry(String alias,
+            KeyStore.ProtectionParameter protection) {
+        SecretKey value = KEYS.get(alias);
+        return value == null ? null : new KeyStore.SecretKeyEntry(value);
+    }
     @Override public boolean engineEntryInstanceOf(String alias,
             Class<? extends KeyStore.Entry> entryClass) { return false; }
 

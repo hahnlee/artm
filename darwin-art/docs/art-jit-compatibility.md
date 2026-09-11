@@ -10208,3 +10208,11 @@ incomplete and still requires managed caller unwind validation.
   (`.darwin-art-owner-pid`)를 추가했다. 24시간 이상 된 root라도 owner가 살아
   있으면 보존하고, SIGKILL로 남은 owner 없는 root만 회수한다. 신규 Chromium
   짧은 실행은 `RC=0`, 실행 후 root `0개`로 확인됐다.
+
+- Checkpoint 1047 (2026-09-11): AndroidKeyStore SPI의 alias 계약을 AOSP
+  `KeyStore` 사용 순서에 맞춰 보완했다. `containsAlias`, `aliases`, `size`,
+  `isKeyEntry`, `getEntry(SecretKeyEntry)`, `deleteEntry`가 생성된 HMAC alias를
+  실제 in-process store에서 반영한다. framework compat 재빌드가 PASS했고,
+  변경 없는 Blue Archive base+split 15초 실행은 `RC=0`, Unity ARM64 초기화
+  정상, AndroidKeyStore/JobScheduler 예외·fatal marker 없음이었다. 다중 프로세스
+  영속 keystore backend는 아직 남은 과제다.

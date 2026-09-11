@@ -14612,3 +14612,9 @@ or admission exception was added.
   (`.darwin-art-owner-pid`)를 기록하도록 보강했다. 오래된 root도 owner가
   생존하면 삭제하지 않으며, 비정상 종료로 owner가 사라진 root만 회수한다.
   신규 Chromium 실행은 `RC=0`이고 실행 후 `mnt/run/app.*`가 0개였다.
+
+- Checkpoint 1047 (2026-09-11): AndroidKeyStore SPI가 alias 조회·열거·삭제와
+  `SecretKeyEntry`를 실제 저장소 상태로 처리하도록 보완됐다. framework compat
+  빌드 PASS 후 변경 없는 Blue Archive base+split 15초 실행에서 `RC=0`, Unity
+  ARM64 초기화 정상, AndroidKeyStore/JobScheduler 예외와 fatal marker 없음이
+  확인됐다. 프로세스 간 영속 keystore backend는 아직 미완료다.
