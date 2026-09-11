@@ -15348,3 +15348,8 @@ or admission exception was added.
   적용하고, bundle sealed-resource를 오염시키던 인접 lock 파일을 TMPDIR
   lock으로 변경했다. Manager 재빌드와 deep codesign 검증이 PASS했고,
   Blue Archive 실행 프로세스가 `dev.darwinart.host` Host.app 소유로 확인됐다.
+- Checkpoint 1191 (2026-09-11): support DEX의 dexopt 산출물이 signed
+  Manager bundle을 변경하던 경로를 제거했다. profile의 writable dex-cache로
+  DEX를 복사하고 system-server/app 양쪽에 그 경로를 전달한다. 실제 Blue
+  Archive 실행에서 profile cache에만 `classes.vdex`가 생겼고, Manager 전체
+  deep signature는 실행 전후 불변으로 검증됐다.

@@ -10993,3 +10993,8 @@ incomplete and still requires managed caller unwind validation.
   resource를 깨뜨리던 문제를 확인해 lock을 TMPDIR 외부 경로로 이동했다.
   재빌드/codesign 검증과 packaged prepare 검증이 PASS했으며, 실제 실행 PID
   53868의 bundleID가 `dev.darwinart.host`이고 Host.app 경로임을 확인했다.
+- Checkpoint 1191 (2026-09-11): Astra 리뷰로 packaged Manager 실행 후
+  `button-dex/dex/oat`가 서명된 번들 내부에 생성되는 문제를 확인했다.
+  launcher가 profile 소유 `mnt/system/dex-cache/button-dex/classes.dex`를
+  사용하도록 변경했고, 실제 실행 후 `classes.vdex`가 profile cache에만
+  생성됐다. 실행 전후 `codesign --verify --deep --strict`가 모두 PASS했다.

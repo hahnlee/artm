@@ -387,7 +387,6 @@ okhttp="$root/_build/android16-ps16k-r07/extracted/art/javalib/okhttp.jar"
 # components through its boot-tail field.
 boot_tail="$framework_location:$conscrypt:$framework_bluetooth:$framework_mediaprovider:$framework_permission:$framework_permission_s:$okhttp:$core_icu"
 support_dex="$root/_build/button-dex/dex/classes.dex"
-export DARWIN_ART_RUNTIME_HOST_FILES="$core_oj:$core_libart:$framework:$boot_tail:$support_dex:$app_dex"
 fonts_xml="$root/probes/button/fonts.xml"
 roboto="$root/_aosp/external/skia/resources/fonts/Roboto-Regular.ttf"
 framework_res="$root/_prebuilt/android-16/resources/framework-res.apk"
@@ -398,6 +397,19 @@ if [[ ! -f "$support_dex" ]]; then
   fi
   cargo run -q -p art-bootstrap -- build-button-dex >/dev/null
 fi
+if [[ -n "$profile_mount" ]]; then
+  # The support probe DEX is also loaded by the profile's system server. ART
+  # may create oat/vdex beside any DEX it opens, so never point a packaged
+  # launch at the read-only signed Manager bundle. Keep a profile-owned copy
+  # with the same bytes and let dexopt place artifacts under this writable
+  # cache root.
+  support_dex_cache="$profile_mount/system/dex-cache/button-dex"
+  mkdir -p "$support_dex_cache"
+  cp "$support_dex" "$support_dex_cache/classes.dex"
+  chmod 0400 "$support_dex_cache/classes.dex"
+  support_dex="$support_dex_cache/classes.dex"
+fi
+export DARWIN_ART_RUNTIME_HOST_FILES="$core_oj:$core_libart:$framework:$boot_tail:$support_dex:$app_dex"
 for input in "$host" "$runtime" "$core_oj" "$core_libart" "$framework" "$framework_location" "$core_icu" "$conscrypt" "$framework_bluetooth" "$framework_mediaprovider" "$framework_permission" "$framework_permission_s" "$okhttp" "$support_dex" "$fonts_xml" "$roboto" "$framework_res"; do
   [[ -f "$input" ]] || {
     echo "runtime input is missing: $input" >&2
