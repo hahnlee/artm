@@ -14467,3 +14467,8 @@ or admission exception was added.
   frames_presented=7`, terminate service cleanup 성공을 확인했으며 Binder
   dispatcher 실패나 Java fatal은 없었다. 반복 acceptance 스크립트의 정체는
   단일 런 결과와 분리해 프로파일/빌드 잔여 프로세스 정리 후 재검증한다.
+
+- Checkpoint 1021 (2026-09-11): child table을 `stopping` fence와 함께 보호하고
+  spawn의 검사·생성·등록을 동일 admission lock 아래로 이동했다. shutdown/terminate는
+  fence 게시와 map detach 후 OS wait를 수행한다. 종료 중 spawn 거부는 확인했으나
+  반복 acceptance의 child-reaping PASS는 아직 닫지 않았다.

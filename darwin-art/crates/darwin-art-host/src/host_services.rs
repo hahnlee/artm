@@ -23,6 +23,11 @@ struct ManagedChild {
     child: Child,
 }
 
+struct ChildState {
+    stopping: bool,
+    children: HashMap<i32, ManagedChild>,
+}
+
 fn debug_child_status(pid: i32, phase: &str, status: &std::process::ExitStatus) {
     if env::var_os("DARWIN_ART_DEBUG_BINDER").is_some() {
         eprintln!(
@@ -37,7 +42,7 @@ fn debug_child_status(pid: i32, phase: &str, status: &std::process::ExitStatus) 
 pub(crate) struct ServiceProcessManager {
     executable: OsString,
     options: RunOptions,
-    children: Mutex<HashMap<i32, ManagedChild>>,
+    children: Mutex<ChildState>,
 }
 
 impl ServiceProcessManager {
@@ -48,7 +53,10 @@ impl ServiceProcessManager {
         Ok(Self {
             executable,
             options,
-            children: Mutex::new(HashMap::new()),
+            children: Mutex::new(ChildState {
+                stopping: false,
+                children: HashMap::new(),
+            }),
         })
     }
 
@@ -62,6 +70,16 @@ impl ServiceProcessManager {
     }
 
     fn spawn(&self, request: &ServiceRequest<'_>) -> Result<(i32, RawFd), String> {
+        // Hold the admission lock through process creation and registration.
+        // Shutdown takes the same lock and flips `stopping` before draining,
+        // so no JNI callback can register a child after teardown begins.
+        let mut state = self
+            .children
+            .lock()
+            .map_err(|_| "service child table poisoned".to_owned())?;
+        if state.stopping {
+            return Err("service process manager is stopping".to_owned());
+        }
         let (browser_stream, child_stream) =
             UnixStream::pair().map_err(|error| format!("service socketpair failed: {error}"))?;
         let inherited_fd = child_stream.into_raw_fd();
@@ -132,10 +150,7 @@ impl ServiceProcessManager {
                 browser_stream.as_raw_fd()
             );
         }
-        self.children
-            .lock()
-            .map_err(|_| "service child table poisoned".to_owned())?
-            .insert(pid, ManagedChild { child });
+        state.children.insert(pid, ManagedChild { child });
         Ok((pid, browser_stream.into_raw_fd()))
     }
 
@@ -148,6 +163,7 @@ impl ServiceProcessManager {
             .children
             .lock()
             .map_err(|_| "service child table poisoned".to_owned())?
+            .children
             .remove(&pid)
             .map(|managed| managed.child)
         else {
@@ -175,13 +191,17 @@ impl ServiceProcessManager {
         Ok(())
     }
 
-    pub(crate) fn shutdown_all(&mut self) -> Result<(), String> {
-        let children = self
-            .children
-            .get_mut()
-            .map_err(|_| "service child table poisoned".to_owned())?;
+    pub(crate) fn shutdown_all(&self) -> Result<(), String> {
+        let children = {
+            let mut state = self
+                .children
+                .lock()
+                .map_err(|_| "service child table poisoned".to_owned())?;
+            state.stopping = true;
+            std::mem::take(&mut state.children)
+        };
         let mut first_error = None;
-        for (_, mut managed) in children.drain() {
+        for (_, mut managed) in children {
             match managed.child.try_wait() {
                 Ok(Some(status)) => {
                     debug_child_status(
@@ -220,11 +240,15 @@ impl ServiceProcessManager {
     /// every child before waiting for any child so Chromium cannot observe a
     /// renderer death while another service is still live, then reap every
     /// child before the browser process exits.
-    pub(crate) fn terminate_for_process_exit(&mut self) -> Result<(), String> {
-        let children = self
-            .children
-            .get_mut()
-            .map_err(|_| "service child table poisoned".to_owned())?;
+    pub(crate) fn terminate_for_process_exit(&self) -> Result<(), String> {
+        let mut children = {
+            let mut state = self
+                .children
+                .lock()
+                .map_err(|_| "service child table poisoned".to_owned())?;
+            state.stopping = true;
+            std::mem::take(&mut state.children)
+        };
         let mut first_error = None;
         for managed in children.values_mut() {
             match managed.child.try_wait() {

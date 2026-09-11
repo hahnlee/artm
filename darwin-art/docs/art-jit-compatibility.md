@@ -10044,3 +10044,8 @@ incomplete and still requires managed caller unwind validation.
   service cleanup `ok=true`를 확인했고, 새 Binder dispatcher/READY 실패와
   uncaught/fatal marker는 없었다. 이전 90초 acceptance 스크립트 정체는 빌드/공유
   프로파일 잔여 프로세스 영향 가능성이 있어 단일 런 증거와 분리한다.
+
+- Checkpoint 1021 (2026-09-11): `ServiceProcessManager`를 `stopping + children`
+  단일 Mutex 상태로 바꾸고 spawn admission fence를 추가했다. 종료는 stopping을
+  먼저 게시하고 map을 detach한 뒤 unlock 후 kill/reap한다. 반복 runner에서 종료
+  직전 추가 spawn이 fence로 거부되는 증거를 얻었지만 child-reaping PASS는 보류한다.
