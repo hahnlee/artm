@@ -10412,3 +10412,10 @@ incomplete and still requires managed caller unwind validation.
   mean/stddev 0인 완전 검정이다. IL2CPP Boehm GC의 stop-the-world
   acknowledgment 대기(`libil2cpp+0x19c964c`)가 현재 첫 프레임 blocker로
   재현됐다. 이는 APK 수정이나 JIT 성공으로 간주하지 않는다.
+
+- Checkpoint 1080 (2026-09-11): Unity signal boundary 계측을 추가한 실험에서
+  첫 suspend는 `E30→sem_post→E24/X24→X30`으로 정상 전달됐지만 이후 동일
+  GC Finalizer에 대한 signal 30 제출은 성공해도 `E30`이 재진입하지 않았다.
+  명시적 host mask 복원 패치도 15초 게임 실행에서 nativeRender/검정 scanout을
+  바꾸지 못했고, 첫 사이클 이전 누락 실행도 관찰돼 해결책으로 입증되지 않았다.
+  해당 추측성 패치는 제거하고 계측 결과만 유지한다.

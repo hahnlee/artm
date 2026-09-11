@@ -14782,6 +14782,12 @@ or admission exception was added.
   IL2CPP Boehm GC의 stop-the-world acknowledgment 대기에서 멈추는 현상을
   재현했으므로, 첫 프레임/상호작용 acceptance는 아직 미완료다.
 
+- Checkpoint 1080 (2026-09-11): Unity GC Finalizer signal 계측에서 첫 suspend/
+  resume 한 쌍은 정상 전달됐지만 이후 signal 30은 `pthread_kill=0`에도
+  guest handler 진입이 재현되지 않았다. host mask를 명시 복원하는 실험 패치는
+  15초 실행에서 nativeRender와 검정 scanout을 개선하지 못해 제거했다. 현재
+  남은 문제는 실제 signal delivery 경계이며 추측성 우회로 해결을 주장하지 않는다.
+
 - Checkpoint 1066 (2026-09-11): 최신 JNI/HWUI 및 MAP_JIT 변경 후 ART JIT
   audit를 재실행해 Nterp, compiled/GC, VarHandle, invoke, Surface,
   MediaCodec, W^X 및 shutdown lifecycle 전체가 `RC=0`으로 통과했다.
