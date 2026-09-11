@@ -15301,3 +15301,7 @@ or admission exception was added.
 - Checkpoint 1178 (2026-09-11): metadata-first reservation 설계를 0040에
   적용하고 bootstrap은 통과했다. JIT audit는 reservation commit에서
   `KERN_INVALID_ADDRESS`가 남아 0039 remap 경로와의 통합 수정이 필요하다.
+- Checkpoint 1179 (2026-09-11): metadata reservation의 low_4gb 강제는
+  `KERN_INVALID_ADDRESS`를 재현했고, 일반 배치는 uint32 pair 조건을
+  충족하지 못했다. 다음은 low4g allocator를 우회하지 않으면서 유효한
+  reservation 주소를 반복 확보하는 구현이다.

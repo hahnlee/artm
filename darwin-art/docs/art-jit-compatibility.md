@@ -10941,3 +10941,7 @@ incomplete and still requires managed caller unwind validation.
   재생성했다. audit는 reservation commit 경로에서 여전히
   `KERN_INVALID_ADDRESS`를 보고해, 0039의 Darwin reservation remap 구현과
   통합 검증이 다음 과제로 남았다.
+- Checkpoint 1179 (2026-09-11): reservation을 low_4gb=true로 강제하면
+  기존 exact allocator의 `KERN_INVALID_ADDRESS`로 회귀했고, false로 두면
+  예약 주소가 executable과 uint32 범위를 만족하지 못했다. low_4gb 경로와
+  일반 VM 배치 사이의 명시적 주소 다양화가 필요하다.
