@@ -10834,3 +10834,7 @@ incomplete and still requires managed caller unwind validation.
 - Checkpoint 1159 (2026-09-11): fresh ledger가 976/1,076개까지 진행되어
   970 passed/6 failed이며 identity `eb468bf1…` 단일성을 유지한다. 프로세스는
   정상 실행 중이고 남은 항목 완료 후 순차 재검증을 진행한다.
+
+- Checkpoint 1160 (2026-09-11): fresh ledger가 1,007/1,076개까지 진행되어
+  1,001 passed/6 failed이며 identity `eb468bf1…` 단일성을 유지한다. 실행은
+  정상 진행 중이고, 마지막 항목 완료 후 순차 재검증을 시작한다.
