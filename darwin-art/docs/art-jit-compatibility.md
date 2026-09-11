@@ -11123,3 +11123,8 @@ incomplete and still requires managed caller unwind validation.
   `registrar=51 fake-symbols=0 host-icu=0 host-fmt=0 CoreText=0`으로
   링크 감사가 PASS했다. 이는 closure 증거이며 전체 산출물 byte identity
   증명과는 별도 항목으로 유지한다.
+- Checkpoint 1215 (2026-09-11): `tools/audit-native-graph.sh`를 재실행했다.
+  graph digest `6c441b7e…02cbd2dc`, runtime 258, graphics-jni 63,
+  ICU 458, cached TU 809, archives 8, phases 12를 확인했고 depfile 기반
+  warm no-op 및 direct-source invalidation이 PASS했다. 재현 가능한 graph
+  identity 증거를 갱신했으며 최종 링크 byte hash는 별도 산출물로 유지한다.

@@ -15461,3 +15461,8 @@ or admission exception was added.
   재검증했다. registrar 51, fake symbols 0, host ICU/fmt/CoreText 0으로
   PASS했으며, 링크 closure와 reproducible 전체 artifact identity는
   혼동하지 않도록 별도 검증 대상으로 남긴다.
+- Checkpoint 1215 (2026-09-11): native graph audit를 재실행했다.
+  digest `6c441b7e…02cbd2dc`, 809 cached TU, 8 archives, 12 phases,
+  gcc depfiles, warm no-op, direct-source invalidation이 모두 PASS했다.
+  따라서 단일 graph 입력 identity는 재현되지만, 최종 dylib/archive의
+  byte-for-byte identity는 별도 검증 항목으로 남아 있다.
