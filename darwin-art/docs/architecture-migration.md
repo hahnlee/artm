@@ -14671,3 +14671,8 @@ or admission exception was added.
 - Checkpoint 1056 (2026-09-11): MAP_JIT 수정 뒤 실제 Calculator APK 실행과
   optimized JIT audit가 모두 `RC=0`으로 통과했다. shutdown 시 HWUI worker의
   JNI detach 경고가 남아 native-thread ownership 계약은 다음 gate로 유지한다.
+
+- Checkpoint 1057 (2026-09-11): stale `--window-seconds 0` host를 종료해
+  장기 실행 프로세스가 shutdown 측정을 오염시키지 않도록 정리했다. 사용자
+  변경 외 소스 수정은 없으며, HWUI worker JNI detach ownership 통합은 Astra
+  검토 결과를 반영할 다음 acceptance gate다.

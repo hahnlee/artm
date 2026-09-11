@@ -10273,3 +10273,8 @@ incomplete and still requires managed caller unwind validation.
   최신 MAP_JIT 수정 후 모두 `RC=0`으로 통과했고 주소 불일치는 재현되지 않았다.
   shutdown 시 HWUI worker JNI detach 경고가 남아 native-thread ownership gate는
   아직 닫지 않았다.
+
+- Checkpoint 1057 (2026-09-11): 장기 실행 중이던 stale `--window-seconds 0`
+  host를 종료해 shutdown 관측 오염을 제거했다. 사용자 소유 `foundation.rs`
+  변경은 보존했고, HWUI worker JNI detach 공통 owner 통합은 Astra 검토 후
+  다음 gate로 진행한다.
