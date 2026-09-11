@@ -10954,3 +10954,7 @@ incomplete and still requires managed caller unwind validation.
   `ART empty checkpoint mutex contention PASS`와 전체 JIT 기능별 PASS를
   확인했다. JIT 증거 ledger는 현재 runtime artifact 기준으로 닫혔고,
   변경 없는 APK acceptance로 다음 단계가 이동했다.
+- Checkpoint 1182 (2026-09-11): Astra가 Blue Archive 물리 입력 미검증 원인을
+  APK shim이 실제 창 owner가 아닌 daemon launcher를 실행하는 구조로 확정했다.
+  실제 `darwin-art-host`를 CFBundleExecutable로 갖는 Host.app 패키징과
+  NSRunningApplication/CUA identity 검증이 다음 acceptance 작업이다.

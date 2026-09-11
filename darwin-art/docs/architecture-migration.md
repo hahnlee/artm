@@ -15313,3 +15313,6 @@ or admission exception was added.
   empty-checkpoint mutex contention과 기능별 JIT acceptance가 모두 PASS했다.
   이제 남은 범위는 Chromium HTTPS와 Blue Archive의 실제 물리 입력/게임
   acceptance다.
+- Checkpoint 1182 (2026-09-11): Blue Archive의 CUA 미등록 원인은 LSUIElement
+  shim과 별도 daemon host 분리로 확인됐다. 실제 host executable을 소유하는
+  `.app` bundle과 OS 입력 경로 검증이 필요하며, APK 변경은 하지 않는다.
