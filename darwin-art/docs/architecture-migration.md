@@ -14455,3 +14455,9 @@ or admission exception was added.
   가능성이 우선이다. 따라서 부모 GPU loop 경계와 자식 wire-ready/dispatcher
   경계를 별도 계측해야 하며, `binder=ready` 문자열만으로 전송 성공을 판정하지
   않는다.
+
+- Checkpoint 1019 (2026-09-11): Binder 자식의 READY 경계(NewGlobalRef,
+  GetJavaVM, dispatcher thread, sendmsg)에 PID/FD/generation 진단을 추가했다.
+  incremental graphics audit는 통과했으며 실제 `example.com` 5초 실행은
+  `RC=0`, GPU loop 정상 종료(`frames_presented=1`)였다. 부모/자식 오류 귀속을
+  섞지 않도록 다음 단계는 장시간 pointer lifecycle의 별도 재현이다.

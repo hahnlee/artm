@@ -2292,7 +2292,12 @@ bool SendWireMessage(int fd, const WireHeader& header,
     sent = sendmsg(fd, &message, 0);
   } while (sent < 0 && errno == EINTR);
   for (int exported : host_descriptors) (void)close(exported);
-  if (sent <= 0) return false;
+  if (sent <= 0) {
+    if (std::getenv("DARWIN_ART_DEBUG_BINDER") != nullptr)
+      std::cerr << "ART Binder wire: send failure pid=" << getpid()
+                << " fd=" << fd << " errno=" << errno << "\n";
+    return false;
+  }
   const size_t prefix = static_cast<size_t>(sent);
   return prefix >= bytes.size() ||
          WriteAll(fd, bytes.data() + prefix, bytes.size() - prefix);
@@ -2848,7 +2853,12 @@ bool DequeueFrameworkKeyPacket(DarwinArtKeyEventV1* packet) {
 bool StartRemoteBinderDispatcher(JNIEnv* env, jint control_fd) {
   if (env == nullptr || control_fd < 0) return false;
   JavaVM* vm = nullptr;
-  if (env->GetJavaVM(&vm) != JNI_OK || vm == nullptr) return false;
+  if (env->GetJavaVM(&vm) != JNI_OK || vm == nullptr) {
+    if (std::getenv("DARWIN_ART_DEBUG_BINDER") != nullptr)
+      std::cerr << "ART Binder wire: dispatcher GetJavaVM failure pid="
+                << getpid() << " fd=" << control_fd << "\n";
+    return false;
+  }
   uint64_t generation = 0;
   {
     std::lock_guard<std::recursive_mutex> lock(g_wire_mutex);
@@ -2864,6 +2874,10 @@ bool StartRemoteBinderDispatcher(JNIEnv* env, jint control_fd) {
   try {
     std::thread(RunRemoteBinderDispatcher, vm, control_fd, generation).detach();
   } catch (...) {
+    if (std::getenv("DARWIN_ART_DEBUG_BINDER") != nullptr)
+      std::cerr << "ART Binder wire: dispatcher thread failure pid="
+                << getpid() << " fd=" << control_fd
+                << " generation=" << generation << "\n";
     std::lock_guard<std::recursive_mutex> lock(g_wire_mutex);
     auto connection = g_wire_connections.find(control_fd);
     if (connection != g_wire_connections.end() &&
@@ -2887,7 +2901,13 @@ bool StartServingRemoteBinder(JNIEnv* env, jint control_fd,
     }
     if (!connection.local_binders.contains(1)) {
       jobject published = env->NewGlobalRef(local_binder);
-      if (published == nullptr) return false;
+      if (published == nullptr) {
+        if (std::getenv("DARWIN_ART_DEBUG_BINDER") != nullptr)
+          std::cerr << "ART Binder wire: NewGlobalRef failure pid=" << getpid()
+                    << " fd=" << control_fd
+                    << " generation=" << connection.generation << "\n";
+        return false;
+      }
       connection.local_binders.emplace(1, published);
     }
     if (connection.class_loader == nullptr) {
@@ -2913,6 +2933,10 @@ bool StartServingRemoteBinder(JNIEnv* env, jint control_fd,
     WireHeader ready;
     ready.type = kWireReady;
     if (!SendWireMessage(control_fd, ready, {}, {}, {})) {
+      if (std::getenv("DARWIN_ART_DEBUG_BINDER") != nullptr)
+        std::cerr << "ART Binder wire: ready send failure pid=" << getpid()
+                  << " fd=" << control_fd
+                  << " generation=" << connection.generation << "\n";
       for (const auto& [target, binder] : connection.local_binders) {
         static_cast<void>(target);
         env->DeleteGlobalRef(binder);
@@ -2925,7 +2949,11 @@ bool StartServingRemoteBinder(JNIEnv* env, jint control_fd,
     }
     connection.ready = true;
   }
-  return StartRemoteBinderDispatcher(env, control_fd);
+  const bool dispatcher = StartRemoteBinderDispatcher(env, control_fd);
+  if (!dispatcher && std::getenv("DARWIN_ART_DEBUG_BINDER") != nullptr)
+    std::cerr << "ART Binder wire: dispatcher start failure pid=" << getpid()
+              << " fd=" << control_fd << "\n";
+  return dispatcher;
 }
 
 bool SendServiceBindIntent(JNIEnv* env, jint control_fd, jobject intent) {

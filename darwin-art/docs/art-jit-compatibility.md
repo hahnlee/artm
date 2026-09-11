@@ -10030,3 +10030,10 @@ incomplete and still requires managed caller unwind validation.
   status=27은 부모 run_request 실패로 단정하지 않고, 기존 child가 종료된 뒤
   늦게 시작한 자식의 ready 전 채널/dispatcher 오류로 분리한다. `binder=ready`는
   StartServingRemoteBinder 이전 로그일 수 있으므로 wire-ready 증거와 구분한다.
+
+- Checkpoint 1019 (2026-09-11): `StartServingRemoteBinder`/dispatcher의
+  NewGlobalRef·GetJavaVM·thread·READY 전송 및 sendmsg 실패에 PID/FD/generation
+  계측을 추가하고 incremental graphics audit를 통과했다. `example.com` VIEW
+  5초 런은 `RC=0`, `gpu-loop exit status=0 frames_presented=1`로 완료됐고 새
+  실패 phase는 발생하지 않았다. status=27은 재현되지 않아 다음 acceptance에서
+  장시간 pointer lifecycle과 자식 종료 경합을 분리해 재현한다.
