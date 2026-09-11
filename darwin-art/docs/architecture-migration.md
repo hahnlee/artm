@@ -15364,3 +15364,8 @@ or admission exception was added.
   실행할 때 0400 파일을 안전하게 갱신하도록 권한 전환을 국소화했다.
   최신 변경 없는 AOSP Calculator/DeskClock acceptance가 각각 계산 결과와
   Timer 페이지, HWUI·SurfaceFlinger·Metal visible buffer를 모두 재검증했다.
+- Checkpoint 1195 (2026-09-11): Chromium 변경 없는 APK 재검증에서 첫
+  TabSwitcherButtonView의 물리 입력 소비는 확인했으나 탭 그리드 전환은
+  확인되지 않았다. 두 번째 좌표가 SuggestionsTileView에 도달했으며,
+  JIT 상태와 기본 profile의 타 앱 Surface 혼입을 분리한 재현 harness가
+  다음 작업이다. 현재 Chromium acceptance는 미완료로 유지한다.

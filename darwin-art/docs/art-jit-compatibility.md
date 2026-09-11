@@ -11012,3 +11012,9 @@ incomplete and still requires managed caller unwind validation.
   재개방 후 다시 봉인하며, 현재 `aosp-core-apps-graphics-acceptance`가
   변경 없는 Calculator `2+3=5`와 DeskClock Timer 전환을 HWUI+
   SurfaceFlinger+Metal 경로에서 PASS했다.
+- Checkpoint 1195 (2026-09-11): 최신 Chromium APK 게이트를 재실행했다.
+  TabSwitcherButtonView 입력과 hold(19.43ms)는 통과했지만 JIT 활성 실행에서
+  10초 뒤에도 TabGridView 전환이 발생하지 않아 두 번째 입력이
+  SuggestionsTileView를 선택했다. Astra 분석상 이전 interpreter-fallback
+  PASS와의 JIT A/B 및 기본 profile의 Blue Archive 프레임 오염 분리가
+  필요하며, 이번 결과를 acceptance PASS로 승격하지 않았다.
