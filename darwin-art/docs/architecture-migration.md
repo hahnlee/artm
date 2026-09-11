@@ -14927,3 +14927,8 @@ or admission exception was added.
   ledger 1,076개는 모두 `passed`이며 current runtime identity 갱신 항목이
   338개로 증가했다. 디스크 여유는 75GiB, refresh ledger는 36MiB로 확인되어
   저장공간 압박 없이 실행을 유지한다.
+
+- Checkpoint 1102 (2026-09-11): corpus refresh가 12분 이상 생존한 것을
+  재확인했다. 전체 1,076개 결과는 모두 `passed`이며 current runtime identity
+  갱신 항목은 370개다. 장시간 테스트가 포함된 AOSP 순서를 유지하고 임의 중단이나
+  재시작은 하지 않았다.
