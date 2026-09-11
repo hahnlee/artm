@@ -14415,3 +14415,8 @@ or admission exception was added.
   최신 실행은 instance=20에서 child 준비 전 `wait-ready-dispatcher errno=9`
   (EBADF)로 종료됐다. 앞선 20개 child의 `INTERFACE_TRANSACTION` 응답은 정상이며,
   다음 단계는 child startup 실패 또는 channel 수명 경합의 직접 원인 수집이다.
+
+- Checkpoint 1012 (2026-09-11): 실제 debug host로 `example.com` VIEW를 재실행해
+  service spawn PID/control-fd와 Binder wait phase를 함께 기록했다. instance=20
+  child까지 spawn은 성공했으나 준비 전 채널이 EBADF로 닫혔다. descriptor 응답은
+  앞선 child들에서 모두 정상이다. 변경은 `88ba146e` 후속 진단으로 반영·푸시했다.

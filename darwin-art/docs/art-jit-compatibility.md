@@ -9987,3 +9987,9 @@ incomplete and still requires managed caller unwind validation.
   마지막 child는 spawn 직후 `wait-ready-dispatcher errno=9 (EBADF)`로
   channel이 사라졌다. 이 증거는 descriptor 계약 문제가 아니라 child startup
   또는 channel lifetime 경합임을 재확인한다.
+
+- Checkpoint 1012 (2026-09-11): 최신 host 진단 빌드에서 Chromium은 instance=0~19
+  child를 정상 준비했지만 instance=20 직후 `wait-ready-dispatcher errno=9`
+  로 실패했다. 실패 child는 ART heap 초기화까지만 남고 `binder=ready`를 출력하지
+  않았다. host spawn 로그를 추가해 spawn 자체 성공을 확인했으며, 다음은 child
+  초기화 중 종료 상태/시그널을 수집하는 단계다.
