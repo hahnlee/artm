@@ -15037,3 +15037,8 @@ or admission exception was added.
   `run-art-upstream-corpus.py --resume --parallel 8`을 현재 산출물 기준으로
   재실행했다. 프로세스와 8개 worker가 살아 있으며, 완료 전 결과를 PASS로
   승격하지 않는다.
+
+- Checkpoint 1124 (2026-09-11): fresh corpus 실행 중 host/artifact가 변경되어
+  identity가 다시 섞이는 현상을 Astra와 확인했다. 잘못된 귀속을 막기 위해 runner가
+  각 완료 batch 전에 runtime identity를 재계산하고 시작값과 다르면 추가 ledger
+  기록 없이 중단하도록 수정했다. `tools/test_art_upstream_corpus.py` 9개는 통과했다.

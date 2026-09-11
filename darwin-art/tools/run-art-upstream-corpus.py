@@ -301,6 +301,18 @@ def _run_parallel(root: Path, runner: Path, tests: list[str], ledger_dir: Path,
             active[submit(executor, test)] = test
         while active:
             done, _ = wait(active, return_when=FIRST_COMPLETED)
+            # The runner identity is captured before dispatch.  A concurrent
+            # build must never be allowed to stamp later results with an
+            # identity different from the one that was actually prepared.
+            # Abort before publishing another row; callers can rerun after
+            # quiescing the build graph.
+            observed_digest = runtime_identity(root)
+            if observed_digest != runtime_digest:
+                for future in active:
+                    future.cancel()
+                raise RuntimeError(
+                    "runtime identity changed during corpus execution: "
+                    f"started={runtime_digest} observed={observed_digest}")
             # Completion order is intentionally normalized before writing the
             # ledger, keeping JSON/TSV content deterministic.
             completed = sorted(
