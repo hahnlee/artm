@@ -15266,3 +15266,10 @@ or admission exception was added.
   scanout을 독립 확인했다. GC acknowledgment 검정 blocker는 재현되지
   않았다. Notice 시점을 맞춘 물리 Cancel 클릭의 전후 상태는 아직 증명하지
   않았으므로 생산 코드 수정 없이 해당 acceptance를 보류한다.
+
+- Checkpoint 1172 (2026-09-11): 최신 runtime으로 60초 물리 입력 전용
+  Blue Archive 실행이 RC=0으로 종료됐다. `nativeRender` 3,113회가 정상
+  반환했고 중간·최종 scanout에서 Notice 화면이 유지됐다. CUA가 비등록
+  Darwin ART host를 제어 대상으로 노출하지 않아 실제 클릭 이벤트는 보내지
+  못했으므로 Cancel DOWN/UP acceptance는 여전히 미검증이다. 산출물은
+  `_build/bluearchive-physical.TAg22f/`에 있다.
