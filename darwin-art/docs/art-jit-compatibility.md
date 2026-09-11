@@ -10781,3 +10781,7 @@ incomplete and still requires managed caller unwind validation.
   189개 항목 중 187 passed/2 failed, 모두 identity `eb468bf1…`이다. 기존
   MAP_JIT 범위 오류는 대표 6개 단독 재실행에서 해소됐고, 새 실패는 종료 후
   개별 원인을 분리한다.
+
+- Checkpoint 1149 (2026-09-11): post-allocator fresh ledger가 약 4분째 진행
+  중이며 204개 항목을 동일 identity `eb468bf1…`로 기록했다(202 passed,
+  133-static-invoke-super와 137-cfi 2 failed). 두 실패는 종료 후 단독 재현한다.
