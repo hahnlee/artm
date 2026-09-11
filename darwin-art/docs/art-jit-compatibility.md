@@ -10629,3 +10629,8 @@ incomplete and still requires managed caller unwind validation.
   base+split APK도 실제 설치·Unity/IL2CPP arm64 초기화·NativeBridge/네트워크 TLS
   경로까지 30초 실행 후 정상 종료했다. 로그인/다운로드/전투 입력은 계정·콘텐츠
   의존성이므로 별도 미완료 acceptance로 유지한다.
+
+- Checkpoint 1116 (2026-09-11): `cargo test -p darwin-art-host`(8 tests)와
+  `cargo test -p art-bootstrap`(14 tests)가 모두 통과했다. JNI attachment,
+  host graphics/input, bootstrap build-contract 회귀를 현재 shutdown/identity
+  산출물과 함께 재확인했다.
