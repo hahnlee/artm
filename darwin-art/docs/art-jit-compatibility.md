@@ -11181,3 +11181,9 @@ incomplete and still requires managed caller unwind validation.
   없어 Ninja materialize/query 기반 byte identity를 증명할 수 없었다.
   graphics dylib와 달리 headless 최종 artifact를 graph 소유 target으로
   승격하는 작업을 명시적 남은 gap으로 유지한다.
+- Checkpoint 1228 (2026-09-11): headless shutdown probe가 graphics 전용
+  `ShutdownFrameworkAsyncWorkers()`를 무조건 참조해 `undefined=1`이던
+  문제를 발견·수정했다. headless `audit-runtime-link`가
+  `undefined=0 exports=15`로 PASS했고, 새
+  `tools/audit-headless-artifact-identity.sh`가 동일 audit 두 번의
+  SHA-256 `c74d5709…f4ce7d` 일치를 확인했다.

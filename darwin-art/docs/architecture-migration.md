@@ -15512,3 +15512,7 @@ or admission exception was added.
   직접 생산하지 않아 기존 파일 hash만으로는 reproducible identity를
   입증할 수 없음을 확인했다. graphics target과 동일한 Ninja 소유 edge와
   warm 재현 검증을 추가하는 것이 1단계의 남은 build-contract gap이다.
+- Checkpoint 1228 (2026-09-11): headless flavor에서 HWUI async-worker
+  shutdown 호출을 graphics 조건부로 분리해 C ABI undefined symbol을
+  제거했다. runtime-link `undefined=0 exports=15`와 동일 audit 두 번의
+  headless dylib hash 일치가 PASS해 실제 byte identity 스크립트를 확보했다.
