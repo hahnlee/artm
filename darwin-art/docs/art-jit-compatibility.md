@@ -10757,3 +10757,8 @@ incomplete and still requires managed caller unwind validation.
   1,070 passed / 6 failed이다. 여섯 실패는 모두 interpreter PASS 후
   MAP_JIT data/code uint32 거리 초과로 optimized compilation이 status=123이 된
   allocator 경계이며, shutdown은 정상이다.
+
+- Checkpoint 1144 (2026-09-11): 최종 summary와 runner 종료 출력을 재확인했다.
+  1,076개 전부 동일 identity `26ba01e4…`로 기록되며 1,070 passed/6 failed다.
+  실패는 `024`, `582`, `642`, `726`, `949`, `2256`이고 모두 optimized
+  compilation 단계 status=123으로, 0040 MAP_JIT allocator 수정이 남아 있다.
