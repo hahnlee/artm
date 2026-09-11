@@ -10970,3 +10970,7 @@ incomplete and still requires managed caller unwind validation.
   추가하고 launcher가 `DARWIN_ART_HOST_BUNDLE` override를 사용하도록 했다.
   Host.app의 CFBundleExecutable/LSUIElement/signature 검증이 PASS했다.
   실제 Blue Archive CUA 입력은 다음 단계에서 실행한다.
+- Checkpoint 1186 (2026-09-11): 새 Manager build를 실제로 실행해 Darwin ART
+  앱 목록과 Blue Archive 설치 항목이 CUA 접근성 트리에 노출되는 것을 확인했다.
+  Host.app bundle은 서명 검증을 통과했고, 실제 Blue Archive 실행/Cancel 입력은
+  다음 단계에서 수행한다.

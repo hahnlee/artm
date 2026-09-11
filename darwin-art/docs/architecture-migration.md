@@ -15328,3 +15328,7 @@ or admission exception was added.
   executable을 소유하는 signed Host.app을 생성한다. launcher override와
   bundle metadata/codesign 검증은 PASS했으며, 실제 창 owner 및 물리 Cancel
   전후 프레임 검증이 남아 있다.
+- Checkpoint 1186 (2026-09-11): Manager GUI가 실행되고 설치된 앱 목록과
+  Blue Archive 항목이 접근성 트리에 노출됐다. Host.app 자체 bundle 검증은
+  통과했지만 실제 launch 후 창 owner가 Host.app인지 확인하는 acceptance가
+  아직 남아 있다.
