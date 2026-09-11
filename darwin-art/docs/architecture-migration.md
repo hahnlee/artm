@@ -15452,3 +15452,7 @@ or admission exception was added.
   `tools/test-hwui-jni-attachment.sh`로 재실행했다. owned thread 100개,
   borrowed 1개, explicit detach 1개가 PASS했고 `ART-TLS-exit=0`으로
   TLS destructor가 VM 소유 attachment를 잘못 해제하지 않음을 확인했다.
+- Checkpoint 1213 (2026-09-11): profile daemon audit를 재실행했다.
+  case-sensitive filesystem, persistent registry, leased process execution,
+  lease-protected shutdown 네 계약이 모두 PASS해 VM 종료 시 서비스와
+  프로필 소유권이 분리되지 않음을 확인했다.

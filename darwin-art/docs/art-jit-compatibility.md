@@ -11113,3 +11113,7 @@ incomplete and still requires managed caller unwind validation.
   재실행해 native-thread/JNI ownership 계약을 확인했다. 결과는
   `owned=100 borrowed=1 explicit-detach=1 ART-TLS-exit=0` PASS이며,
   ART TLS 종료가 임의로 detach를 수행하지 않는 AOSP 경계를 유지한다.
+- Checkpoint 1213 (2026-09-11): `tools/audit-profile-daemon.sh`를
+  재실행해 VM 서비스 수명 계약을 확인했다. case-sensitive profile,
+  persistent registry, leased process-exec, lease-protected shutdown이
+  모두 PASS했다.
