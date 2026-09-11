@@ -103,7 +103,8 @@ run; it must not be asserted as the demonstrated cause of this black screen.
 
 ## Diagnostic-only source status
 
-Temporary opt-in instrumentation remains uncommitted in:
+Opt-in instrumentation is committed in `a60d9674` (diagnostic-only; it is
+disabled unless the explicit environment variables are set):
 
 - `compat/darwin_surface_bridge.mm` (`DARWIN_ART_DIAGNOSTIC_FRAME_PREFIX`);
 - `compat/darwin_runtime_jni_registration.cc` (self-process nativeRender
@@ -111,7 +112,7 @@ Temporary opt-in instrumentation remains uncommitted in:
 - `tools/android-bionic-pthread-provider/src/provider.cc`
   (`DARWIN_ART_DEBUG_PTHREAD_SIGNALS`).
 
-Do not classify or commit these as a compatibility fix. Capture does no GPU
+Do not classify these as a compatibility fix. Capture does no GPU
 readback/allocation/wait when unset. Watcher code is only reachable with the
 existing Unity lifecycle diagnostic wrapper plus its explicit stall option;
 its completion flag has static lifetime, thread rights are retained/released,
