@@ -14793,6 +14793,12 @@ or admission exception was added.
   `nativeRender` 전에 정체되어 `RC=137`이 됐다. AOSP sigreturn 동작과 일치하지
   않는 변경이므로 제거했고, 현재 런타임은 검증된 baseline 상태다.
 
+- Checkpoint 1082 (2026-09-11): AOSP sigchain은 handled special handler의
+  마스크 복원을 kernel sigreturn에 위임하므로 Darwin dispatcher의 반환 순서를
+  바꾸는 실험을 해결책으로 채택하지 않았다. 실제 Blue Archive 재실행도
+  개선되지 않았고, 다음 수정 경계는 host pending/mask와 chain delivery의
+  직접 계측으로 유지한다.
+
 - Checkpoint 1066 (2026-09-11): 최신 JNI/HWUI 및 MAP_JIT 변경 후 ART JIT
   audit를 재실행해 Nterp, compiled/GC, VarHandle, invoke, Surface,
   MediaCodec, W^X 및 shutdown lifecycle 전체가 `RC=0`으로 통과했다.

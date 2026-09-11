@@ -10425,3 +10425,9 @@ incomplete and still requires managed caller unwind validation.
   Archive가 `nativeRender` 이전 startup에서 CPU 정체되어 `RC=137`로 종료됐다.
   이는 AOSP의 kernel sigreturn 계약을 바꾸는 해결책으로 입증되지 않아 즉시
   revert했으며, 공식 소스는 baseline으로 복원했다.
+
+- Checkpoint 1082 (2026-09-11): Astra가 special-handler mask fingerprint와
+  `DispatchUserHandler` 경계를 대조했다. AOSP도 handled special handler에서
+  kernel sigreturn에 맡기므로 반환 순서 변경은 계약상 근거가 없고 실제 실행도
+  실패했다. 현재 baseline에서 문제는 첫 signal 이후 host pending/mask 또는
+  chain delivery 경계로 한정되며, 추가 생산 수정 없이 계측 대상으로 유지한다.
