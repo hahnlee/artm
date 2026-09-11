@@ -1426,10 +1426,64 @@ static DarwinArtSurfaceResult PresentSurfaceOnMain(
             destinationSlice:0
             destinationLevel:0
            destinationOrigin:origin];
+    // Opt-in acceptance artifact: copy the exact scanout source on the same
+    // command buffer. No screen capture API, app callback, or APK change is
+    // involved. The normal path does not allocate or wait for a readback.
+    static const char* diagnostic_prefix =
+        std::getenv("DARWIN_ART_DIAGNOSTIC_FRAME_PREFIX");
+    static double diagnostic_last_time = 0;
+    static uint64_t diagnostic_sequence = 0;
+    id<MTLBuffer> diagnostic_pixels = nil;
+    const size_t diagnostic_stride =
+        (static_cast<size_t>(surface->width) * 4 + 255) & ~size_t(255);
+    if (diagnostic_prefix != nullptr && diagnostic_prefix[0] != '\0' &&
+        CACurrentMediaTime() - diagnostic_last_time >= 2.0) {
+      diagnostic_last_time = CACurrentMediaTime();
+      diagnostic_pixels = [surface->device
+          newBufferWithLength:diagnostic_stride * surface->height
+                      options:MTLResourceStorageModeShared];
+      if (diagnostic_pixels != nil) {
+        [encoder copyFromTexture:surface->io_surface_texture
+                     sourceSlice:0 sourceLevel:0 sourceOrigin:origin
+                      sourceSize:size toBuffer:diagnostic_pixels
+               destinationOffset:0 destinationBytesPerRow:diagnostic_stride
+           destinationBytesPerImage:diagnostic_stride * surface->height];
+      }
+    }
     [encoder endEncoding];
     [command_buffer presentDrawable:drawable];
     [command_buffer commit];
     surface->last_command_buffer = command_buffer;
+    if (diagnostic_pixels != nil) {
+      [command_buffer waitUntilCompleted];
+      if (command_buffer.status == MTLCommandBufferStatusCompleted) {
+        NSBitmapImageRep* bitmap = [[NSBitmapImageRep alloc]
+            initWithBitmapDataPlanes:nullptr pixelsWide:surface->width
+            pixelsHigh:surface->height bitsPerSample:8 samplesPerPixel:4
+            hasAlpha:YES isPlanar:NO colorSpaceName:NSDeviceRGBColorSpace
+            bitmapFormat:0 bytesPerRow:surface->width * 4 bitsPerPixel:32];
+        if (bitmap != nil) {
+          const auto* source = static_cast<const uint8_t*>(diagnostic_pixels.contents);
+          uint8_t* destination = bitmap.bitmapData;
+          for (uint32_t y = 0; y < surface->height; ++y) {
+            for (uint32_t x = 0; x < surface->width; ++x) {
+              const uint8_t* bgra = source + y * diagnostic_stride + x * 4;
+              uint8_t* rgba = destination + (y * surface->width + x) * 4;
+              rgba[0] = bgra[2]; rgba[1] = bgra[1];
+              rgba[2] = bgra[0]; rgba[3] = bgra[3];
+            }
+          }
+          NSString* path = [NSString stringWithFormat:@"%s-%06llu.png",
+              diagnostic_prefix, ++diagnostic_sequence];
+          NSData* png = [bitmap representationUsingType:NSBitmapImageFileTypePNG
+                                           properties:@{}];
+          const bool written = png != nil && [png writeToFile:path atomically:YES];
+          std::fprintf(stderr, "DARWIN_ART diagnostic scanout frame=%llu size=%ux%u written=%d path=%s\n",
+              diagnostic_sequence, surface->width, surface->height,
+              written, path.UTF8String);
+        }
+      }
+    }
   }
   return DARWIN_ART_SURFACE_OK;
 }

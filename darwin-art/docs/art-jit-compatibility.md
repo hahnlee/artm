@@ -9567,6 +9567,17 @@ incomplete and still requires managed caller unwind validation.
   acceptance도 Calculator `2+3=5`, DeskClock Timer, HWUI+
   SurfaceFlinger+Metal 경로로 `RC=0`이었다.
 
+- Checkpoint 1075 (2026-09-11): 변경 없는 Blue Archive base+split을 최신
+  runtime으로 실행하고 opt-in scanout/watcher를 사용했다. APK는 Unity/IL2CPP
+  초기화와 309개 JNI 등록까지 도달했지만 첫 `nativeRender`가 IL2CPP Boehm
+  GC stop-the-world acknowledgment 대기(`libil2cpp.so+0x19c964c`,
+  `__semwait_signal`/`usleep`)에 머물러 scanout PNG가 검정이었다. Android
+  signal 30→Darwin SIGINFO 29 `pthread_kill`은 50회 모두 성공했으나
+  acknowledgment는 관측되지 않았다. sem_post mutex deadlock은 snapshot에서
+  발견되지 않았으며, signal mask 복원/guest trampoline 경계를 다음 수정
+  대상으로 남긴다. 상세 로그와 재현 절차는
+  `docs/bluearchive-first-frame-diagnosis-20260911.md`에 기록했다.
+
 - Checkpoint 938 (2026-09-10): 변경 없는 Blue Archive 1.93.454564를
   최신 runtime으로 15초 실행했다. `libmain.so`·`libil2cpp.so` graph
   로드, Unity RegisterNatives 309건 및 후속 등록 세트, Unity 초기화와

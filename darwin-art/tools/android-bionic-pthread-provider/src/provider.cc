@@ -110,6 +110,19 @@ int AndroidSignal(int host_signal) {
   return 0;
 }
 
+void TraceSignalMask(const char* phase, uint64_t token) {
+  if (std::getenv("DARWIN_ART_DEBUG_PTHREAD_SIGNALS") == nullptr) return;
+  static std::atomic<unsigned> observed{0};
+  if (observed.fetch_add(1) >= 150) return;
+  sigset_t mask{};
+  struct sigaction action{};
+  pthread_sigmask(SIG_SETMASK, nullptr, &mask);
+  sigaction(SIGINFO, nullptr, &action);
+  std::fprintf(stderr, "DARWIN pthread mask phase=%s token=%llu mask=%x siginfo_blocked=%d handler=%p flags=%x\n",
+      phase, static_cast<unsigned long long>(token), mask,
+      sigismember(&mask, SIGINFO), reinterpret_cast<void*>(action.sa_handler), action.sa_flags);
+}
+
 struct KeyEntry {
   uint32_t slot{};
   uint64_t generation{};
@@ -360,9 +373,11 @@ void* HostOwnedThreadStart(void* opaque) {
     while (!entry->published) entry->startup_condition.wait(lock);
   }
   current_thread_token = static_cast<uint64_t>(entry->token);
+  TraceSignalMask("before-ART-attach", current_thread_token);
   if (darwin_art_attach_native_thread != nullptr) {
     g_art_provider_attachment = darwin_art_attach_native_thread() > 0;
   }
+  TraceSignalMask("after-ART-attach", current_thread_token);
   if (std::getenv("DARWIN_ART_DEBUG_PTHREAD_WAITS") != nullptr) {
     std::fprintf(stderr,
                  "DARWIN pthread thread-start token=%llu routine=%p argument=%p\n",
@@ -1278,6 +1293,7 @@ extern "C" int darwin_art_bionic_pthread_setname_np(
     DarwinArtAndroidPthread token, const char* name) {
   if (name == nullptr) return kAndroidEinval;
   if (token != CurrentThreadToken()) return kAndroidEnotsup;
+  TraceSignalMask(name, token);
   if (std::getenv("DARWIN_ART_DEBUG_PTHREAD_WAITS") != nullptr) {
     std::fprintf(stderr,
                  "DARWIN pthread setname token=%llu name=%s caller=%p\n",
@@ -1298,7 +1314,17 @@ extern "C" int darwin_art_bionic_pthread_kill(
   if (entry == nullptr) return kAndroidEsrch;
   std::lock_guard<std::mutex> lock(entry->mutex);
   if (!entry->published || entry->host_exited) return kAndroidEsrch;
-  return AndroidError(pthread_kill(entry->host, host_signal));
+  const int status = AndroidError(pthread_kill(entry->host, host_signal));
+  if (std::getenv("DARWIN_ART_DEBUG_PTHREAD_SIGNALS") != nullptr) {
+    static std::atomic<unsigned> observed{0};
+    if (observed.fetch_add(1) < 50) {
+      char name[64]{};
+      pthread_getname_np(entry->host, name, sizeof(name));
+      std::fprintf(stderr, "DARWIN pthread signal token=%llu name=%s guest=%d host=%d result=%d\n",
+          static_cast<unsigned long long>(token), name, signal_number, host_signal, status);
+    }
+  }
+  return status;
 }
 
 extern "C" int darwin_art_bionic_pthread_sigmask(
@@ -1325,6 +1351,7 @@ extern "C" int darwin_art_bionic_pthread_sigmask(
                                      android_set == nullptr ? nullptr : &host_set,
                                      android_old_set == nullptr ? nullptr : &host_old);
   if (result != 0) return AndroidError(result);
+  TraceSignalMask("guest-sigmask", current_thread_token);
   if (android_old_set != nullptr) {
     uint64_t result_set = 0;
     for (int host_signal = 1; host_signal < NSIG; ++host_signal) {

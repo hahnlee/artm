@@ -4,6 +4,14 @@
 #include <iostream>
 #include <string>
 #include <vector>
+#include <chrono>
+#include <thread>
+#include <cstdio>
+#include <dlfcn.h>
+#include <mach/mach.h>
+#include <mach/mach_vm.h>
+#include <mach/arm/thread_status.h>
+#include <pthread.h>
 
 #include "darwin_jni_shorty.h"
 #include "darwin_unwindstack_native.h"
@@ -32,10 +40,100 @@ bool UnityLifecycleDebugEnabled() {
 }
 
 jboolean TraceUnityNativeRender(JNIEnv* env, jobject object) {
+  static std::atomic<bool> watched{false};
+  static std::atomic<bool> finished{false};
+  const bool watch = std::getenv("DARWIN_ART_DEBUG_UNITY_STALL") != nullptr &&
+                     !watched.exchange(true);
+  if (watch) {
+    const mach_port_t target = mach_thread_self();
+    const uintptr_t stack_end = reinterpret_cast<uintptr_t>(
+        pthread_get_stackaddr_np(pthread_self()));
+    const uintptr_t stack_begin = stack_end - pthread_get_stacksize_np(pthread_self());
+    std::thread([target, stack_begin, stack_end] {
+      std::this_thread::sleep_for(std::chrono::seconds(5));
+      if (!finished.load(std::memory_order_acquire)) {
+        const auto sample = [](mach_port_t sample_thread, uintptr_t stack_begin,
+                               uintptr_t stack_end) {
+        thread_extended_info_data_t thread_info_data{};
+        mach_msg_type_number_t info_count = THREAD_EXTENDED_INFO_COUNT;
+        (void)thread_info(sample_thread, THREAD_EXTENDED_INFO,
+            reinterpret_cast<thread_info_t>(&thread_info_data), &info_count);
+        // Self-process inspection avoids external debugger permissions. Keep
+        // all allocation, dyld lookup, and logging outside the suspended
+        // interval: the target may own those libraries' internal locks.
+        arm_thread_state64_t state{};
+        mach_msg_type_number_t count = ARM_THREAD_STATE64_COUNT;
+        uintptr_t addresses[40]{};
+        size_t depth = 0;
+        std::fprintf(stderr, "DARWIN Unity stall: sampling first nativeRender\n");
+        const kern_return_t suspended = thread_suspend(sample_thread);
+        kern_return_t status = suspended;
+        if (suspended == KERN_SUCCESS) {
+          status = thread_get_state(sample_thread, ARM_THREAD_STATE64,
+              reinterpret_cast<thread_state_t>(&state), &count);
+          if (status == KERN_SUCCESS) {
+            addresses[depth++] = arm_thread_state64_get_pc(state);
+            addresses[depth++] = arm_thread_state64_get_lr(state);
+            if (stack_begin == 0) {
+              stack_begin = arm_thread_state64_get_sp(state);
+              stack_end = stack_begin + 8 * 1024 * 1024;
+            }
+            uintptr_t fp = arm_thread_state64_get_fp(state);
+            while (depth < 40 && fp >= stack_begin &&
+                   fp <= stack_end - 2 * sizeof(uintptr_t) && (fp & 15) == 0) {
+              uintptr_t frame[2]{};
+              mach_vm_size_t copied = 0;
+              if (mach_vm_read_overwrite(mach_task_self(), fp, sizeof(frame),
+                      reinterpret_cast<mach_vm_address_t>(frame), &copied) != KERN_SUCCESS ||
+                  copied != sizeof(frame)) break;
+              addresses[depth++] = frame[1] & 0x0000ffffffffffffULL;
+              if (frame[0] <= fp) break;
+              fp = frame[0];
+            }
+          }
+          (void)thread_resume(sample_thread);
+        }
+        std::fprintf(stderr, "DARWIN Unity stall: thread=%u name=%s status=%d pc=%p fp=%p sp=%p frames=%zu x19=%llx x20=%llx x21=%llx\n",
+            sample_thread, thread_info_data.pth_name, status,
+            reinterpret_cast<void*>(arm_thread_state64_get_pc(state)),
+            reinterpret_cast<void*>(arm_thread_state64_get_fp(state)),
+            reinterpret_cast<void*>(arm_thread_state64_get_sp(state)), depth,
+            state.__x[19], state.__x[20], state.__x[21]);
+        for (size_t i = 0; i < depth; ++i) {
+          Dl_info info{};
+          const bool resolved = dladdr(reinterpret_cast<void*>(addresses[i]), &info) != 0;
+          std::fprintf(stderr, "DARWIN Unity stall frame=%zu pc=%p image=%s symbol=%s offset=0x%llx\n",
+              i, reinterpret_cast<void*>(addresses[i]),
+              resolved && info.dli_fname ? info.dli_fname : "guest-elf",
+              resolved && info.dli_sname ? info.dli_sname : "unknown",
+              static_cast<unsigned long long>(addresses[i] -
+                  reinterpret_cast<uintptr_t>(resolved ? info.dli_fbase : nullptr)));
+        }
+        };
+        sample(target, stack_begin, stack_end);
+        if (std::getenv("DARWIN_ART_DEBUG_UNITY_STALL_ALL") != nullptr) {
+          thread_act_array_t threads = nullptr;
+          mach_msg_type_number_t thread_count = 0;
+          const mach_port_t watcher = mach_thread_self();
+          if (task_threads(mach_task_self(), &threads, &thread_count) == KERN_SUCCESS) {
+            for (mach_msg_type_number_t i = 0; i < thread_count; ++i) {
+              if (threads[i] != watcher && threads[i] != target) sample(threads[i], 0, 0);
+              mach_port_deallocate(mach_task_self(), threads[i]);
+            }
+            vm_deallocate(mach_task_self(), reinterpret_cast<vm_address_t>(threads),
+                          thread_count * sizeof(thread_t));
+          }
+          mach_port_deallocate(mach_task_self(), watcher);
+        }
+      }
+      mach_port_deallocate(mach_task_self(), target);
+    }).detach();
+  }
   std::cerr << "DARWIN Unity lifecycle: nativeRender enter\n";
   const jboolean result = g_unity_native_render == nullptr
                               ? JNI_FALSE
                               : g_unity_native_render(env, object);
+  if (watch) finished.store(true, std::memory_order_release);
   std::cerr << "DARWIN Unity lifecycle: nativeRender exit result="
             << (result == JNI_TRUE ? 1 : 0) << " exception="
             << (env != nullptr && env->ExceptionCheck() ? 1 : 0) << "\n";

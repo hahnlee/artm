@@ -14083,6 +14083,15 @@ or admission exception was added.
   Calculator 계산 결과 `5`, DeskClock Timer와 공통 GPU 경로를 `RC=0`으로
   확인했다.
 
+- Checkpoint 1075 (2026-09-11): 변경 없는 Blue Archive 최신 split 실행에서
+  Unity/IL2CPP와 JNI 등록은 정상이나 첫 `nativeRender`가 Boehm GC의
+  stop-the-world acknowledgment를 기다리며 정지했다. self Mach snapshot은
+  `libil2cpp.so+0x19c964c`의 `__semwait_signal`/`usleep` 대기를 확인했고,
+  Android signal 30→Darwin SIGINFO 29 전달은 `pthread_kill=0`이어도 handler
+  ack가 없었다. 검정 scanout은 이 정지의 결과이며, 우회하지 않고 signal
+  mask 복원과 guest trampoline 경계를 다음 구현 과제로 지정했다. 진단
+  산출물은 `docs/bluearchive-first-frame-diagnosis-20260911.md`다.
+
 - Checkpoint 1069 (2026-09-11): 최신 JNI/HWUI 변경 후 AOSP Calculator와
   DeskClock graphics acceptance가 `RC=0`으로 통과했다. Calculator `2+3=5`,
   DeskClock Timer, HWUI+SurfaceFlinger+Metal 공통 경로를 재확인했다.
