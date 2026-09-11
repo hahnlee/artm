@@ -11221,3 +11221,10 @@ incomplete and still requires managed caller unwind validation.
   인증서 SHA-256 fingerprint, 재현 가능한 `security verify-cert` 명령을
   남긴다. 자동으로 시스템 키체인을 변경하지 않았고, CA 신뢰 설치 후에만
   Chromium runtime/탐색 검증을 재개한다.
+- Checkpoint 1234 (2026-09-11): 현재 산출물에서 재검증을 수행했다.
+  `audit-art-jit.sh`, AOSP Calculator/DeskClock graphics acceptance,
+  window-menu acceptance (Calculator History/outside-dismiss/resize,
+  Calendar Day/Week/Month, Chrome New-tab, Android popup), 그리고 변경 없는
+  Blue Archive Cancel DOWN/UP OCR verifier가 모두 PASS했다. Chromium E2E는
+  여전히 macOS mkcert CA trust preflight에서만 `RC=69`로 중단되며 앱/서버는
+  시작되지 않았다(`runtime_started=0`).

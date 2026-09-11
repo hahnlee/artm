@@ -15544,3 +15544,8 @@ or admission exception was added.
   시작하지 않고 `BLOCKED_ENV` artifact만 생성한다. 로그에는 사용자,
   CAROOT, 공개 인증서 fingerprint와 검증 명령을 기록하며, 권한이 필요한
   macOS 키체인 설치는 사용자 승인 없이는 수행하지 않는다.
+- Checkpoint 1234 (2026-09-11): JIT, core-app graphics, window/menu 및
+  Blue Archive Cancel acceptance를 재실행해 모두 PASS했다. Chromium의
+  남은 gate는 런타임 동작이 아니라 사용자 macOS trust store에 mkcert CA를
+  설치해야 하는 환경 사전조건이며, 현재 harness는 이를 명시적으로
+  `BLOCKED_ENV`로 남긴다.
