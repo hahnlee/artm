@@ -15485,3 +15485,7 @@ or admission exception was added.
   verifier를 재실행했다. Notice 제거와 nonblank scanout, consumed DOWN/UP,
   nativeRender 종료를 모두 PASS해 앱 UI 이벤트 경계를 재확인했다
   (`run.WR52q9`). 로그인·실제 서버 게임은 계정 의존성으로 미검증이다.
+- Checkpoint 1220 (2026-09-11): Chromium 탭 그래픽 acceptance를 같은
+  입력으로 반복 실행해 두 번째 PASS를 확인했다(`run.g8kgk4`, states=10).
+  renderer child Surface 게시와 Android 입력 경계가 연속 실행에서 모두
+  유지됐으며, 이전 readiness race는 현재 재현되지 않았다.

@@ -11148,3 +11148,8 @@ incomplete and still requires managed caller unwind validation.
   OCR, nonblank post-UP frame, Cancel DOWN/UP `consumed=1`, nativeRender
   정상 종료가 PASS했다(`_build/bluearchive-cancel-verification/run.WR52q9`).
   계정 로그인·서버 게임플레이는 여전히 범위 밖이다.
+- Checkpoint 1220 (2026-09-11): Chromium 변경 없는 APK acceptance를
+  동일 입력으로 연속 재실행해 두 번째 PASS를 얻었다
+  (`_build/chromium-tab-graphics-acceptance/run.g8kgk4`, target-states=10).
+  실제 TabSwitcher·TabGrid·card 입력과 child Surface 게시가 반복 성공해
+  readiness 경합은 이번 실행에서 재현되지 않았다.
