@@ -15429,3 +15429,8 @@ or admission exception was added.
   현재 산출물에서 재검증했다. 계산 결과 `2+3=5`, Timer 전환 및
   HWUI·SurfaceFlinger·Metal 표시가 PASS했다. Calendar와 Blue Archive,
   Chromium의 결정적 JIT-on acceptance는 아직 남아 있다.
+- Checkpoint 1208 (2026-09-11): 현재 빌드에서 window-menu acceptance가
+  Calculator History/외부 dismiss/resize, Calendar Day·Week·Month,
+  Chrome New-tab과 Android ViewRoot/InputChannel/SurfaceFlinger popup을
+  모두 PASS했다. 남은 앱 acceptance는 Blue Archive 실제 상호작용과
+  Chromium JIT-on 안정성이다.

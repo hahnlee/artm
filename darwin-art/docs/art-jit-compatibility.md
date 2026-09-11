@@ -11088,3 +11088,7 @@ incomplete and still requires managed caller unwind validation.
   graphics acceptance를 재실행해 `Calculator=2+3=5`, DeskClock Timer,
   HWUI+SurfaceFlinger+Metal 공통 경로를 PASS했다. Chromium은 JIT-on
   성공/실패가 혼재하므로 callback lifecycle 계측 상태로 계속 추적한다.
+- Checkpoint 1208 (2026-09-11): `bash tools/android-window-menu-acceptance.sh`
+  재실행이 PASS했다. 변경 없는 Calculator의 History/외부 dismiss/resize,
+  Calendar의 Day·Week·Month 전환, Chrome New-tab 및 Android popup의
+  ViewRoot+InputChannel+SurfaceFlinger 경계를 모두 통과했다.
