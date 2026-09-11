@@ -10656,3 +10656,10 @@ incomplete and still requires managed caller unwind validation.
   런타임 변경 없이 30초 실행하고 Unity/IL2CPP native 경로와 GPU 진단 프레임을
   수집했다(exit=0, diagnostic PNG 15장). 포인터 테스트 훅은 실행 로그에 기록됐지만
   이 캡처만으로 게임 UI 입력 소비나 계정 이후 콘텐츠를 acceptance로 주장하지 않는다.
+
+- Checkpoint 1122 (2026-09-11): Astra 재검토로 corpus identity를 정정했다.
+  `_build/art-upstream-corpus/summary.json`은 1,076개가 모두 `passed`이지만
+  runtime identity는 `20c39afc…` 1,073개와 `d698be27…` 3개로 혼합되어 있다.
+  따라서 이를 단일 current identity 1,076/1,076으로 표현하지 않으며, 최신
+  shutdown 수정의 focused 3건 PASS와 기존 identity 결과를 분리해 기록한다.
+  `audit-art-jit.sh` 자체는 이번 실행에서 RC=0이었다.
