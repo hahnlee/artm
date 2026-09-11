@@ -14642,3 +14642,10 @@ or admission exception was added.
   `2+3=5`와 DeskClock Timer가 HWUI+SurfaceFlinger+Metal 공통 경로에서
   통과했다. Calendar/Blue Archive와 cross-process keystore alias 재사용은
   다음 acceptance gate다.
+
+- Checkpoint 1052 (2026-09-11): 두 개의 독립 JVM으로 AndroidKeyStore
+  cross-process acceptance를 실행했다. 첫 프로세스가 생성한 alias를 두 번째
+  프로세스가 같은 앱 데이터 루트에서 재로드했고 HMAC 결과가 일치했으며,
+  opaque key 비노출과 삭제 후 backend 정리까지 PASS했다. AndroidCAStore의
+  선택적 native bridge가 없어도 AndroidKeyStore 서비스가 초기화되도록 provider
+  경계를 분리했다.

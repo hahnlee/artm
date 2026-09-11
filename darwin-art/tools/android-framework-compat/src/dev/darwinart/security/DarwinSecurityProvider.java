@@ -23,7 +23,17 @@ public final class DarwinSecurityProvider extends Provider {
         // same macOS-backed, read-only CA view so ordinary OkHttp startup
         // follows the host trust roots without requiring an APK-side store.
         put("KeyStore.BKS", DarwinAndroidCAStore.class.getName());
-        DarwinAndroidCAStore.preload();
+        // Keystore users must remain usable even when the optional native CA
+        // bridge is not loaded (for example in a host-side acceptance JVM).
+        // Android treats each provider service independently; do not make
+        // AndroidKeyStore construction fail because AndroidCAStore is absent.
+        try {
+            DarwinAndroidCAStore.preload();
+        } catch (LinkageError ignored) {
+            if (System.getenv("DARWIN_ART_DEBUG_SECURITY") != null) {
+                System.err.println("DARWIN security: AndroidCAStore unavailable");
+            }
+        }
         DarwinHttpsDiagnostic.startIfRequested();
         if (System.getenv("DARWIN_ART_DEBUG_SECURITY") != null) {
             System.err.println("DARWIN security: provider initialized");

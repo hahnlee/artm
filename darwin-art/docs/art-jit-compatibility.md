@@ -10242,3 +10242,10 @@ incomplete and still requires managed caller unwind validation.
   Timer 경로가 `RC=0`으로 통과했고 공통 경로는 HWUI+SurfaceFlinger+Metal로
   유지됐다. Calendar/Blue Archive 및 실제 cross-process keystore 재사용은
   별도 acceptance gate로 남아 있다.
+
+- Checkpoint 1052 (2026-09-11): `android-keystore-cross-process-acceptance.sh`를
+  추가해 별도 JVM 두 개가 동일한 앱 데이터 루트의 `AndroidKeyStore` alias를
+  생성·재로드하고 동일 HMAC(`d0968585…a0e68`)을 산출하는 것을 확인했다.
+  `getEncoded()==null` opaque 계약과 삭제 후 빈 backend도 검증했다. 선택적
+  AndroidCAStore native bridge가 없는 host에서도 keystore provider가 독립적으로
+  초기화되도록 LinkageError 경계를 추가했다.
