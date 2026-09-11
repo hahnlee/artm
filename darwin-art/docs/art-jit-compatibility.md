@@ -10142,3 +10142,10 @@ incomplete and still requires managed caller unwind validation.
   graphics acceptance를 재실행했다. Calculator `2+3=5`, DeskClock Timer,
   HWUI+SurfaceFlinger+Metal 공통 경로가 모두 PASS(RC=0)했다. Calendar의
   직접 Day/Week/Month/window-remove 증거는 checkpoint 1027을 유지한다.
+
+- Checkpoint 1038 (2026-09-11): Blue Archive 변경 없는 base+`split-0.apk`를
+  재실행했다. native resolver=24, libmain/libunity/libil2cpp ELF 로드와 Unity
+  ARM64 초기화는 유지되고 RC=0이지만, WorkManager의
+  `SystemJobScheduler.getPendingJobs()`에서 JobScheduler가 null인 동일한
+  blocker가 재현됐다. 게임 플레이 acceptance는 서비스 계약 구현 전까지
+  닫지 않는다.

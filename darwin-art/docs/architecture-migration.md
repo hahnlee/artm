@@ -14555,3 +14555,8 @@ or admission exception was added.
   acceptance를 재실행해 Calculator `2+3=5`, DeskClock Timer 및
   HWUI+SurfaceFlinger+Metal 공통 경로를 RC=0으로 확인했다. Calendar 직접
   acceptance(Day/Week/Month/window remove)는 checkpoint 1027 증거를 유지한다.
+
+- Checkpoint 1038 (2026-09-11): Blue Archive base+ABI split 재실행에서
+  native=24 및 Unity 초기화가 정상이고 RC=0이었으나
+  `JobScheduler.getAllPendingJobs()` 호출 시 null 서비스가 다시 발생했다.
+  이는 unchanged APK acceptance를 막는 실제 framework service 계약 blocker다.
