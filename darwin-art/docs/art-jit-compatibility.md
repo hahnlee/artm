@@ -10859,3 +10859,9 @@ incomplete and still requires managed caller unwind validation.
   `tools/aosp-core-apps-graphics-acceptance.sh`가 PASS했다. Calculator의
   실제 `2+3=5` 결과, DeskClock의 Timer 페이지 전환, HWUI·SurfaceFlinger·Metal
   visible buffer publish를 확인했으며 로그는 `_build/aosp-core-apps-graphics-acceptance/`에 있다.
+
+- Checkpoint 1165 (2026-09-11): `tools/android-window-menu-acceptance.sh`가
+  PASS했다. Calculator History 팝업·외부 터치 dismiss·리사이징, Calendar
+  Day/Week/Month 전환, Chrome 새 탭, Android popup의 ViewRoot/InputChannel/
+  SurfaceFlinger 경로를 변경 없는 APK로 검증했다. 로그는
+  `_build/android-window-menu-acceptance/run.m2KTpu/`에 있다.
