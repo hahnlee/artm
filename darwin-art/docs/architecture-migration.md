@@ -15141,3 +15141,7 @@ or admission exception was added.
 - Checkpoint 1146 (2026-09-11): 새 ledger fresh 실행이 시작 후 약 1분간
   drift 없이 진행되어 첫 58개가 identity `eb468bf1…`로 모두 passed였다.
   전체 완료 전에는 단일 identity acceptance를 확정하지 않는다.
+
+- Checkpoint 1147 (2026-09-11): allocator 수정 후 별도 ledger가 약 2분간
+  drift 없이 124개 항목을 `eb468bf1…` identity로 모두 passed 처리했다.
+  전체 1,076개 완료 전에는 최종 corpus acceptance로 승격하지 않는다.
