@@ -14636,3 +14636,9 @@ or admission exception was added.
   변경 없는 Blue Archive base+split 재실행(`RC=0`, Unity ARM64 초기화 정상)을
   확인했다. host Rust 10개 테스트 및 graphics/JIT smoke도 PASS다. 앱/isolated
   service의 동일 alias 재사용을 직접 증명하는 acceptance는 남아 있다.
+
+- Checkpoint 1051 (2026-09-11): keystore persistence 변경 후 AOSP core 앱
+  graphics acceptance를 재실행해 `RC=0`을 확인했다. 변경 없는 Calculator
+  `2+3=5`와 DeskClock Timer가 HWUI+SurfaceFlinger+Metal 공통 경로에서
+  통과했다. Calendar/Blue Archive와 cross-process keystore alias 재사용은
+  다음 acceptance gate다.

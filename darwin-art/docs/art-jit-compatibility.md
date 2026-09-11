@@ -10236,3 +10236,9 @@ incomplete and still requires managed caller unwind validation.
   AndroidKeyStore/JobScheduler 예외 및 fatal marker 없음이었다. host Rust 10개
   테스트와 graphics link/JIT smoke도 PASS했다. 실제 두 프로세스가 동일 alias를
   읽는 acceptance는 아직 별도로 닫아야 한다.
+
+- Checkpoint 1051 (2026-09-11): keystore persistence 변경 이후 AOSP core 앱
+  graphics acceptance를 재실행했다. 변경 없는 Calculator `2+3=5`와 DeskClock
+  Timer 경로가 `RC=0`으로 통과했고 공통 경로는 HWUI+SurfaceFlinger+Metal로
+  유지됐다. Calendar/Blue Archive 및 실제 cross-process keystore 재사용은
+  별도 acceptance gate로 남아 있다.
