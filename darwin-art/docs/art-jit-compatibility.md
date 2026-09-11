@@ -10805,3 +10805,8 @@ incomplete and still requires managed caller unwind validation.
   417 passed/6 failed이며 모든 행이 identity `eb468bf1…`이다. 병렬 압박으로
   보이는 기존 다섯 실패 외에 `2233-metrics-background-thread`가 추가됐지만,
   원 실행은 계속 진행 중이므로 종료 후 순차 재검증한다.
+
+- Checkpoint 1153 (2026-09-11): fresh ledger가 511/1,076개까지 진행되어
+  505 passed/6 failed, identity `eb468bf1…` 단일성을 유지한다. 병렬 실행은
+  계속 중이며 실패 행은 동일 6개로 유지되어, 종료 뒤 `--resume --parallel 1`
+  재검증을 수행한다.
