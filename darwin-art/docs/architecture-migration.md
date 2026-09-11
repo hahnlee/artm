@@ -14535,3 +14535,8 @@ or admission exception was added.
   Android tab state/active-tab FlatBuffer와 TabDB에 URL과 `Example Domain`이
   남아 실제 탭 네비게이션 상태 반영을 확인했다. 화면 캡처 기반 로드 완료
   게이트는 아직 별도 과제로 남긴다.
+
+- Checkpoint 1034 (2026-09-11): Chromium process lifecycle acceptance를
+  동일 APK로 연속 2회 통과했다(`new-tab=2`, `JNI-detach-crash=0`,
+  `service-children=reaped`). 각 실행의 isolated service child가 shutdown
+  전에 모두 수거되어 native-thread/VM 종료 경계를 회귀 검증했다.

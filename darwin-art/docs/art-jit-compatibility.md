@@ -10120,3 +10120,9 @@ incomplete and still requires managed caller unwind validation.
   TabDB에 `https://example.com/` 및 `Example Domain`이 기록됐다. 따라서 URL
   인텐트가 실제 Chrome 탭 상태로 반영되는 것은 확인했지만, 화면 픽셀/로드
   완료 신호는 별도 캡처 게이트로 계속 보강한다.
+
+- Checkpoint 1034 (2026-09-11): `chrome-process-lifecycle-acceptance.sh`를
+  현재 빌드에서 2회 연속 실행해 `PASS iterations=2 new-tab=2`를 확인했다.
+  두 실행 모두 JNI detach crash/fatal signal이 없고, 분리된 Chromium service
+  child가 모두 종료·reap됐다. native child lifecycle과 VM shutdown 계약의
+  반복 실행 증거로 기록한다.
