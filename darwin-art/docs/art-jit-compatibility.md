@@ -9999,3 +9999,9 @@ incomplete and still requires managed caller unwind validation.
   dispatcher 스레드에서 기록하도록 정정했다. Rust service manager는 shutdown/reap
   시 child exit code/signal/core-dump 상태를 기록한다. `cargo test -p darwin-art-host`
   는 통과했다.
+
+- Checkpoint 1014 (2026-09-11): 재실행에서 실제 수신 실패는 `receive failure
+  reason=eof received=0 errno=0`으로 기록됐다. 실패 transaction의 child는
+  `binder=ready` 전 ART 초기화에서 멈췄고, parent fatal 직후 모든 기존 채널도 EOF가
+  됐다. 따라서 EBADF/FD 고갈 가설은 폐기하고, 동기 descriptor 조회가 child startup
+  지연을 fatal로 전파하는지 Astra에 재검토 요청했다.

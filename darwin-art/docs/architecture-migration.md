@@ -14425,3 +14425,9 @@ or admission exception was added.
   정정했다. waiter는 호출자 errno를 사용하지 않고 channel state만 보고하며,
   dispatcher가 EOF/프로토콜/dispatch 원인을 close 전에 출력한다. child 소유자인
   Rust manager는 kill 전/후 종료 상태를 기록하고 host 테스트가 통과했다.
+
+- Checkpoint 1014 (2026-09-11): 최신 Chromium 실행에서 수신 스레드가 실제 EOF를
+  기록했고, child instance=20은 `binder=ready` 전에 ART 초기화만 수행했다.
+  parent의 `RemoteServiceBinder` 생성자 동기 descriptor 조회가 지연을
+  `IllegalStateException`으로 승격하는 구조인지 Astra 검토를 요청했다. AOSP
+  BinderProxy의 lazy descriptor semantics를 기준으로 다음 수정 여부를 결정한다.
