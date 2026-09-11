@@ -15456,3 +15456,8 @@ or admission exception was added.
   case-sensitive filesystem, persistent registry, leased process execution,
   lease-protected shutdown 네 계약이 모두 PASS해 VM 종료 시 서비스와
   프로필 소유권이 분리되지 않음을 확인했다.
+- Checkpoint 1214 (2026-09-11): graphics-link fast audit를 재실행해
+  AOSP JIT/dex2oat/unwindstack 캐시와 32-archive graphics closure를
+  재검증했다. registrar 51, fake symbols 0, host ICU/fmt/CoreText 0으로
+  PASS했으며, 링크 closure와 reproducible 전체 artifact identity는
+  혼동하지 않도록 별도 검증 대상으로 남긴다.

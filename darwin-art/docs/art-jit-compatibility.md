@@ -11117,3 +11117,9 @@ incomplete and still requires managed caller unwind validation.
   재실행해 VM 서비스 수명 계약을 확인했다. case-sensitive profile,
   persistent registry, leased process-exec, lease-protected shutdown이
   모두 PASS했다.
+- Checkpoint 1214 (2026-09-11): `cargo run -q -p art-bootstrap --
+  audit-runtime-graphics-link-fast`를 재실행했다. 캐시된 AOSP ARM64
+  JIT/dex2oat/unwindstack 산출물과 그래픽 closure가 재사용되었고,
+  `registrar=51 fake-symbols=0 host-icu=0 host-fmt=0 CoreText=0`으로
+  링크 감사가 PASS했다. 이는 closure 증거이며 전체 산출물 byte identity
+  증명과는 별도 항목으로 유지한다.
