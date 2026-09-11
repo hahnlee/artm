@@ -11047,3 +11047,10 @@ incomplete and still requires managed caller unwind validation.
   `requested=0 actual=0 jit_object=0`으로 확인되어 JIT on/off 계약이
   실제 ART 상태와 일치한다. 개별 메서드 compile 실패는 전체 JIT 실패가
   아닌 method admission/fallback 범위로 분리한다.
+- Checkpoint 1201 (2026-09-11): `bash tools/audit-art-jit.sh`를 현재
+  산출물에서 완료했다. JIT eligibility, compiled arithmetic/post-GC/JNI,
+  concurrent GC, OSR(정수·wide·예외·reference·자동), virtual dispatch,
+  speculative deopt, type/array covariance, fields, ByteBuffer/VarHandle,
+  string/class roots와 native exit hooks가 모두 PASS했다. 종료 단계의
+  reverse teardown도 정상 출력됐다. 이로써 JIT 기능 ledger는 남은
+  메서드별 admission 실패를 제외하고 acceptance 증거를 확보했다.

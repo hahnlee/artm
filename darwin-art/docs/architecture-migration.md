@@ -15395,3 +15395,9 @@ or admission exception was added.
   `requested=0 actual=0 jit_object=0`을 확인했다. 따라서 JIT archive/
   backend 전체 미연결이 아니라 정상 생성 상태이며, 개별 compile 실패는
   별도 admission/fallback 추적 항목으로 남긴다.
+- Checkpoint 1201 (2026-09-11): 전체 JIT audit를 실행해 AOSP식 compiled
+  arithmetic, GC 후 호출, JNI/native 경계, OSR·deopt, virtual/speculative
+  dispatch, unresolved field/class, ByteBuffer/VarHandle 및 종료 hook을
+  통과시켰다. 같은 실행에서 native-thread/JNI shutdown reverse 단계도
+  완료됐다. 남은 작업은 Chromium/Blue Archive 실제 APK acceptance와
+  개별 메서드 compile admission 분석이다.
