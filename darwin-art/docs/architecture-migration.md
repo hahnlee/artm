@@ -15260,3 +15260,9 @@ or admission exception was added.
   `vlc-surface-canvas-acceptance.sh`가 PASS했다. `ANativeWindow` lock/post가
   각각 3회 발생했고 nativeLockCanvas 오류나 crash 없이 소프트웨어 Canvas
   경로가 동작했다. 로그는 `/var/folders/t4/qqflgy6n3rgd5dcnv2r4x0nh0000gn/T//darwin-art-vlc-canvas.8NFNTY/vlc.log`에 있다.
+
+- Checkpoint 1171 (2026-09-11): Astra가 최신 runtime으로 Blue Archive를
+  변경 없이 재실행해 `nativeRender` 정상 반환 1,204회와 실제 Notice
+  scanout을 독립 확인했다. GC acknowledgment 검정 blocker는 재현되지
+  않았다. Notice 시점을 맞춘 물리 Cancel 클릭의 전후 상태는 아직 증명하지
+  않았으므로 생산 코드 수정 없이 해당 acceptance를 보류한다.
