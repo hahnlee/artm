@@ -11214,3 +11214,10 @@ incomplete and still requires managed caller unwind validation.
   뒤에만 system root를 삭제하며, `android.system`은 제외한다. 새 app-data
   Chrome 실행에서 child PID가 정상 회수되고 `profile ps`에 Chrome lease가
   없으며 root가 제거되는 것을 확인했다.
+- Checkpoint 1233 (2026-09-11): Chromium 실제 acceptance harness의
+  사전조건을 fail-closed하게 정리했다. 현재 macOS system trust store에
+  mkcert CA가 없어 실행은 `RC=69`, `status=BLOCKED_ENV`,
+  `runtime_started=0`으로 중단되며 `trust-preflight.log`에 CAROOT,
+  인증서 SHA-256 fingerprint, 재현 가능한 `security verify-cert` 명령을
+  남긴다. 자동으로 시스템 키체인을 변경하지 않았고, CA 신뢰 설치 후에만
+  Chromium runtime/탐색 검증을 재개한다.

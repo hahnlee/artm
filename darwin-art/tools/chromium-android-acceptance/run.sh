@@ -28,12 +28,25 @@ ffmpeg -loglevel error -y -f lavfi -i testsrc2=size=160x90:rate=24 \
 port="${DARWIN_ART_CHROMIUM_ACCEPTANCE_PORT:-$((20000 + RANDOM % 20000))}"
 cert="$output/localhost.pem"
 key="$output/localhost-key.pem"
-mkcert -cert-file "$cert" -key-file "$key" 127.0.0.1 localhost ::1 >/dev/null
+trust_preflight="$output/trust-preflight.log"
+{
+  printf 'preflight=macos-ca-trust\n'
+  printf 'user=%s\n' "$(id -un)"
+  printf 'caroot=%s\n' "$(mkcert -CAROOT)"
+  printf 'verify_command=security verify-cert -c %s -p ssl -s 127.0.0.1\n' "$cert"
+} >"$trust_preflight"
+mkcert -cert-file "$cert" -key-file "$key" 127.0.0.1 localhost ::1 >>"$trust_preflight" 2>&1
+openssl x509 -in "$cert" -noout -fingerprint -sha256 >>"$trust_preflight"
 if ! security verify-cert -c "$cert" -p ssl -s 127.0.0.1 >/dev/null 2>&1; then
-  echo "Chromium acceptance requires the generated mkcert root to be trusted by macOS" >&2
-  echo "Install/trust the current user's mkcert root, then rerun this gate" >&2
+  {
+    printf 'status=BLOCKED_ENV reason=macos_ca_untrusted runtime_started=0\n'
+    printf 'verify_rc=1\n'
+  } >>"$trust_preflight"
+  echo "Chromium acceptance BLOCKED_ENV: generated mkcert root is not trusted by macOS" >&2
+  echo "trust-preflight=$trust_preflight" >&2
   exit 69
 fi
+printf 'status=pass verify_rc=0\n' >>"$trust_preflight"
 python3 "$fixture_source/server.py" --directory "$fixture" \
   --report "$output/reports.log" --cert "$cert" --key "$key" --port "$port" \
   >"$output/server.log" 2>&1 &

@@ -15539,3 +15539,8 @@ or admission exception was added.
   package service-child가 모두 종료·회수된 뒤 shared system root를 정리하며,
   5초 후에도 남으면 해당 PID에만 TERM/KILL하고 root를 보존한다. 격리 Chrome
   lifecycle 실행과 profile daemon audit가 PASS했다.
+- Checkpoint 1233 (2026-09-11): Chromium acceptance를 runtime 결과와
+  환경 사전조건으로 분리했다. mkcert CA 미신뢰 시 harness는 서버·앱을
+  시작하지 않고 `BLOCKED_ENV` artifact만 생성한다. 로그에는 사용자,
+  CAROOT, 공개 인증서 fingerprint와 검증 명령을 기록하며, 권한이 필요한
+  macOS 키체인 설치는 사용자 승인 없이는 수행하지 않는다.
