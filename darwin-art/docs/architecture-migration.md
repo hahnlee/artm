@@ -15108,3 +15108,7 @@ or admission exception was added.
   `726-array-store`까지 다섯 개의 동일 MAP_JIT uint32-range 실패가 누적됐다.
   테스트들은 interpreter 단계와 shutdown을 통과했고, 세션 완료 전에는 의미론
   결함으로 분류하지 않는다.
+
+- Checkpoint 1140 (2026-09-11): corpus가 약 24분째 진행 중이며 current
+  identity 행이 993개까지 갱신됐다. 남은 구 identity 행은 실행 완료 뒤 fresh
+  ledger 분리 검증 전까지 최종 증거로 사용하지 않는다.
